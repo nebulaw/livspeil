@@ -153,7 +153,10 @@ livspeil assets check examples/sun-and-lamp.room [--strict]
 ```
 
 `assets add` copies the file to `assets/<sha256>.<ext>` and updates
-`assets.lock`. `assets check` (and `validate`, whenever the package has an
+`assets.lock`. If the path is already listed with other data (license,
+source, author, or a stale hash or size) it refuses, unless `--replace`,
+which rewrites that entry canonically. `livspeil fmt` also rewrites the
+package's `assets.lock` canonically, and `fmt --check` fails if it is not. `assets check` (and `validate`, whenever the package has an
 `assets.lock` or `assets/`) reports, as errors, hash or size mismatches,
 missing files, files in `assets/` that are not listed, and malformed license
 expressions (or `NONE`/`NOASSERTION`). Licenses outside the allow-list

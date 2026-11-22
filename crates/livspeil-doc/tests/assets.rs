@@ -10,8 +10,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use livspeil_doc::assets::{FileFacts, verify};
 use livspeil_doc::{
-    AssetEntry, AssetsError, AssetsLock, IssueKind, Location, Severity, add_asset, check_assets,
-    read_assets_lock, sha256_file, write_assets_lock,
+    AddMode, AssetEntry, AssetsError, AssetsLock, IssueKind, Location, Severity, add_asset,
+    add_asset_with, canonicalize_assets_lock, check_assets, read_assets_lock, sha256_file,
+    write_assets_lock,
 };
 
 /// SHA-256 of "hello world\n".
@@ -352,4 +353,35 @@ fn entry_constructor_formats() {
     assert!(lock.format().contains(
         "asset \"assets/x\" sha256=\"a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447\" size=12 license=\"MIT\" source=\"original\" author=\"Me\"\n"
     ));
+}
+
+#[test]
+fn add_with_replace_updates_the_entry() {
+    let tmp = TempDir::new("replace");
+    let dir = &tmp.0;
+    let file = dir.join("hello.txt");
+    fs::write(&file, "hello world\n").unwrap();
+    let first = add_asset(dir, &file, "CC0-1.0", "original", None).unwrap();
+    assert!(first.added && !first.replaced);
+    let err = add_asset(dir, &file, "MIT", "original", None).unwrap_err();
+    assert!(matches!(err, AssetsError::Conflict { .. }), "{err}");
+    let second =
+        add_asset_with(dir, &file, "MIT", "original", Some("Ann"), AddMode::Replace).unwrap();
+    assert!(!second.added && second.replaced);
+    let (lock, _) = read_assets_lock(dir).unwrap().unwrap();
+    assert_eq!(lock.assets.len(), 1);
+    assert_eq!(lock.assets[0].license, "MIT");
+    assert_eq!(lock.assets[0].author.as_deref(), Some("Ann"));
+    let third =
+        add_asset_with(dir, &file, "MIT", "original", Some("Ann"), AddMode::Replace).unwrap();
+    assert!(!third.added && !third.replaced);
+}
+
+#[test]
+fn canonicalize_lock_keeps_prolog_and_is_idempotent() {
+    let messy = format!("// h  \n\n{}", LOCK.replace("  asset", "      asset"));
+    let once = canonicalize_assets_lock(&messy).unwrap();
+    assert!(once.starts_with("// h\n\nassets-lock format=1 {\n  asset "));
+    assert_eq!(canonicalize_assets_lock(&once).unwrap(), once);
+    assert!(canonicalize_assets_lock("assets-lock format=1 {\n  x\n}\n").is_err());
 }
