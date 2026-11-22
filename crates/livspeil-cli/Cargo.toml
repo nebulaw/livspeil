@@ -18,7 +18,13 @@ path = "src/main.rs"
 
 [dependencies]
 livspeil-doc = { path = "../livspeil-doc" }
+livspeil-graph = { path = "../livspeil-graph" }
+livspeil-node-api = { path = "../livspeil-node-api" }
 livspeil-nodes-core = { path = "../livspeil-nodes-core" }
+serde_json = "1"
+
+[dev-dependencies]
+livspeil-testkit = { path = "../livspeil-testkit" }
 
 [lints]
 workspace = true
