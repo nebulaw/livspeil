@@ -1,0 +1,7 @@
+frame=0 time=0.00 total=0.2500 cooked=3 reused=0
+frame=1 time=0.25 total=0.4500 cooked=3 reused=0
+frame=2 time=0.50 total=0.6500 cooked=3 reused=0
+frame=3 time=0.75 total=0.8500 cooked=3 reused=0
+frame=4 time=1.00 total=1.0500 cooked=3 reused=0
+frame=5 time=1.25 total=1.2500 cooked=3 reused=0
+again cooked=0 reused=3

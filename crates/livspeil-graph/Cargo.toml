@@ -14,6 +14,11 @@ publish.workspace = true
 
 [dependencies]
 livspeil-node-api = { path = "../livspeil-node-api" }
+uuid = { version = "1", features = ["v7"] }
+
+[dev-dependencies]
+livspeil-nodes-core = { path = "../livspeil-nodes-core" }
+livspeil-testkit = { path = "../livspeil-testkit" }
 
 [lints]
 workspace = true
