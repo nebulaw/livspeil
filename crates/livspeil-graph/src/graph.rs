@@ -686,7 +686,16 @@ impl Graph {
                 found: out_ty,
             });
         }
-        if !self.link_visible(from, to, None) {
+        let (Some(&from_slot), Some(&to_slot)) = (self.index.get(&from), self.index.get(&to))
+        else {
+            return Err(GraphError::UnknownNode(from));
+        };
+        // Siblings (the common case) without further lookups.
+        let siblings = match (self.node_at(from_slot), self.node_at(to_slot)) {
+            (Some(f), Some(t)) => f.parent == t.parent && t.type_id != network::INPUT_TYPE,
+            _ => false,
+        };
+        if !siblings && !self.link_visible(from, to, None) {
             return Err(GraphError::CrossNetwork { from, to });
         }
         if self.links.contains_key(&(to, in_index)) {
@@ -698,10 +707,6 @@ impl Graph {
         if self.depends_on(from, to) {
             return Err(GraphError::WouldCycle);
         }
-        let (Some(&from_slot), Some(&to_slot)) = (self.index.get(&from), self.index.get(&to))
-        else {
-            return Err(GraphError::UnknownNode(from));
-        };
         self.links.insert(
             (to, in_index),
             Endpoint {
