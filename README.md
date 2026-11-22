@@ -13,7 +13,7 @@ Status: **Phase 0 (kernel)**. This repository currently holds the headless, cros
 | `crates/livspeil-params` | Parameters, animation, expressions (expression language done; parameters next, M0.5) |
 | `crates/livspeil-doc` | Document model and KDL (placeholder, M0.4) |
 | `crates/livspeil-cmd` | Command bus, undo/redo, journal (M0.3) |
-| `crates/livspeil-nodes-core` | Core nodes: math, logic, time, sky, color (M0.6, in progress) |
+| `crates/livspeil-nodes-core` | Core nodes: math, logic, vector, time, sky, color, text (M0.6; events, fs, tables, ramps and subnets deferred) |
 | `crates/livspeil-testkit` | Golden-file harness |
 | `crates/livspeil-cli` | `livspeil` headless command line |
 | `xtask` | Project automation (`cargo xtask check`) |

@@ -98,8 +98,9 @@ pub fn sun_position(day_of_year: f64, solar_hour: f64, latitude: f64) -> SunPosi
 /// `core.sky.sun_direction@1`: the direction, elevation and azimuth of the
 /// sun from the day of the year, local solar time and latitude.
 ///
-/// Inputs: `day_of_year` (Float, 1..=366, default 172 = June solstice; any
-/// finite value is accepted and the formula repeats every 365 days),
+/// Inputs: `day_of_year` (Float, default 172 = June solstice; must lie in
+/// `[1, 366]`, fractional days allowed; anything else, including `NaN` and
+/// infinities, is [`NodeError::InvalidInput`]),
 /// `solar_hour` (Float, local apparent solar time 0..24, default 12),
 /// `latitude` (Float degrees, north positive, default 41.7; outside
 /// `[-90, 90]` is [`NodeError::InvalidInput`]).
@@ -142,7 +143,13 @@ impl NodeImpl for SunDirection {
     }
 
     fn cook(&self, _ctx: &CookContext, inputs: &[Value]) -> Result<Vec<Value>, NodeError> {
-        let day = finite(float(inputs, 0, "day_of_year")?, "day_of_year")?;
+        let day = float(inputs, 0, "day_of_year")?;
+        if !(1.0..=366.0).contains(&day) {
+            return Err(NodeError::InvalidInput {
+                port: "day_of_year",
+                reason: format!("day_of_year must be within [1, 366], got {day}"),
+            });
+        }
         let hour = finite(float(inputs, 1, "solar_hour")?, "solar_hour")?;
         let latitude = float(inputs, 2, "latitude")?;
         if !(-90.0..=90.0).contains(&latitude) {
@@ -291,6 +298,33 @@ mod tests {
                 ),
                 "{lat}"
             );
+        }
+    }
+
+    #[test]
+    fn day_of_year_out_of_range_is_rejected() {
+        for day in [0.0, 0.999, 366.001, 367.0, -1.0, f64::NAN, f64::INFINITY] {
+            let err = SunDirection::new()
+                .cook(
+                    &CookContext::default(),
+                    &[Value::Float(day), Value::Float(12.0), Value::Float(41.7)],
+                )
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    NodeError::InvalidInput {
+                        port: "day_of_year",
+                        ..
+                    }
+                ),
+                "{day}"
+            );
+        }
+        // Both ends are inclusive.
+        for day in [1.0, 366.0] {
+            let sun = cook(day, 12.0, 41.7);
+            assert!((0.0..360.0).contains(&sun.azimuth));
         }
     }
 

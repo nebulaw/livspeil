@@ -21,3 +21,10 @@ core.sky.sun_direction(day_of_year=266.000000, solar_hour=7.500000, latitude=59.
 core.sky.sun_direction(day_of_year=1.000000, solar_hour=16.250000, latitude=51.500000) => direction=[-0.825505, -0.052514, 0.561947], elevation=-3.010206, azimuth=235.755638
 core.sky.sun_direction(day_of_year=172.000000, solar_hour=12.000000, latitude=91.000000) => error: invalid input 'latitude': latitude must be within [-90, 90] degrees, got 91
 core.sky.sun_direction(day_of_year=172.000000, solar_hour=12.000000, latitude=-90.500000) => error: invalid input 'latitude': latitude must be within [-90, 90] degrees, got -90.5
+core.sky.sun_direction(day_of_year=366.000000, solar_hour=12.000000, latitude=41.700000) => direction=[0.000000, 0.427174, 0.904169], elevation=25.288363, azimuth=180.000000
+core.sky.sun_direction(day_of_year=0.000000, solar_hour=12.000000, latitude=41.700000) => error: invalid input 'day_of_year': day_of_year must be within [1, 366], got 0
+core.sky.sun_direction(day_of_year=0.500000, solar_hour=12.000000, latitude=41.700000) => error: invalid input 'day_of_year': day_of_year must be within [1, 366], got 0.5
+core.sky.sun_direction(day_of_year=366.500000, solar_hour=12.000000, latitude=41.700000) => error: invalid input 'day_of_year': day_of_year must be within [1, 366], got 366.5
+core.sky.sun_direction(day_of_year=-10.000000, solar_hour=12.000000, latitude=41.700000) => error: invalid input 'day_of_year': day_of_year must be within [1, 366], got -10
+core.sky.sun_direction(day_of_year=NaN, solar_hour=12.000000, latitude=41.700000) => error: invalid input 'day_of_year': day_of_year must be within [1, 366], got NaN
+core.sky.sun_direction(day_of_year=inf, solar_hour=12.000000, latitude=41.700000) => error: invalid input 'day_of_year': day_of_year must be within [1, 366], got inf

@@ -1,0 +1,28 @@
+core.text.format(template="{a}", a=0.0, b=0.0, precision=2) => out="0.00"
+core.text.format(template="{a}", a=12.3456, b=0.0, precision=2) => out="12.35"
+core.text.format(template="{a} of {b}", a=3.0, b=10.0, precision=0) => out="3 of 10"
+core.text.format(template="{b}/{a}/{b}", a=1.0, b=2.0, precision=1) => out="2.0/1.0/2.0"
+core.text.format(template="Temp: {a} °C", a=21.456, b=0.0, precision=1) => out="Temp: 21.5 °C"
+core.text.format(template="plain text", a=0.0, b=0.0, precision=2) => out="plain text"
+core.text.format(template="", a=0.0, b=0.0, precision=2) => out=""
+core.text.format(template="{{a}} = {a}", a=1.0, b=0.0, precision=2) => out="{a} = 1.00"
+core.text.format(template="{{{a}}}", a=1.0, b=0.0, precision=2) => out="{1.00}"
+core.text.format(template="}}{{", a=0.0, b=0.0, precision=2) => out="}{"
+core.text.format(template="{a}", a=0.125, b=0.0, precision=2) => out="0.12"
+core.text.format(template="{a}", a=2.675, b=0.0, precision=2) => out="2.67"
+core.text.format(template="{a}", a=-0.0, b=0.0, precision=2) => out="0.00"
+core.text.format(template="{a}", a=-0.001, b=0.0, precision=2) => out="0.00"
+core.text.format(template="{a}", a=-0.006, b=0.0, precision=2) => out="-0.01"
+core.text.format(template="{a}", a=2.5, b=0.0, precision=0) => out="2"
+core.text.format(template="{a}", a=3.5, b=0.0, precision=0) => out="4"
+core.text.format(template="{a}", a=0.3333333333333333, b=0.0, precision=12) => out="0.333333333333"
+core.text.format(template="{a}", a=0.3333333333333333, b=0.0, precision=99) => out="0.333333333333"
+core.text.format(template="{a}", a=0.3333333333333333, b=0.0, precision=-1) => out="0"
+core.text.format(template="{a}", a=1e21, b=0.0, precision=0) => out="1000000000000000000000"
+core.text.format(template="{a} {b}", a=NaN, b=-inf, precision=2) => out="NaN -inf"
+core.text.format(template="{c}", a=0.0, b=0.0, precision=2) => error: invalid input 'template': unknown placeholder {c} at byte 0 (only {a} and {b} exist)
+core.text.format(template="x{}", a=0.0, b=0.0, precision=2) => error: invalid input 'template': unknown placeholder {} at byte 1 (only {a} and {b} exist)
+core.text.format(template="{ a }", a=0.0, b=0.0, precision=2) => error: invalid input 'template': unknown placeholder { a } at byte 0 (only {a} and {b} exist)
+core.text.format(template="ok {", a=0.0, b=0.0, precision=2) => error: invalid input 'template': unclosed '{' at byte 3 (write '{{' for a literal brace)
+core.text.format(template="{a}}", a=0.0, b=0.0, precision=2) => error: invalid input 'template': unmatched '}' at byte 3 (write '}}' for a literal brace)
+core.text.format(template="é}", a=0.0, b=0.0, precision=2) => error: invalid input 'template': unmatched '}' at byte 2 (write '}}' for a literal brace)
