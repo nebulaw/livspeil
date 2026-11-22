@@ -13,6 +13,9 @@
 //!   change, and stops propagating when a re-cooked node produced the same
 //!   outputs as before (early cutoff). Failures never panic the host: a
 //!   failing node keeps its last good output and carries an error.
+//!   Invalidation is push-based: edits mark the affected subgraph dirty,
+//!   so a cook with nothing dirty upstream costs `O(1)` (see the `cook`
+//!   module source for the design).
 //!
 //! - Inputs can also be driven by an expression or an animation channel
 //!   ([`Graph::set_expression`], [`Graph::set_animation`], M0.5b). Priority:
