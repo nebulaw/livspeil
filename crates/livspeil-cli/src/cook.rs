@@ -47,6 +47,27 @@
 //! row 1>; ...]` (cells space-separated, in the value format above) and
 //! curves as `curve(<position>:<value> ...)` (keys only).
 //!
+//! # Events
+//!
+//! Every frame is one tick of the cooker: input (the frame clock and the
+//! events injected for that frame), events (delivered with
+//! `Cooker::tick`), cook (the printed nodes), publish (the printed line).
+//! `--event NODE.PORT@FRAME` (repeatable) injects an event without payload
+//! in frame `FRAME` (counting from 0): delivered to the `Event` input
+//! `PORT` of `NODE`, or emitted from its `Event` output `PORT` if it has
+//! no such input. Events of one frame are injected in command-line order.
+//! Event node state is runtime only: every run starts from the initial
+//! states.
+//!
+//! An `Event` port of a printed node shows the events it fired in that
+//! frame: `none`, or a comma-separated list of `event` (no payload) and
+//! `event(<value>)` (with payload, in the value format below), for example
+//! `blink.fired=event(4)`. When the frame's events were cut at the event
+//! limit, the frame ends with `frame=N time=T events overflow
+//! processed=P dropped=D`; an event handler that failed adds
+//! `frame=N time=T event-error <node>: <message>` and makes the exit code
+//! 3, like a node error.
+//!
 //! # File system
 //!
 //! Nodes that read files (`core.fs.list_dir`) see the room package
@@ -70,6 +91,12 @@
 //! "rows":[[<value>,..],..]}}` with types and untagged values as above; a
 //! curve is `{"curve":[[<position>,<value>],..]}` (keys only).
 //! A failed node is `{"error":"<message>"}` instead of its ports.
+//! An `Event` port is `{"event":[<payload>,..]}`, one entry per event
+//! fired in the frame (`[]` when none): `null` without payload, else the
+//! tagged value as above. After `outputs`, `"events":{"processed":P,
+//! "dropped":D}` is present only when the events were cut at the limit,
+//! and `"event_errors":[{"node":..,"error":..}]` only when a handler
+//! failed.
 //! Floats are rounded to six decimals, like the text format, and written in
 //! the shortest form that reads back as that value (`0.8`, `1.0`);
 //! non-finite floats are `null`. `stats` is present only with `--stats`.
@@ -81,8 +108,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use livspeil_doc::parse;
-use livspeil_graph::{CookError, Cooker, Graph, NodeId, OUTPUT_TYPE};
-use livspeil_node_api::{CookContext, Value};
+use livspeil_graph::{CookError, Cooker, ExternalEvent, Graph, NodeId, OUTPUT_TYPE, TickReport};
+use livspeil_node_api::{CookContext, Event, PortType, Value};
 use livspeil_nodes_core::{StdFs, core_registry};
 
 use crate::{read, report, usage};
@@ -110,6 +137,31 @@ struct Options {
     stats: bool,
     /// `--fs-root`: file root of file-system nodes (default: the package).
     fs_root: Option<String>,
+    /// `--event NODE.PORT@FRAME`, in command-line order.
+    events: Vec<EventArg>,
+}
+
+/// One `--event NODE.PORT@FRAME`.
+#[derive(Debug, Clone, PartialEq)]
+struct EventArg {
+    node: String,
+    port: String,
+    frame: u64,
+}
+
+impl EventArg {
+    fn parse(text: &str) -> Option<Self> {
+        let (target, frame) = text.rsplit_once('@')?;
+        let (node, port) = target.rsplit_once('.')?;
+        if node.is_empty() || port.is_empty() {
+            return None;
+        }
+        Some(EventArg {
+            node: node.to_owned(),
+            port: port.to_owned(),
+            frame: frame.parse().ok()?,
+        })
+    }
 }
 
 /// What a `cook` argument list asked for.
@@ -143,6 +195,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
         format: Format::Text,
         stats: false,
         fs_root: None,
+        events: Vec::new(),
     };
     let mut args = args.peekable();
     while let Some(arg) = args.next() {
@@ -165,7 +218,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
                 options.stats = true;
                 continue;
             }
-            "--frames" | "--fps" | "--start" | "--every" | "--node" | "--format" | "--fs-root" => {}
+            "--frames" | "--fps" | "--start" | "--every" | "--node" | "--format" | "--fs-root"
+            | "--event" => {}
             _ => return Err(format!("unknown option '{flag}'")),
         }
         let value = match inline.or_else(|| args.next()) {
@@ -199,6 +253,11 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
                 }
                 options.nodes.push(value);
             }
+            "--event" => {
+                options.events.push(EventArg::parse(&value).ok_or_else(|| {
+                    format!("invalid value '{value}' for --event (NODE.PORT@FRAME)")
+                })?)
+            }
             "--fs-root" => {
                 if value.is_empty() {
                     return Err(bad());
@@ -230,6 +289,8 @@ struct Target {
     name: String,
     id: NodeId,
     ports: Vec<&'static str>,
+    /// Per port: whether it is an `Event` port.
+    events: Vec<bool>,
     upstream: Vec<(String, NodeId)>,
 }
 
@@ -250,6 +311,10 @@ fn cook(options: &Options) -> ExitCode {
     };
     let targets = match targets(&graph, &options.nodes) {
         Ok(targets) => targets,
+        Err(message) => return usage(&format!("cook: {message}")),
+    };
+    let events = match external_events(&graph, &options.events) {
+        Ok(events) => events,
         Err(message) => return usage(&format!("cook: {message}")),
     };
 
@@ -282,8 +347,13 @@ fn cook(options: &Options) -> ExitCode {
         // Exact for every frame count a run can reach (below 2^53).
         #[allow(clippy::cast_precision_loss)]
         let time = options.start + frame as f64 / options.fps;
-        cooker.set_clock(CookContext { frame, time, dt });
         cooker.reset_stats();
+        let injected: Vec<ExternalEvent> = events
+            .iter()
+            .filter(|(f, _)| *f == frame)
+            .map(|(_, e)| e.clone())
+            .collect();
+        let report = cooker.tick(&graph, CookContext { frame, time, dt }, &injected);
         let outcomes: Vec<Outcome> = targets
             .iter()
             .map(|t| cook_target(&mut cooker, &graph, t))
@@ -291,11 +361,20 @@ fn cook(options: &Options) -> ExitCode {
         if frame % options.every != 0 {
             continue;
         }
-        node_error |= outcomes.iter().any(Result::is_err);
+        node_error |= outcomes.iter().any(Result::is_err) || !report.errors.is_empty();
         let stats = options.stats.then(|| cooker.stats());
+        let frame_out = FrameOut {
+            frame,
+            time,
+            targets: &targets,
+            outcomes: &outcomes,
+            report: &report,
+            graph: &graph,
+            stats,
+        };
         let written = match options.format {
-            Format::Text => write_text(&mut out, frame, time, &targets, &outcomes, stats),
-            Format::Jsonl => write_jsonl(&mut out, frame, time, &targets, &outcomes, stats),
+            Format::Text => write_text(&mut out, &frame_out),
+            Format::Jsonl => write_jsonl(&mut out, &frame_out),
         };
         if let Err(err) = written {
             return output_failed(&err);
@@ -314,6 +393,34 @@ fn cook(options: &Options) -> ExitCode {
 fn output_failed(err: &io::Error) -> ExitCode {
     eprintln!("livspeil cook: cannot write output: {err}");
     ExitCode::FAILURE
+}
+
+/// Resolve `--event` arguments to `(frame, event)`, in order.
+fn external_events(graph: &Graph, args: &[EventArg]) -> Result<Vec<(u64, ExternalEvent)>, String> {
+    args.iter()
+        .map(|arg| {
+            let id = graph
+                .find(&arg.node)
+                .or_else(|| graph.find_path(&arg.node))
+                .ok_or_else(|| format!("--event: no node named '{}'", arg.node))?;
+            let event = ExternalEvent::new(graph, id, &arg.port, Event::bang()).map_err(|_| {
+                format!(
+                    "--event: node '{}' has no Event port '{}'",
+                    arg.node, arg.port
+                )
+            })?;
+            Ok((arg.frame, event))
+        })
+        .collect()
+}
+
+/// How a node is named in the output: its name in the root network, its
+/// path (without the leading `/`) inside subnets.
+fn display_name(graph: &Graph, id: NodeId) -> Option<String> {
+    match graph.parent(id) {
+        None => graph.node_name(id).map(str::to_owned),
+        Some(_) => graph.path(id).map(|p| p.trim_start_matches('/').to_owned()),
+    }
 }
 
 /// The nodes to print, sorted by name: the requested ones, or the sinks.
@@ -347,10 +454,7 @@ fn targets(graph: &Graph, requested: &[String]) -> Result<Vec<Target>, String> {
     let mut targets: Vec<Target> = ids
         .into_iter()
         .filter_map(|id| {
-            let name = match graph.parent(id) {
-                None => graph.node_name(id)?.to_owned(),
-                Some(_) => graph.path(id)?.trim_start_matches('/').to_owned(),
-            };
+            let name = display_name(graph, id)?;
             Some(Target {
                 name,
                 id,
@@ -359,6 +463,12 @@ fn targets(graph: &Graph, requested: &[String]) -> Result<Vec<Target>, String> {
                     .outputs
                     .iter()
                     .map(|p| p.name)
+                    .collect(),
+                events: graph
+                    .node_spec(id)?
+                    .outputs
+                    .iter()
+                    .map(|p| p.ty == PortType::Event)
                     .collect(),
                 upstream: upstream(graph, &readers, id),
             })
@@ -553,19 +663,71 @@ fn json_parts(value: &Value) -> (&'static str, String) {
     }
 }
 
-fn write_text(
-    out: &mut impl Write,
+/// Everything printed for one frame.
+struct FrameOut<'a> {
     frame: u64,
     time: f64,
-    targets: &[Target],
-    outcomes: &[Outcome],
+    targets: &'a [Target],
+    outcomes: &'a [Outcome],
+    report: &'a TickReport,
+    graph: &'a Graph,
     stats: Option<livspeil_graph::CookStats>,
-) -> io::Result<()> {
-    let prefix = format!("frame={frame} time={}", fixed(time));
-    for (target, outcome) in targets.iter().zip(outcomes) {
+}
+
+impl FrameOut<'_> {
+    /// The events fired from output `port` of `target` this frame.
+    fn fired(&self, target: &Target, port: usize) -> Vec<&Event> {
+        self.report.fired_at(target.id, port).collect()
+    }
+
+    /// Failed handlers as `(node name, message)`.
+    fn event_errors(&self) -> Vec<(String, String)> {
+        self.report
+            .errors
+            .iter()
+            .map(|e| {
+                let name = display_name(self.graph, e.node).unwrap_or_else(|| e.node.to_string());
+                (name, describe(self.graph, &e.error))
+            })
+            .collect()
+    }
+}
+
+fn text_events(events: &[&Event]) -> String {
+    if events.is_empty() {
+        return "none".to_owned();
+    }
+    events
+        .iter()
+        .map(|e| match &e.payload {
+            Some(p) => format!("event({})", text_value(p)),
+            None => "event".to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn json_events(events: &[&Event]) -> String {
+    let items: Vec<String> = events
+        .iter()
+        .map(|e| {
+            e.payload
+                .as_ref()
+                .map_or_else(|| "null".to_owned(), json_value)
+        })
+        .collect();
+    format!("{{\"event\":[{}]}}", items.join(","))
+}
+
+fn write_text(out: &mut impl Write, f: &FrameOut<'_>) -> io::Result<()> {
+    let prefix = format!("frame={} time={}", f.frame, fixed(f.time));
+    for (target, outcome) in f.targets.iter().zip(f.outcomes) {
         write!(out, "{prefix}")?;
         for (index, port) in target.ports.iter().enumerate() {
             let value = match outcome {
+                Ok(_) if target.events.get(index) == Some(&true) => {
+                    text_events(&f.fired(target, index))
+                }
                 Ok(values) => values
                     .get(index)
                     .map_or_else(|| "<missing>".to_owned(), text_value),
@@ -575,7 +737,17 @@ fn write_text(
         }
         writeln!(out)?;
     }
-    if let Some(stats) = stats {
+    if f.report.overflowed() {
+        writeln!(
+            out,
+            "{prefix} events overflow processed={} dropped={}",
+            f.report.processed, f.report.dropped
+        )?;
+    }
+    for (node, message) in f.event_errors() {
+        writeln!(out, "{prefix} event-error {node}: {message}")?;
+    }
+    if let Some(stats) = f.stats {
         writeln!(
             out,
             "{prefix} stats cooked={} reused={}",
@@ -585,17 +757,11 @@ fn write_text(
     Ok(())
 }
 
-fn write_jsonl(
-    out: &mut impl Write,
-    frame: u64,
-    time: f64,
-    targets: &[Target],
-    outcomes: &[Outcome],
-    stats: Option<livspeil_graph::CookStats>,
-) -> io::Result<()> {
-    let nodes: Vec<String> = targets
+fn write_jsonl(out: &mut impl Write, f: &FrameOut<'_>) -> io::Result<()> {
+    let nodes: Vec<String> = f
+        .targets
         .iter()
-        .zip(outcomes)
+        .zip(f.outcomes)
         .map(|(target, outcome)| {
             let body = match outcome {
                 Ok(values) => {
@@ -603,7 +769,15 @@ fn write_jsonl(
                         .ports
                         .iter()
                         .zip(values)
-                        .map(|(port, value)| format!("{}:{}", json_string(port), json_value(value)))
+                        .enumerate()
+                        .map(|(index, (port, value))| {
+                            let value = if target.events.get(index) == Some(&true) {
+                                json_events(&f.fired(target, index))
+                            } else {
+                                json_value(value)
+                            };
+                            format!("{}:{value}", json_string(port))
+                        })
                         .collect();
                     format!("{{{}}}", ports.join(","))
                 }
@@ -614,11 +788,33 @@ fn write_jsonl(
         .collect();
     write!(
         out,
-        "{{\"frame\":{frame},\"time\":{},\"outputs\":{{{}}}",
-        json_float(time),
+        "{{\"frame\":{},\"time\":{},\"outputs\":{{{}}}",
+        f.frame,
+        json_float(f.time),
         nodes.join(",")
     )?;
-    if let Some(stats) = stats {
+    if f.report.overflowed() {
+        write!(
+            out,
+            ",\"events\":{{\"processed\":{},\"dropped\":{}}}",
+            f.report.processed, f.report.dropped
+        )?;
+    }
+    let errors = f.event_errors();
+    if !errors.is_empty() {
+        let items: Vec<String> = errors
+            .iter()
+            .map(|(node, message)| {
+                format!(
+                    "{{\"node\":{},\"error\":{}}}",
+                    json_string(node),
+                    json_string(message)
+                )
+            })
+            .collect();
+        write!(out, ",\"event_errors\":[{}]", items.join(","))?;
+    }
+    if let Some(stats) = f.stats {
         write!(
             out,
             ",\"stats\":{{\"cooked\":{},\"reused\":{}}}",
@@ -674,6 +870,31 @@ mod tests {
     }
 
     #[test]
+    fn events() {
+        let o = opts(&["r", "--event", "blink.fired@3", "--event=sub/c.trigger@0"]).unwrap();
+        assert_eq!(
+            o.events,
+            [
+                EventArg {
+                    node: "blink".into(),
+                    port: "fired".into(),
+                    frame: 3
+                },
+                EventArg {
+                    node: "sub/c".into(),
+                    port: "trigger".into(),
+                    frame: 0
+                }
+            ]
+        );
+        let o = opts(&["r", "--event", "a.b.c@2"]).unwrap();
+        assert_eq!(
+            (o.events[0].node.as_str(), o.events[0].port.as_str()),
+            ("a.b", "c")
+        );
+    }
+
+    #[test]
     fn bad_arguments() {
         for args in [
             &[][..],
@@ -688,6 +909,12 @@ mod tests {
             &["r", "--frob"],
             &["r", "--stats=1"],
             &["r", "--node="],
+            &["r", "--event", "a.b"],
+            &["r", "--event", "ab@1"],
+            &["r", "--event", ".b@1"],
+            &["r", "--event", "a.@1"],
+            &["r", "--event", "a.b@-1"],
+            &["r", "--event"],
         ] {
             assert!(opts(args).is_err(), "{args:?}");
         }
