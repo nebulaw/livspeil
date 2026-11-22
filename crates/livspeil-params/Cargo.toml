@@ -12,5 +12,14 @@ repository.workspace = true
 authors.workspace = true
 publish.workspace = true
 
+[dependencies]
+# Pure-Rust libm (MIT): bit-identical transcendental functions on every platform.
+libm = "0.2"
+livspeil-node-api = { path = "../livspeil-node-api" }
+
+[dev-dependencies]
+livspeil-testkit = { path = "../livspeil-testkit" }
+proptest = { version = "1.11", default-features = false, features = ["std"] }
+
 [lints]
 workspace = true
