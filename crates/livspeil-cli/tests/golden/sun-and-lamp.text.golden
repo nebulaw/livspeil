@@ -1,0 +1,36 @@
+frame=0 time=0.000000 lamp_color.out=oklch(0.628704 0.065007 51.483430 1.000000)
+frame=0 time=0.000000 lamp_intensity.out=0.792593
+frame=0 time=0.000000 sun.direction=vec3(0.917409 0.264725 -0.297121) sun.elevation=15.350625 sun.azimuth=72.054432
+frame=50 time=0.833333 lamp_color.out=oklch(0.950000 0.030000 95.000000 1.000000)
+frame=50 time=0.833333 lamp_intensity.out=0.200000
+frame=50 time=0.833333 sun.direction=vec3(0.794500 0.607212 0.008023) sun.elevation=37.388153 sun.azimuth=90.578576
+frame=100 time=1.666667 lamp_color.out=oklch(0.950000 0.030000 95.000000 1.000000)
+frame=100 time=1.666667 lamp_intensity.out=0.200000
+frame=100 time=1.666667 sun.direction=vec3(0.458705 0.857929 0.231404) sun.elevation=59.084840 sun.azimuth=116.769728
+frame=150 time=2.500000 lamp_color.out=oklch(0.950000 0.030000 95.000000 1.000000)
+frame=150 time=2.500000 lamp_intensity.out=0.200000
+frame=150 time=2.500000 sun.direction=vec3(0.000000 0.949698 0.313167) sun.elevation=71.749783 sun.azimuth=180.000000
+frame=200 time=3.333333 lamp_color.out=oklch(0.950000 0.030000 95.000000 1.000000)
+frame=200 time=3.333333 lamp_intensity.out=0.200000
+frame=200 time=3.333333 sun.direction=vec3(-0.458705 0.857929 0.231404) sun.elevation=59.084840 sun.azimuth=243.230272
+frame=250 time=4.166667 lamp_color.out=oklch(0.950000 0.030000 95.000000 1.000000)
+frame=250 time=4.166667 lamp_intensity.out=0.200000
+frame=250 time=4.166667 sun.direction=vec3(-0.794500 0.607212 0.008023) sun.elevation=37.388153 sun.azimuth=269.421424
+frame=300 time=5.000000 lamp_color.out=oklch(0.876543 0.075088 67.477719 1.000000)
+frame=300 time=5.000000 lamp_intensity.out=0.407407
+frame=300 time=5.000000 sun.direction=vec3(-0.917409 0.264725 -0.297121) sun.elevation=15.350625 sun.azimuth=287.945568
+frame=350 time=5.833333 lamp_color.out=oklch(0.350000 0.080000 260.000000 1.000000)
+frame=350 time=5.833333 lamp_intensity.out=1.000000
+frame=350 time=5.833333 sun.direction=vec3(-0.794500 -0.077761 -0.602265) sun.elevation=-4.459890 sun.azimuth=307.163708
+frame=400 time=6.666667 lamp_color.out=oklch(0.350000 0.080000 260.000000 1.000000)
+frame=400 time=6.666667 lamp_intensity.out=1.000000
+frame=400 time=6.666667 sun.direction=vec3(-0.458705 -0.328479 -0.825646) sun.elevation=-19.176459 sun.azimuth=330.944750
+frame=450 time=7.500000 lamp_color.out=oklch(0.350000 0.080000 260.000000 1.000000)
+frame=450 time=7.500000 lamp_intensity.out=1.000000
+frame=450 time=7.500000 sun.direction=vec3(0.000000 -0.420248 -0.907409) sun.elevation=-24.850217 sun.azimuth=0.000000
+frame=500 time=8.333333 lamp_color.out=oklch(0.350000 0.080000 260.000000 1.000000)
+frame=500 time=8.333333 lamp_intensity.out=1.000000
+frame=500 time=8.333333 sun.direction=vec3(0.458705 -0.328479 -0.825646) sun.elevation=-19.176459 sun.azimuth=29.055250
+frame=550 time=9.166667 lamp_color.out=oklch(0.350000 0.080000 260.000000 1.000000)
+frame=550 time=9.166667 lamp_intensity.out=1.000000
+frame=550 time=9.166667 sun.direction=vec3(0.794500 -0.077761 -0.602265) sun.elevation=-4.459890 sun.azimuth=52.836292

@@ -10,6 +10,12 @@
 //! `crates/livspeil-doc/tests/fixtures/format-<n>/`. Fixtures are never
 //! edited or deleted.
 //!
+//! Additive changes do not bump the format: new syntax that older files
+//! cannot contain (because the strict reader rejected it before) keeps the
+//! version, as long as every existing file still parses to the same
+//! document. Expressions and animation channels on inputs were added to
+//! format 1 this way.
+//!
 //! Migrations work on the raw KDL tree of the `room` node (before it is
 //! interpreted), so an old format does not need to be representable in the
 //! current [`crate::Document`] model. Each migration upgrades by exactly one

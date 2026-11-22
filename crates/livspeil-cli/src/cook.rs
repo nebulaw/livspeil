@@ -1,0 +1,653 @@
+// SPDX-FileCopyrightText: 2026 Livspeil contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! `livspeil cook`: cook a document over a deterministic frame clock and
+//! print the outputs of its sinks.
+//!
+//! # Clock
+//!
+//! Frame `i` (counting from 0) cooks at `time = start + i / fps` seconds with
+//! `dt = 1 / fps`. Every frame is cooked, in order, with one [`Cooker`], so
+//! caching behaves as in a live session; only every `K`-th frame (`i % K ==
+//! 0`) is printed.
+//!
+//! # Sinks
+//!
+//! Until a `core.output` node marks outputs explicitly, the sinks of a
+//! network are its nodes with no outgoing links (a node that is only read by
+//! another node's `ch()` expression still counts as a sink). `--node NAME`
+//! (repeatable) prints the named nodes instead, sink or not. Nodes are
+//! printed sorted by name, ports in the order of the node type's spec.
+//!
+//! # Text format
+//!
+//! One line per printed frame and node:
+//!
+//! ```text
+//! frame=0 time=0.000000 lamp_color.out=oklch(0.628704 0.065007 51.483430 1.000000)
+//! frame=0 time=0.000000 lamp_intensity.out=0.792593
+//! frame=0 time=0.000000 sun.direction=vec3(0.917409 0.264725 -0.297121) sun.elevation=15.350625 sun.azimuth=72.054432
+//! ```
+//!
+//! Floats use exactly six decimals (`-0.000000` is written `0.000000`), so
+//! the last-bit differences between platform math libraries do not show.
+//! Values: Float `0.500000`, Int `3`, Bool `true`, `vec2(x y)`,
+//! `vec3(x y z)`, `vec4(x y z w)`, Color `oklch(L C H A)`, String as a JSON
+//! string literal. A failed node prints `<error: message>` for each port.
+//! With `--stats`, each printed frame ends with
+//! `frame=N time=T stats cooked=C reused=R`, the scheduler counters for that
+//! frame alone ([`livspeil_graph::CookStats`]; a node shared by several
+//! printed nodes is counted once per visit).
+//!
+//! # JSONL format
+//!
+//! One JSON object per printed frame, keys in this order:
+//!
+//! ```text
+//! {"frame":0,"time":0.0,"outputs":{"<node>":{"<port>":{"<type>":<value>}}},"stats":{"cooked":9,"reused":0}}
+//! ```
+//!
+//! `<type>` is `float`, `int`, `bool`, `string` (scalars) or `vec2`, `vec3`,
+//! `vec4`, `color` (arrays; color is `[L, C, H, A]` in OKLCH, hue in
+//! degrees). A failed node is `{"error":"<message>"}` instead of its ports.
+//! Floats are rounded to six decimals, like the text format, and written in
+//! the shortest form that reads back as that value (`0.8`, `1.0`);
+//! non-finite floats are `null`. `stats` is present only with `--stats`.
+
+use std::collections::{HashMap, HashSet};
+use std::io::{self, BufWriter, Write};
+use std::path::Path;
+use std::process::ExitCode;
+use std::sync::Arc;
+
+use livspeil_doc::parse;
+use livspeil_graph::{CookError, Cooker, Graph, NodeId};
+use livspeil_node_api::{CookContext, Value};
+use livspeil_nodes_core::core_registry;
+
+use crate::{read, report, usage};
+
+/// Exit code when at least one printed value is a node error.
+const EXIT_NODE_ERROR: u8 = 3;
+
+/// Output format of `cook`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Format {
+    Text,
+    Jsonl,
+}
+
+/// Parsed `cook` arguments.
+#[derive(Debug, Clone, PartialEq)]
+struct Options {
+    path: String,
+    frames: u64,
+    fps: f64,
+    start: f64,
+    every: u64,
+    nodes: Vec<String>,
+    format: Format,
+    stats: bool,
+}
+
+/// What a `cook` argument list asked for.
+#[derive(Debug)]
+enum Parsed {
+    Help,
+    Run(Options),
+}
+
+/// Entry point for `livspeil cook ARGS`.
+pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
+    match parse_args(args) {
+        Ok(Parsed::Help) => {
+            print!("{}", crate::HELP);
+            ExitCode::SUCCESS
+        }
+        Ok(Parsed::Run(options)) => cook(&options),
+        Err(message) => usage(&format!("cook: {message}")),
+    }
+}
+
+fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
+    let mut path = None;
+    let mut options = Options {
+        path: String::new(),
+        frames: 1,
+        fps: 60.0,
+        start: 0.0,
+        every: 1,
+        nodes: Vec::new(),
+        format: Format::Text,
+        stats: false,
+    };
+    let mut args = args.peekable();
+    while let Some(arg) = args.next() {
+        if !arg.starts_with('-') {
+            if path.replace(arg).is_some() {
+                return Err("takes exactly one <path>".to_owned());
+            }
+            continue;
+        }
+        let (flag, inline) = match arg.split_once('=') {
+            Some((flag, value)) => (flag.to_owned(), Some(value.to_owned())),
+            None => (arg, None),
+        };
+        match flag.as_str() {
+            "-h" | "--help" => return Ok(Parsed::Help),
+            "--stats" => {
+                if inline.is_some() {
+                    return Err("--stats takes no value".to_owned());
+                }
+                options.stats = true;
+                continue;
+            }
+            "--frames" | "--fps" | "--start" | "--every" | "--node" | "--format" => {}
+            _ => return Err(format!("unknown option '{flag}'")),
+        }
+        let value = match inline.or_else(|| args.next()) {
+            Some(value) => value,
+            None => return Err(format!("{flag} needs a value")),
+        };
+        let bad = || format!("invalid value '{value}' for {flag}");
+        match flag.as_str() {
+            "--frames" => options.frames = value.parse().map_err(|_| bad())?,
+            "--every" => {
+                options.every = value.parse().map_err(|_| bad())?;
+                if options.every == 0 {
+                    return Err("--every must be at least 1".to_owned());
+                }
+            }
+            "--fps" => {
+                options.fps = value.parse().map_err(|_| bad())?;
+                if !(options.fps.is_finite() && options.fps > 0.0) {
+                    return Err("--fps must be a positive number".to_owned());
+                }
+            }
+            "--start" => {
+                options.start = value.parse().map_err(|_| bad())?;
+                if !options.start.is_finite() {
+                    return Err("--start must be a finite number".to_owned());
+                }
+            }
+            "--node" => {
+                if value.is_empty() {
+                    return Err(bad());
+                }
+                options.nodes.push(value);
+            }
+            "--format" => {
+                options.format = match value.as_str() {
+                    "text" => Format::Text,
+                    "jsonl" => Format::Jsonl,
+                    _ => return Err(format!("unknown format '{value}' (text or jsonl)")),
+                };
+            }
+            _ => return Err(format!("unknown option '{flag}'")),
+        }
+    }
+    match path {
+        Some(path) => {
+            options.path = path;
+            Ok(Parsed::Run(options))
+        }
+        None => Err("takes exactly one <path>".to_owned()),
+    }
+}
+
+/// A node to print: name, id, output port names in spec order, and every
+/// node it depends on (through links or `ch()` reads), sorted by name.
+struct Target {
+    name: String,
+    id: NodeId,
+    ports: Vec<&'static str>,
+    upstream: Vec<(String, NodeId)>,
+}
+
+/// The cook result of one target in one frame.
+type Outcome = Result<Vec<Value>, String>;
+
+fn cook(options: &Options) -> ExitCode {
+    let (file, text) = match read(Path::new(&options.path)) {
+        Ok(v) => v,
+        Err(code) => return code,
+    };
+    let graph = match parse(&text).and_then(|doc| doc.to_graph(Arc::new(core_registry()))) {
+        Ok(graph) => graph,
+        Err(err) => {
+            report(&file, &err);
+            return ExitCode::FAILURE;
+        }
+    };
+    let targets = match targets(&graph, &options.nodes) {
+        Ok(targets) => targets,
+        Err(message) => return usage(&format!("cook: {message}")),
+    };
+
+    let stdout = io::stdout();
+    let mut out = BufWriter::new(stdout.lock());
+    let mut cooker = Cooker::new();
+    let dt = 1.0 / options.fps;
+    let mut node_error = false;
+    for frame in 0..options.frames {
+        // Exact for every frame count a run can reach (below 2^53).
+        #[allow(clippy::cast_precision_loss)]
+        let time = options.start + frame as f64 / options.fps;
+        cooker.set_clock(CookContext { frame, time, dt });
+        cooker.reset_stats();
+        let outcomes: Vec<Outcome> = targets
+            .iter()
+            .map(|t| cook_target(&mut cooker, &graph, t))
+            .collect();
+        if frame % options.every != 0 {
+            continue;
+        }
+        node_error |= outcomes.iter().any(Result::is_err);
+        let stats = options.stats.then(|| cooker.stats());
+        let written = match options.format {
+            Format::Text => write_text(&mut out, frame, time, &targets, &outcomes, stats),
+            Format::Jsonl => write_jsonl(&mut out, frame, time, &targets, &outcomes, stats),
+        };
+        if let Err(err) = written {
+            return output_failed(&err);
+        }
+    }
+    if let Err(err) = out.flush() {
+        return output_failed(&err);
+    }
+    if node_error {
+        ExitCode::from(EXIT_NODE_ERROR)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+fn output_failed(err: &io::Error) -> ExitCode {
+    eprintln!("livspeil cook: cannot write output: {err}");
+    ExitCode::FAILURE
+}
+
+/// The nodes to print, sorted by name: the requested ones, or the sinks.
+fn targets(graph: &Graph, requested: &[String]) -> Result<Vec<Target>, String> {
+    let mut ids = Vec::new();
+    if requested.is_empty() {
+        ids.extend(
+            graph
+                .node_ids()
+                .filter(|&id| graph.outgoing_links(id).is_empty()),
+        );
+    } else {
+        for name in requested {
+            let id = graph
+                .find(name)
+                .ok_or_else(|| format!("--node: no node named '{name}'"))?;
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    }
+    let readers = ch_readers(graph);
+    let mut targets: Vec<Target> = ids
+        .into_iter()
+        .filter_map(|id| {
+            Some(Target {
+                name: graph.node_name(id)?.to_owned(),
+                id,
+                ports: graph
+                    .node_spec(id)?
+                    .outputs
+                    .iter()
+                    .map(|p| p.name)
+                    .collect(),
+                upstream: upstream(graph, &readers, id),
+            })
+        })
+        .collect();
+    targets.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(targets)
+}
+
+/// For every node, the nodes whose inputs its expressions read via `ch()`.
+fn ch_readers(graph: &Graph) -> HashMap<NodeId, Vec<NodeId>> {
+    let mut reads: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+    for source in graph.node_ids() {
+        for (reader, _) in graph.referenced_by(source) {
+            reads.entry(reader).or_default().push(source);
+        }
+    }
+    reads
+}
+
+/// Every node `id` depends on, transitively, sorted by name.
+fn upstream(
+    graph: &Graph,
+    reads: &HashMap<NodeId, Vec<NodeId>>,
+    id: NodeId,
+) -> Vec<(String, NodeId)> {
+    let mut seen = HashSet::new();
+    let mut stack = vec![id];
+    while let Some(node) = stack.pop() {
+        let linked = graph.incoming_links(node).into_iter().map(|l| l.from);
+        let read = reads.get(&node).into_iter().flatten().copied();
+        for dep in linked.chain(read) {
+            if dep != id && seen.insert(dep) {
+                stack.push(dep);
+            }
+        }
+    }
+    let mut deps: Vec<(String, NodeId)> = seen
+        .into_iter()
+        .filter_map(|dep| Some((graph.node_name(dep)?.to_owned(), dep)))
+        .collect();
+    deps.sort();
+    deps
+}
+
+/// Cook one node. It is an error when it failed this frame, even if the
+/// cooker still holds an earlier good output for it, and when any node it
+/// depends on failed this frame (its value would be stale).
+fn cook_target(cooker: &mut Cooker, graph: &Graph, target: &Target) -> Outcome {
+    let result = cooker.cook(graph, target.id);
+    if let Some(err) = cooker.error(target.id) {
+        return Err(describe(graph, err));
+    }
+    let values = result.map_err(|err| describe(graph, &err))?;
+    for (name, dep) in &target.upstream {
+        if let Some(err) = cooker.error(*dep) {
+            return Err(format!(
+                "upstream node '{name}' failed: {}",
+                describe(graph, err)
+            ));
+        }
+    }
+    Ok(values)
+}
+
+/// Error text with node names instead of ids where the error names a node.
+fn describe(graph: &Graph, err: &CookError) -> String {
+    match err {
+        CookError::Upstream { node } => match graph.node_name(*node) {
+            Some(name) => format!("upstream node '{name}' has no usable output"),
+            None => err.to_string(),
+        },
+        _ => err.to_string(),
+    }
+}
+
+/// A float with six decimals; negative zero (after rounding) is unsigned.
+fn fixed(x: f64) -> String {
+    let s = format!("{x:.6}");
+    if s == "-0.000000" {
+        "0.000000".to_owned()
+    } else {
+        s
+    }
+}
+
+fn fixed_list(xs: &[f64]) -> String {
+    xs.iter().map(|&x| fixed(x)).collect::<Vec<_>>().join(" ")
+}
+
+fn json_string(s: &str) -> String {
+    // Serializing a string cannot fail; the fallback keeps output valid JSON.
+    serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_owned())
+}
+
+/// A float rounded to six decimals, as JSON (`null` if not finite).
+fn json_float(x: f64) -> String {
+    if !x.is_finite() {
+        return "null".to_owned();
+    }
+    let rounded: f64 = fixed(x).parse().unwrap_or(x);
+    serde_json::to_string(&rounded).unwrap_or_else(|_| "null".to_owned())
+}
+
+fn json_list(xs: &[f64]) -> String {
+    let items: Vec<String> = xs.iter().map(|&x| json_float(x)).collect();
+    format!("[{}]", items.join(","))
+}
+
+fn text_value(value: &Value) -> String {
+    match value {
+        Value::Float(x) => fixed(*x),
+        Value::Int(i) => i.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Vec2(v) => format!("vec2({})", fixed_list(v)),
+        Value::Vec3(v) => format!("vec3({})", fixed_list(v)),
+        Value::Vec4(v) => format!("vec4({})", fixed_list(v)),
+        Value::Color(c) => format!("oklch({})", fixed_list(c)),
+        Value::String(s) => json_string(s),
+        other => format!("<unsupported {}>", other.port_type()),
+    }
+}
+
+fn json_value(value: &Value) -> String {
+    let (tag, body) = match value {
+        Value::Float(x) => ("float", json_float(*x)),
+        Value::Int(i) => ("int", i.to_string()),
+        Value::Bool(b) => ("bool", b.to_string()),
+        Value::Vec2(v) => ("vec2", json_list(v)),
+        Value::Vec3(v) => ("vec3", json_list(v)),
+        Value::Vec4(v) => ("vec4", json_list(v)),
+        Value::Color(c) => ("color", json_list(c)),
+        Value::String(s) => ("string", json_string(s)),
+        other => ("unsupported", json_string(other.port_type().name())),
+    };
+    format!("{{\"{tag}\":{body}}}")
+}
+
+fn write_text(
+    out: &mut impl Write,
+    frame: u64,
+    time: f64,
+    targets: &[Target],
+    outcomes: &[Outcome],
+    stats: Option<livspeil_graph::CookStats>,
+) -> io::Result<()> {
+    let prefix = format!("frame={frame} time={}", fixed(time));
+    for (target, outcome) in targets.iter().zip(outcomes) {
+        write!(out, "{prefix}")?;
+        for (index, port) in target.ports.iter().enumerate() {
+            let value = match outcome {
+                Ok(values) => values
+                    .get(index)
+                    .map_or_else(|| "<missing>".to_owned(), text_value),
+                Err(message) => format!("<error: {message}>"),
+            };
+            write!(out, " {}.{port}={value}", target.name)?;
+        }
+        writeln!(out)?;
+    }
+    if let Some(stats) = stats {
+        writeln!(
+            out,
+            "{prefix} stats cooked={} reused={}",
+            stats.cooked, stats.reused
+        )?;
+    }
+    Ok(())
+}
+
+fn write_jsonl(
+    out: &mut impl Write,
+    frame: u64,
+    time: f64,
+    targets: &[Target],
+    outcomes: &[Outcome],
+    stats: Option<livspeil_graph::CookStats>,
+) -> io::Result<()> {
+    let nodes: Vec<String> = targets
+        .iter()
+        .zip(outcomes)
+        .map(|(target, outcome)| {
+            let body = match outcome {
+                Ok(values) => {
+                    let ports: Vec<String> = target
+                        .ports
+                        .iter()
+                        .zip(values)
+                        .map(|(port, value)| format!("{}:{}", json_string(port), json_value(value)))
+                        .collect();
+                    format!("{{{}}}", ports.join(","))
+                }
+                Err(message) => format!("{{\"error\":{}}}", json_string(message)),
+            };
+            format!("{}:{body}", json_string(&target.name))
+        })
+        .collect();
+    write!(
+        out,
+        "{{\"frame\":{frame},\"time\":{},\"outputs\":{{{}}}",
+        json_float(time),
+        nodes.join(",")
+    )?;
+    if let Some(stats) = stats {
+        write!(
+            out,
+            ",\"stats\":{{\"cooked\":{},\"reused\":{}}}",
+            stats.cooked, stats.reused
+        )?;
+    }
+    writeln!(out, "}}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn opts(args: &[&str]) -> Result<Options, String> {
+        match parse_args(args.iter().map(|s| (*s).to_owned()))? {
+            Parsed::Run(o) => Ok(o),
+            Parsed::Help => Err("help".to_owned()),
+        }
+    }
+
+    #[test]
+    fn defaults() {
+        let o = opts(&["room.kdl"]).unwrap();
+        assert_eq!(
+            (o.frames, o.fps, o.start, o.every, o.format, o.stats),
+            (1, 60.0, 0.0, 1, Format::Text, false)
+        );
+    }
+
+    #[test]
+    fn values_inline_and_separate() {
+        let o = opts(&[
+            "--frames=600",
+            "r",
+            "--fps",
+            "30",
+            "--every",
+            "5",
+            "--node",
+            "a",
+            "--node=b",
+            "--format",
+            "jsonl",
+            "--start=-1.5",
+            "--stats",
+        ])
+        .unwrap();
+        assert_eq!(o.path, "r");
+        assert_eq!((o.frames, o.fps, o.every, o.start), (600, 30.0, 5, -1.5));
+        assert_eq!(o.nodes, ["a", "b"]);
+        assert_eq!(o.format, Format::Jsonl);
+        assert!(o.stats);
+    }
+
+    #[test]
+    fn bad_arguments() {
+        for args in [
+            &[][..],
+            &["a", "b"],
+            &["r", "--frames"],
+            &["r", "--frames", "-1"],
+            &["r", "--every", "0"],
+            &["r", "--fps", "0"],
+            &["r", "--fps", "inf"],
+            &["r", "--start", "nan"],
+            &["r", "--format", "xml"],
+            &["r", "--frob"],
+            &["r", "--stats=1"],
+            &["r", "--node="],
+        ] {
+            assert!(opts(args).is_err(), "{args:?}");
+        }
+    }
+
+    /// Every float of the acceptance scene, over all 600 frames, prints the
+    /// same with six decimals after a relative perturbation of 1e-12 (or an
+    /// absolute one of 1e-15 near zero). Platform math libraries (`sin`,
+    /// `cos`, `atan2`, `cbrt`, ... in the sky and color nodes) differ by at
+    /// most a few ulps, far below that, so the golden files are the same on
+    /// macOS and Linux.
+    #[test]
+    fn acceptance_scene_is_far_from_rounding_boundaries() {
+        let room =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/sun-and-lamp.room/room.kdl");
+        let text = std::fs::read_to_string(room).unwrap();
+        let graph = parse(&text)
+            .unwrap()
+            .to_graph(Arc::new(core_registry()))
+            .unwrap();
+        let targets = targets(&graph, &[]).unwrap();
+        let mut cooker = Cooker::new();
+        let stable = |x: f64| {
+            let s = fixed(x);
+            for y in [x * (1.0 + 1e-12), x * (1.0 - 1e-12), x + 1e-15, x - 1e-15] {
+                assert_eq!(fixed(y), s, "{x:e} is too close to a rounding boundary");
+            }
+        };
+        let mut checked = 0;
+        for frame in 0..600_u64 {
+            let time = frame as f64 / 60.0;
+            stable(time);
+            cooker.set_clock(CookContext {
+                frame,
+                time,
+                dt: 1.0 / 60.0,
+            });
+            for target in &targets {
+                for value in cook_target(&mut cooker, &graph, target).unwrap() {
+                    let floats: Vec<f64> = match value {
+                        Value::Float(x) => vec![x],
+                        Value::Vec3(v) => v.to_vec(),
+                        Value::Color(c) => c.to_vec(),
+                        other => panic!("unexpected value {other:?}"),
+                    };
+                    floats.into_iter().for_each(stable);
+                    checked += 1;
+                }
+            }
+        }
+        assert_eq!(checked, 600 * 5);
+    }
+
+    #[test]
+    fn float_formatting() {
+        assert_eq!(fixed(0.5), "0.500000");
+        assert_eq!(fixed(-0.0), "0.000000");
+        assert_eq!(fixed(-1e-9), "0.000000");
+        assert_eq!(fixed(-0.25), "-0.250000");
+        assert_eq!(json_float(0.8000000001), "0.8");
+        assert_eq!(json_float(1.0), "1.0");
+        assert_eq!(json_float(-1e-9), "0.0");
+        assert_eq!(json_float(f64::NAN), "null");
+    }
+
+    #[test]
+    fn value_formatting() {
+        assert_eq!(
+            text_value(&Value::Color([0.8, 0.12, 60.0, 1.0])),
+            "oklch(0.800000 0.120000 60.000000 1.000000)"
+        );
+        assert_eq!(text_value(&Value::String("a\"b".into())), "\"a\\\"b\"");
+        assert_eq!(
+            json_value(&Value::Vec2([1.0, -0.5])),
+            "{\"vec2\":[1.0,-0.5]}"
+        );
+        assert_eq!(json_value(&Value::Int(-3)), "{\"int\":-3}");
+        assert_eq!(json_value(&Value::Bool(true)), "{\"bool\":true}");
+    }
+}

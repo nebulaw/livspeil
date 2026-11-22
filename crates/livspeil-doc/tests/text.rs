@@ -209,20 +209,13 @@ fn bad_values_are_explained() {
         ("input \"x\" (color)\"rgb(1 2 3)\"", "oklch"),
         ("input \"x\" (i32)1", "unknown type annotation"),
         ("input \"x\" (vec2)\"1 two\"", "not a number"),
-        ("input \"x\"", "a port name and one value"),
-        ("input \"x\" 1 2", "a port name and one value"),
+        ("input \"x\"", "input 'x' sets nothing"),
+        ("input \"x\" 1 2", "expected `input \"port\" <value>`"),
         ("input \"x\" 1 unit=\"m\"", "unknown property `unit`"),
     ] {
         let e = err(&node_with_input(input));
         assert!(e.to_string().contains(needle), "{input}: {e}");
     }
-}
-
-#[test]
-fn expressions_are_reserved() {
-    let e = err(&node_with_input("input \"x\" expr=\"sin($T)\""));
-    assert!(e.to_string().contains("expressions"), "{e}");
-    assert_eq!(e.location().map(|l| l.line), Some(4));
 }
 
 #[test]

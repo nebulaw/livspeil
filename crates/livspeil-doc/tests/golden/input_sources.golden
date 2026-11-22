@@ -1,0 +1,30 @@
+room "Sources" format=1 min-tier="T0" {
+  network "/" {
+    node "sun" type="core.time.timeofday@1" id="01920000-0000-7000-8000-000000000001" {
+      input "offset" 0.25
+      input "seconds" expr="$T * 60.0"
+    }
+    node "lamp" type="core.math.lerp@1" id="01920000-0000-7000-8000-000000000002" {
+      input "a" 0.2
+      input "b" 0.5 expr="ch(\"sun/offset\") + 0.1" {
+        anim post="loop" {
+          key 0.0 0.2 interp="bezier"
+          key 1.0 0.8 interp="bezier" tangent="explicit" in=0.0 out=1.0
+          key 2.0 0.4 interp="spring" frequency=2.0 damping=0.5 tangent="flat"
+          key 3.0 0.5 interp="step"
+          key 4.0 0.1
+        }
+      }
+      input "t" expr="ch(\"sun/offset\") * 0.5"
+    }
+    node "all" type="test.all@1" id="01920000-0000-7000-8000-000000000003" {
+      input "c" {
+        anim pre="ping-pong" post="ping-pong" offset=-1.5 {
+          key 0.0 (color)"oklch(0.8 0.12 60.0 1.0)"
+          key 10.0 (color)"oklch(0.35 0.08 260.0 1.0)"
+        }
+      }
+      input "s" expr="\"héllo \\\"✓\\\"\""
+    }
+  }
+}

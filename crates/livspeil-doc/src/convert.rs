@@ -10,7 +10,7 @@ use livspeil_graph::{Graph, GraphError, NodeId};
 use livspeil_node_api::NodeRegistry;
 
 use crate::error::DocError;
-use crate::model::{DocLink, DocNode, Document, Network};
+use crate::model::{DocAnim, DocExpr, DocLink, DocNode, Document, Network};
 use crate::value::is_finite;
 
 impl Document {
@@ -39,6 +39,17 @@ impl Document {
                 }
                 doc_node.inputs.insert(port.clone(), value.clone());
             }
+            for (port, source) in &node.expressions {
+                doc_node
+                    .expressions
+                    .insert(port.clone(), DocExpr::new(source.clone()));
+            }
+            for (port, channel) in &node.animations {
+                // Channels are validated, so their numbers are finite.
+                doc_node
+                    .animations
+                    .insert(port.clone(), DocAnim::new(channel.clone()));
+            }
             network.nodes.push(doc_node);
         }
         for link in &snapshot.links {
@@ -60,16 +71,19 @@ impl Document {
 
     /// Build a graph from the document, preserving node ids.
     ///
-    /// Nodes are added first (in document order), then inputs are set, then
-    /// links are made, so the graph applies every rule it enforces at edit
-    /// time: known node types, unique names and ids, known ports, type
-    /// checks (an `Int` value is accepted for a `Float` input and stored as
-    /// a float), one link per input and no cycles. Meta is not part of the
-    /// graph.
+    /// Steps, in order: add every node (in document order); set static
+    /// inputs; set animation channels; make links; set expressions. So the
+    /// graph applies every rule it enforces at edit time: known node types,
+    /// unique names and ids, known ports, type checks (an `Int` value is
+    /// accepted for a `Float` input and stored as a float), one link per
+    /// input and no cycles. Expressions come last because their `ch()`
+    /// paths name other nodes; a `ch()` reference that closes a cycle (with
+    /// links or other expressions) is reported at the expression. Meta is
+    /// not part of the graph.
     ///
     /// # Errors
-    /// [`DocError::Graph`] naming the node, input or link at fault, with
-    /// its location when the document was parsed from text.
+    /// [`DocError::Graph`] naming the node, input, link or expression at
+    /// fault, with its location when the document was parsed from text.
     pub fn to_graph(&self, registry: Arc<NodeRegistry>) -> Result<Graph, DocError> {
         let mut graph = Graph::new(registry);
         let mut ids = BTreeMap::new();
@@ -93,6 +107,19 @@ impl Document {
                     })?;
             }
         }
+        for node in &self.network.nodes {
+            for (port, anim) in &node.animations {
+                graph
+                    .set_animation(node.id, port, anim.channel.clone())
+                    .map_err(|source| {
+                        graph_err(
+                            anim.at.0.or(node.at.0),
+                            format!("node '{}' input '{port}' anim", node.name),
+                            source,
+                        )
+                    })?;
+            }
+        }
         for link in &self.network.links {
             let context = format!(
                 "link {}.{} -> {}.{}",
@@ -109,6 +136,19 @@ impl Document {
             graph
                 .link(from, &link.from_port, to, &link.to_port)
                 .map_err(|source| graph_err(link.at.0, context.clone(), source))?;
+        }
+        for node in &self.network.nodes {
+            for (port, expr) in &node.expressions {
+                graph
+                    .set_expression(node.id, port, &expr.source)
+                    .map_err(|source| {
+                        graph_err(
+                            expr.at.0.or(node.at.0),
+                            format!("node '{}' input '{port}' expr", node.name),
+                            source,
+                        )
+                    })?;
+            }
         }
         Ok(graph)
     }

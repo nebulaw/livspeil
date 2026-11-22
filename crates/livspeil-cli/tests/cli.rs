@@ -82,7 +82,6 @@ fn help_lists_commands() {
 
 #[test]
 fn reserved_commands_exit_with_usage_code() {
-    assert_eq!(livspeil(&["cook"]).status.code(), Some(2));
     assert_eq!(livspeil(&["diff"]).status.code(), Some(2));
 }
 
@@ -104,7 +103,7 @@ fn example_room_validates_and_is_canonical() {
     let example = repo_root().join("examples/sun-and-lamp.room");
     let out = livspeil(&["validate", s(&example)]);
     assert!(out.status.success(), "{}", stderr(&out));
-    assert!(String::from_utf8_lossy(&out.stdout).contains("2 nodes, 1 links"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("9 nodes, 9 links"));
     let out = livspeil(&["fmt", "--check", s(&example)]);
     assert!(out.status.success(), "{}", stderr(&out));
     // The file path form works too.

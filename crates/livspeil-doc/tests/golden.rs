@@ -11,6 +11,7 @@ use common::{id, registry};
 use livspeil_doc::{Document, Tier, format, parse};
 use livspeil_graph::Graph;
 use livspeil_node_api::Value;
+use livspeil_params::{AnimChannel, Extrapolation, Interpolation, Keyframe, Tangent};
 use livspeil_testkit::assert_golden;
 
 fn golden_dir() -> PathBuf {
@@ -80,4 +81,57 @@ fn empty_document() {
     let graph = Graph::new(registry());
     let doc = Document::from_graph(&graph, "").unwrap();
     check("empty", &graph, &doc);
+}
+
+/// Static values, expressions and animation channels, alone and together.
+#[test]
+fn input_sources() {
+    let mut g = Graph::new(registry());
+    let sun = g
+        .add_node_with_id(id(1), "core.time.timeofday@1", "sun")
+        .unwrap();
+    let lamp = g
+        .add_node_with_id(id(2), "core.math.lerp@1", "lamp")
+        .unwrap();
+    let all = g.add_node_with_id(id(3), "test.all@1", "all").unwrap();
+    g.set_input(sun, "offset", Value::Float(0.25)).unwrap();
+    g.set_expression(sun, "seconds", "$T * 60.0").unwrap();
+    g.set_input(lamp, "a", Value::Float(0.2)).unwrap();
+    g.set_expression(lamp, "t", "ch(\"sun/offset\") * 0.5")
+        .unwrap();
+    let b = AnimChannel::new(vec![
+        Keyframe::float(0.0, 0.2).with_interpolation(Interpolation::Bezier),
+        Keyframe::float(1.0, 0.8)
+            .with_interpolation(Interpolation::Bezier)
+            .with_tangent(Tangent::Explicit {
+                incoming: Value::Float(0.0),
+                outgoing: Value::Float(1.0),
+            }),
+        Keyframe::float(2.0, 0.4)
+            .with_interpolation(Interpolation::Spring {
+                frequency: 2.0,
+                damping: 0.5,
+            })
+            .with_tangent(Tangent::Flat),
+        Keyframe::float(3.0, 0.5).with_interpolation(Interpolation::Step),
+        Keyframe::float(4.0, 0.1),
+    ])
+    .unwrap()
+    .with_extrapolation(Extrapolation::Hold, Extrapolation::Loop);
+    g.set_input(lamp, "b", Value::Float(0.5)).unwrap();
+    g.set_animation(lamp, "b", b).unwrap();
+    g.set_expression(lamp, "b", "ch(\"sun/offset\") + 0.1")
+        .unwrap();
+    let color = AnimChannel::new(vec![
+        Keyframe::new(0.0, Value::Color([0.8, 0.12, 60.0, 1.0])),
+        Keyframe::new(10.0, Value::Color([0.35, 0.08, 260.0, 1.0])),
+    ])
+    .unwrap()
+    .with_extrapolation(Extrapolation::PingPong, Extrapolation::PingPong)
+    .with_offset(-1.5)
+    .unwrap();
+    g.set_animation(all, "c", color).unwrap();
+    g.set_expression(all, "s", "\"héllo \\\"✓\\\"\"").unwrap();
+    let doc = Document::from_graph(&g, "Sources").unwrap();
+    check("input_sources", &g, &doc);
 }
