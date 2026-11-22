@@ -10,8 +10,17 @@ use std::sync::Arc;
 use livspeil_node_api::{NodeImpl, NodeRegistry, NodeSpec, PortType, Value};
 use uuid::Uuid;
 
+use crate::snapshot::{GraphSnapshot, NamedLink, NodeSnapshot};
+
 /// Stable identifier of a node (UUIDv7, so ids sort by creation time).
+///
+/// With the `serde` feature it serializes as its UUID string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(transparent)
+)]
 pub struct NodeId(Uuid);
 
 impl NodeId {
@@ -48,6 +57,7 @@ impl fmt::Display for NodeId {
 
 /// A port on a specific node, by index into the node spec's port list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Endpoint {
     pub node: NodeId,
     pub port: usize,
@@ -55,6 +65,7 @@ pub struct Endpoint {
 
 /// A connection from an output port to an input port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Link {
     pub from: Endpoint,
     pub to: Endpoint,
@@ -357,6 +368,146 @@ impl Graph {
         self.outgoing.remove(&(src.node, to, index));
         self.bump(to);
         Ok(true)
+    }
+
+    /// Rename a node. Returns the previous name. Renaming does not change
+    /// what a node computes, so it does not invalidate cooked results.
+    /// Renaming a node to its current name is a no-op.
+    ///
+    /// # Errors
+    /// Fails for an unknown node, an empty name or a name used by another
+    /// node.
+    pub fn rename(&mut self, id: NodeId, name: &str) -> Result<String, GraphError> {
+        if name.is_empty() {
+            return Err(GraphError::EmptyName);
+        }
+        let node = self.nodes.get_mut(&id).ok_or(GraphError::UnknownNode(id))?;
+        if node.name == name {
+            return Ok(name.to_owned());
+        }
+        if self.names.contains_key(name) {
+            return Err(GraphError::DuplicateName(name.to_owned()));
+        }
+        let old = std::mem::replace(&mut node.name, name.to_owned());
+        self.names.remove(&old);
+        self.names.insert(name.to_owned(), id);
+        Ok(old)
+    }
+
+    /// Whether a node with this id exists.
+    #[must_use]
+    pub fn contains(&self, id: NodeId) -> bool {
+        self.nodes.contains_key(&id)
+    }
+
+    /// The explicitly set value of an input, or `None` when the input uses
+    /// its spec default. Links are not considered.
+    ///
+    /// # Errors
+    /// Fails for an unknown node or port.
+    pub fn input_value(&self, node: NodeId, port: &str) -> Result<Option<&Value>, GraphError> {
+        let (index, _) = self.input_port(node, port)?;
+        Ok(self
+            .nodes
+            .get(&node)
+            .and_then(|n| n.values.get(index))
+            .and_then(Option::as_ref))
+    }
+
+    /// Every explicitly set input value of a node as `(port name, value)`,
+    /// in port order. Empty for an unknown node.
+    pub fn input_values(&self, node: NodeId) -> impl Iterator<Item = (&str, &Value)> + '_ {
+        self.nodes.get(&node).into_iter().flat_map(|n| {
+            let spec = n.imp.spec();
+            n.values
+                .iter()
+                .zip(&spec.inputs)
+                .filter_map(|(value, port)| value.as_ref().map(|v| (port.name, v)))
+        })
+    }
+
+    /// The output feeding input `to_port` of node `to`, as
+    /// `(source node, output port name)`, or `None` when it is unlinked.
+    ///
+    /// # Errors
+    /// Fails for an unknown node or port.
+    pub fn link_source(
+        &self,
+        to: NodeId,
+        to_port: &str,
+    ) -> Result<Option<(NodeId, &str)>, GraphError> {
+        let (index, _) = self.input_port(to, to_port)?;
+        Ok(self.links.get(&(to, index)).and_then(|src| {
+            let spec = self.nodes.get(&src.node)?.imp.spec();
+            Some((src.node, spec.outputs.get(src.port)?.name))
+        }))
+    }
+
+    /// The links feeding a node, by input port order, with port names.
+    #[must_use]
+    pub fn incoming_links(&self, id: NodeId) -> Vec<NamedLink> {
+        self.links
+            .range((id, 0)..=(id, usize::MAX))
+            .filter_map(|(&(node, port), &from)| {
+                self.named(Link {
+                    from,
+                    to: Endpoint { node, port },
+                })
+            })
+            .collect()
+    }
+
+    /// The links leaving a node, ordered by target node and input port,
+    /// with port names.
+    #[must_use]
+    pub fn outgoing_links(&self, id: NodeId) -> Vec<NamedLink> {
+        self.outgoing
+            .range((id, NodeId(Uuid::nil()), 0)..)
+            .take_while(|(from, _, _)| *from == id)
+            .filter_map(|&(_, to, port)| {
+                let from = *self.links.get(&(to, port))?;
+                self.named(Link {
+                    from,
+                    to: Endpoint { node: to, port },
+                })
+            })
+            .collect()
+    }
+
+    /// A link with port names instead of indices.
+    #[must_use]
+    pub fn named(&self, link: Link) -> Option<NamedLink> {
+        let from_spec = self.nodes.get(&link.from.node)?.imp.spec();
+        let to_spec = self.nodes.get(&link.to.node)?.imp.spec();
+        Some(NamedLink {
+            from: link.from.node,
+            from_port: from_spec.outputs.get(link.from.port)?.name.to_owned(),
+            to: link.to.node,
+            to_port: to_spec.inputs.get(link.to.port)?.name.to_owned(),
+        })
+    }
+
+    /// A canonical, comparable copy of the editable state: node ids, names,
+    /// types, explicitly set inputs and links. Cook revisions and the graph
+    /// instance id are not part of it, so two graphs built by the same
+    /// edits have equal snapshots.
+    #[must_use]
+    pub fn snapshot(&self) -> GraphSnapshot {
+        let nodes = self
+            .nodes
+            .iter()
+            .map(|(&id, n)| NodeSnapshot {
+                id,
+                name: n.name.clone(),
+                type_id: n.type_id.clone(),
+                inputs: self
+                    .input_values(id)
+                    .map(|(port, value)| (port.to_owned(), value.clone()))
+                    .collect(),
+            })
+            .collect();
+        let links = self.links().filter_map(|l| self.named(l)).collect();
+        GraphSnapshot { nodes, links }
     }
 
     /// Number of nodes.

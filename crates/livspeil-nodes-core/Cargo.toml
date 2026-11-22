@@ -15,5 +15,8 @@ publish.workspace = true
 [dependencies]
 livspeil-node-api = { path = "../livspeil-node-api" }
 
+[dev-dependencies]
+livspeil-testkit = { path = "../livspeil-testkit" }
+
 [lints]
 workspace = true

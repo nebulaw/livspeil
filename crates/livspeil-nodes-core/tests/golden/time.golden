@@ -1,0 +1,14 @@
+core.time.timeofday(seconds=0.000000, offset=0.000000) => phase=0.000000, hour=0.000000
+core.time.timeofday(seconds=21600.000000, offset=0.000000) => phase=0.250000, hour=6.000000
+core.time.timeofday(seconds=43200.000000, offset=0.000000) => phase=0.500000, hour=12.000000
+core.time.timeofday(seconds=64800.000000, offset=0.000000) => phase=0.750000, hour=18.000000
+core.time.timeofday(seconds=86399.000000, offset=0.000000) => phase=0.999988, hour=23.999722
+core.time.timeofday(seconds=86400.000000, offset=0.000000) => phase=0.000000, hour=0.000000
+core.time.timeofday(seconds=-3600.000000, offset=0.000000) => phase=0.958333, hour=23.000000
+core.time.timeofday(seconds=-90000.000000, offset=0.000000) => phase=0.958333, hour=23.000000
+core.time.timeofday(seconds=300000.000000, offset=0.000000) => phase=0.472222, hour=11.333333
+core.time.timeofday(seconds=45296.000000, offset=0.000000) => phase=0.524259, hour=12.582222
+core.time.timeofday(seconds=43200.000000, offset=2.000000) => phase=0.583333, hour=14.000000
+core.time.timeofday(seconds=3600.000000, offset=-2.500000) => phase=0.937500, hour=22.500000
+core.time.timeofday(seconds=43200.000000, offset=36.000000) => phase=0.000000, hour=0.000000
+core.time.timeofday(seconds=NaN, offset=0.000000) => error: invalid input 'seconds': expected a finite number, got NaN

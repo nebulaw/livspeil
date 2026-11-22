@@ -29,7 +29,6 @@ A Room package (`*.room`) can ship its own Charms, assets and scripts, and autho
 - The official store accepts free licenses only (OSI/FSF-approved for code, CC BY / CC BY-SA / CC0 and similar for content). Recommended defaults: CC BY-SA 4.0 for Rooms, MIT or MPL-2.0 for Charms.
 
 ## Contributions
-- DCO sign-off on every commit (required now).
 - CLA with an open-source lock (required once the reviewed text exists; the CI check is off until then).
 - Details in [CONTRIBUTING.md](../CONTRIBUTING.md).
 

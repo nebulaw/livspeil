@@ -1,0 +1,72 @@
+core.math.sub(a=0.0, b=0.0) => out=0.0
+core.math.sub(a=5.0, b=3.5) => out=1.5
+core.math.sub(a=0.3, b=0.1) => out=0.19999999999999998
+core.math.sub(a=inf, b=inf) => out=NaN
+core.math.mul(a=0.0, b=1.0) => out=0.0
+core.math.mul(a=2.5, b=1.0) => out=2.5
+core.math.mul(a=2.5, b=-4.0) => out=-10.0
+core.math.mul(a=-0.0, b=3.0) => out=-0.0
+core.math.mul(a=0.0, b=inf) => out=NaN
+core.math.mul(a=NaN, b=2.0) => out=NaN
+core.math.div(a=0.0, b=1.0) => out=0.0
+core.math.div(a=7.0, b=2.0) => out=3.5
+core.math.div(a=1.0, b=3.0) => out=0.3333333333333333
+core.math.div(a=1.0, b=0.0) => error: invalid input 'b': division by zero
+core.math.div(a=1.0, b=-0.0) => error: invalid input 'b': division by zero
+core.math.div(a=0.0, b=0.0) => error: invalid input 'b': division by zero
+core.math.div(a=1.0, b=inf) => out=0.0
+core.math.div(a=1.0, b=NaN) => out=NaN
+core.math.clamp(x=0.0, min=0.0, max=1.0) => out=0.0
+core.math.clamp(x=0.25, min=0.0, max=1.0) => out=0.25
+core.math.clamp(x=-2.0, min=0.0, max=1.0) => out=0.0
+core.math.clamp(x=3.0, min=0.0, max=1.0) => out=1.0
+core.math.clamp(x=3.0, min=1.0, max=-1.0) => out=1.0
+core.math.clamp(x=-3.0, min=1.0, max=-1.0) => out=-1.0
+core.math.clamp(x=5.0, min=2.0, max=2.0) => out=2.0
+core.math.clamp(x=-inf, min=0.0, max=1.0) => out=0.0
+core.math.clamp(x=NaN, min=0.0, max=1.0) => out=NaN
+core.math.clamp(x=5.0, min=NaN, max=1.0) => out=1.0
+core.math.clamp(x=-5.0, min=NaN, max=1.0) => out=-5.0
+core.math.remap(x=0.0, in_min=0.0, in_max=1.0, out_min=0.0, out_max=1.0, clamp=false) => out=0.0
+core.math.remap(x=0.25, in_min=0.0, in_max=1.0, out_min=0.0, out_max=1.0, clamp=false) => out=0.25
+core.math.remap(x=2.5, in_min=0.0, in_max=10.0, out_min=100.0, out_max=200.0, clamp=false) => out=125.0
+core.math.remap(x=20.0, in_min=0.0, in_max=10.0, out_min=100.0, out_max=200.0, clamp=false) => out=300.0
+core.math.remap(x=20.0, in_min=0.0, in_max=10.0, out_min=100.0, out_max=200.0, clamp=true) => out=200.0
+core.math.remap(x=-1.0, in_min=0.0, in_max=1.0, out_min=0.0, out_max=1.0, clamp=true) => out=0.0
+core.math.remap(x=0.25, in_min=0.0, in_max=1.0, out_min=1.0, out_max=0.0, clamp=false) => out=0.75
+core.math.remap(x=2.0, in_min=0.0, in_max=1.0, out_min=1.0, out_max=0.0, clamp=true) => out=0.0
+core.math.remap(x=0.25, in_min=1.0, in_max=0.0, out_min=0.0, out_max=1.0, clamp=false) => out=0.75
+core.math.remap(x=1.0, in_min=2.0, in_max=2.0, out_min=0.0, out_max=1.0, clamp=false) => error: invalid input 'in_max': input range is empty (in_min == in_max)
+core.math.remap(x=NaN, in_min=0.0, in_max=1.0, out_min=0.0, out_max=1.0, clamp=true) => out=NaN
+core.math.remap(x=inf, in_min=0.0, in_max=1.0, out_min=0.0, out_max=1.0, clamp=false) => out=inf
+core.math.remap(x=inf, in_min=0.0, in_max=1.0, out_min=0.0, out_max=1.0, clamp=true) => out=1.0
+core.math.min(a=0.0, b=0.0) => out=0.0
+core.math.min(a=1.0, b=-2.0) => out=-2.0
+core.math.min(a=0.0, b=-0.0) => out=-0.0
+core.math.min(a=-0.0, b=0.0) => out=-0.0
+core.math.min(a=NaN, b=3.0) => out=3.0
+core.math.min(a=3.0, b=NaN) => out=3.0
+core.math.min(a=NaN, b=NaN) => out=NaN
+core.math.min(a=-inf, b=0.0) => out=-inf
+core.math.max(a=0.0, b=0.0) => out=0.0
+core.math.max(a=1.0, b=-2.0) => out=1.0
+core.math.max(a=0.0, b=-0.0) => out=0.0
+core.math.max(a=-0.0, b=0.0) => out=0.0
+core.math.max(a=NaN, b=3.0) => out=3.0
+core.math.max(a=3.0, b=NaN) => out=3.0
+core.math.max(a=NaN, b=NaN) => out=NaN
+core.math.max(a=inf, b=0.0) => out=inf
+core.math.smoothstep(edge0=0.0, edge1=1.0, x=0.0) => out=0.0
+core.math.smoothstep(edge0=0.0, edge1=1.0, x=-1.0) => out=0.0
+core.math.smoothstep(edge0=0.0, edge1=1.0, x=0.25) => out=0.15625
+core.math.smoothstep(edge0=0.0, edge1=1.0, x=0.5) => out=0.5
+core.math.smoothstep(edge0=0.0, edge1=1.0, x=0.75) => out=0.84375
+core.math.smoothstep(edge0=0.0, edge1=1.0, x=1.0) => out=1.0
+core.math.smoothstep(edge0=0.0, edge1=1.0, x=2.0) => out=1.0
+core.math.smoothstep(edge0=2.0, edge1=6.0, x=3.0) => out=0.15625
+core.math.smoothstep(edge0=1.0, edge1=0.0, x=0.25) => out=0.84375
+core.math.smoothstep(edge0=0.5, edge1=0.5, x=0.4) => out=0.0
+core.math.smoothstep(edge0=0.5, edge1=0.5, x=0.5) => out=1.0
+core.math.smoothstep(edge0=0.5, edge1=0.5, x=0.6) => out=1.0
+core.math.smoothstep(edge0=0.0, edge1=1.0, x=NaN) => out=NaN
+core.math.smoothstep(edge0=0.0, edge1=1.0, x=inf) => out=1.0

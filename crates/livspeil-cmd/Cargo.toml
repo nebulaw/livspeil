@@ -12,5 +12,17 @@ repository.workspace = true
 authors.workspace = true
 publish.workspace = true
 
+[dependencies]
+livspeil-graph = { path = "../livspeil-graph", features = ["serde"] }
+livspeil-node-api = { path = "../livspeil-node-api", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+# float_roundtrip: parse floats back bit-exactly so a replayed journal
+# reproduces the original values.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[dev-dependencies]
+proptest = "1"
+uuid = "1"
+
 [lints]
 workspace = true

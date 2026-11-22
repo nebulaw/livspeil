@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: 2026 Livspeil contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! Canonical, comparable copies of a graph's editable state.
+
+use livspeil_node_api::Value;
+
+use crate::NodeId;
+
+/// A link described by port names rather than port indices.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct NamedLink {
+    pub from: NodeId,
+    pub from_port: String,
+    pub to: NodeId,
+    pub to_port: String,
+}
+
+/// One node of a [`GraphSnapshot`].
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct NodeSnapshot {
+    pub id: NodeId,
+    pub name: String,
+    /// Qualified type id, for example `core.math.add@1`.
+    pub type_id: String,
+    /// Explicitly set inputs as `(port name, value)`, in port order.
+    pub inputs: Vec<(String, Value)>,
+}
+
+/// The editable state of a graph: nodes in id order and links ordered by
+/// target node and input port. Produced by [`crate::Graph::snapshot`].
+///
+/// Equality uses IEEE float equality, so a snapshot holding `NaN` never
+/// equals itself.
+#[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct GraphSnapshot {
+    pub nodes: Vec<NodeSnapshot>,
+    pub links: Vec<NamedLink>,
+}
