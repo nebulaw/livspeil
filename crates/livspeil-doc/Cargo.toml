@@ -18,6 +18,7 @@ publish.workspace = true
 kdl = "6.5"
 livspeil-graph = { path = "../livspeil-graph" }
 livspeil-node-api = { path = "../livspeil-node-api" }
+livspeil-params = { path = "../livspeil-params" }
 uuid = "1"
 
 [dev-dependencies]

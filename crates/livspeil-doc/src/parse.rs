@@ -7,12 +7,16 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use kdl::{KdlDocument, KdlEntry, KdlNode, KdlValue};
 use livspeil_graph::NodeId;
+use livspeil_node_api::Value;
+use livspeil_params::{AnimChannel, AnimError, Extrapolation, Interpolation, Keyframe, Tangent};
 use uuid::Uuid;
 
+use crate::anim;
 use crate::error::{DocError, Location};
 use crate::migrate::migrate;
 use crate::model::{
-    CURRENT_FORMAT, DocLink, DocNode, Document, Meta, Network, ROOT_NETWORK, SourceLoc, Tier,
+    CURRENT_FORMAT, DocAnim, DocExpr, DocLink, DocNode, Document, Meta, Network, ROOT_NETWORK,
+    SourceLoc, Tier,
 };
 use crate::value::decode;
 
@@ -280,55 +284,280 @@ impl Reader<'_> {
             .map(NodeId::from_uuid)
             .map_err(|e| self.err_entry(id_entry, format!("invalid node id '{id_text}': {e}")))?;
 
-        let mut inputs = BTreeMap::new();
+        let mut doc_node = DocNode::new(id, name, type_id);
+        doc_node.at = SourceLoc(self.at_node(node));
+        let mut seen = BTreeSet::new();
         for child in children(node) {
             self.no_annotation(child)?;
             if child.name().value() != "input" {
                 return Err(self.err_node(
                     child,
                     format!(
-                        "unknown node `{}` in node '{name}'; expected `input`",
+                        "unknown node `{}` in node '{}'; expected `input`",
+                        child.name().value(),
+                        doc_node.name
+                    ),
+                ));
+            }
+            self.input(child, &mut doc_node, &mut seen)?;
+        }
+        Ok(doc_node)
+    }
+
+    /// `input "port" [<value>] [expr="..."] [{ anim ... }]`.
+    fn input(
+        &self,
+        child: &KdlNode,
+        node: &mut DocNode,
+        seen: &mut BTreeSet<String>,
+    ) -> Result<(), DocError> {
+        const USAGE: &str = "expected `input \"port\" <value>`, optionally with `expr=\"...\"` and an `anim { ... }` block";
+        let entries = self.entries(child)?;
+        self.allow_props(&entries, &["expr"])?;
+        let (port, value) = match entries.args.as_slice() {
+            [port] => (port, None),
+            [port, value] => (port, Some(value)),
+            _ => return Err(self.err_node(child, USAGE)),
+        };
+        let port = self.plain_string(port, "input port name")?;
+        if !seen.insert(port.clone()) {
+            return Err(self.err_node(child, format!("input '{port}' is set more than once")));
+        }
+        if let Some(value) = value {
+            let decoded = decode(value.ty().map(|t| t.value()), value.value())
+                .map_err(|msg| self.err_entry(value, format!("input '{port}': {msg}")))?;
+            node.inputs.insert(port.clone(), decoded);
+        }
+        if let Some(entry) = entries.props.get("expr") {
+            let source = self.plain_string(entry, "expr")?;
+            node.expressions.insert(
+                port.clone(),
+                DocExpr {
+                    source,
+                    at: SourceLoc(self.at_entry(entry)),
+                },
+            );
+        }
+        let mut anim = None;
+        for sub in children(child) {
+            self.no_annotation(sub)?;
+            if sub.name().value() != "anim" {
+                return Err(self.err_node(
+                    sub,
+                    format!(
+                        "unknown node `{}` in input '{port}'; expected `anim`",
+                        sub.name().value()
+                    ),
+                ));
+            }
+            if anim.is_some() {
+                return Err(self.err_node(
+                    sub,
+                    format!("input '{port}' has more than one `anim` block"),
+                ));
+            }
+            anim = Some(self.anim(sub, &port)?);
+        }
+        let has_anim = anim.is_some();
+        if let Some(anim) = anim {
+            node.animations.insert(port.clone(), anim);
+        }
+        if value.is_none() && !entries.props.contains_key("expr") && !has_anim {
+            return Err(self.err_node(child, format!("input '{port}' sets nothing; {USAGE}")));
+        }
+        Ok(())
+    }
+
+    /// `anim [pre=".."] [post=".."] [offset=<number>] { key ... }`.
+    fn anim(&self, node: &KdlNode, port: &str) -> Result<DocAnim, DocError> {
+        let entries = self.entries(node)?;
+        self.allow_props(&entries, &["pre", "post", "offset"])?;
+        if let Some(arg) = entries.args.first() {
+            return Err(self.err_entry(
+                arg,
+                "`anim` takes no arguments; settings are `pre=`, `post=` and `offset=`",
+            ));
+        }
+        let extrapolation = |key: &str| -> Result<Extrapolation, DocError> {
+            let Some(entry) = entries.props.get(key) else {
+                return Ok(Extrapolation::Hold);
+            };
+            let name = self.plain_string(entry, key)?;
+            anim::extrapolation(&name).ok_or_else(|| {
+                self.err_entry(
+                    entry,
+                    format!(
+                        "unknown {key} extrapolation \"{name}\"; expected one of {}",
+                        anim::list(anim::EXTRAPOLATIONS.map(|(n, _)| n))
+                    ),
+                )
+            })
+        };
+        let pre = extrapolation("pre")?;
+        let post = extrapolation("post")?;
+        let offset = match entries.props.get("offset") {
+            None => 0.0,
+            Some(entry) => self.number(entry, "offset")?,
+        };
+
+        let mut keys = Vec::new();
+        let mut key_nodes = Vec::new();
+        for child in children(node) {
+            self.no_annotation(child)?;
+            if child.name().value() != "key" {
+                return Err(self.err_node(
+                    child,
+                    format!(
+                        "unknown node `{}` in anim; expected `key <time> <value>`",
                         child.name().value()
                     ),
                 ));
             }
-            if child.children().is_some() {
-                return Err(self.err_node(child, "`input` takes no children block"));
-            }
-            let entries = self.entries(child)?;
-            if let Some(expr) = entries.props.get("expr") {
-                // Extension point: expressions on inputs (M0.5) will be
-                // written `input "x" expr="..."`.
-                return Err(self.err_entry(
-                    expr,
-                    "expressions on inputs (`expr=`) are reserved for a later format and not supported yet",
-                ));
-            }
-            self.allow_props(&entries, &[])?;
-            let (port, value) = match entries.args.as_slice() {
-                [port, value] => (port, value),
-                _ => {
-                    return Err(self.err_node(
-                        child,
-                        "expected `input \"port\" <value>` (a port name and one value)",
-                    ));
-                }
-            };
-            let port = self.plain_string(port, "input port name")?;
-            let decoded = decode(value.ty().map(|t| t.value()), value.value())
-                .map_err(|msg| self.err_entry(value, format!("input '{port}': {msg}")))?;
-            if inputs.insert(port.clone(), decoded).is_some() {
-                return Err(self.err_node(child, format!("input '{port}' is set more than once")));
-            }
+            keys.push(self.key(child)?);
+            key_nodes.push(child);
         }
-
-        Ok(DocNode {
-            id,
-            name,
-            type_id,
-            inputs,
+        let channel = AnimChannel::new(keys)
+            .and_then(|c| c.with_extrapolation(pre, post).with_offset(offset))
+            .map_err(|e| {
+                let at = match &e {
+                    AnimError::UnsupportedType { index, .. }
+                    | AnimError::MixedTypes { index, .. }
+                    | AnimError::NotIncreasing { index }
+                    | AnimError::NonFinite { index }
+                    | AnimError::InvalidSpring { index } => key_nodes.get(*index).copied(),
+                    _ => None,
+                };
+                DocError::invalid(
+                    self.at_node(at.unwrap_or(node)),
+                    format!("input '{port}' anim: {e}"),
+                )
+            })?;
+        Ok(DocAnim {
+            channel,
             at: SourceLoc(self.at_node(node)),
         })
+    }
+
+    /// `key <time> <value> [interp=".."] [frequency=.. damping=..]
+    /// [tangent=".."] [in=<value> out=<value>]`.
+    fn key(&self, node: &KdlNode) -> Result<Keyframe, DocError> {
+        if node.children().is_some() {
+            return Err(self.err_node(node, "`key` takes no children block"));
+        }
+        let entries = self.entries(node)?;
+        self.allow_props(
+            &entries,
+            &["interp", "frequency", "damping", "tangent", "in", "out"],
+        )?;
+        let [time, value] = entries.args.as_slice() else {
+            return Err(self.err_node(node, "expected `key <time> <value>`"));
+        };
+        let time = self.number(time, "key time")?;
+        let value = self.key_value(value, "key value")?;
+
+        let name = |key: &str| -> Result<Option<(String, &KdlEntry)>, DocError> {
+            entries
+                .props
+                .get(key)
+                .map(|entry| self.plain_string(entry, key).map(|s| (s, *entry)))
+                .transpose()
+        };
+        let only_with = |props: &[&str], setting: &str| -> Result<(), DocError> {
+            match props.iter().find_map(|p| entries.props.get(p)) {
+                Some(entry) => Err(self.err_entry(
+                    entry,
+                    format!(
+                        "`{}` is only allowed with {setting}",
+                        entry.name().map_or("", |n| n.value())
+                    ),
+                )),
+                None => Ok(()),
+            }
+        };
+        let required = |prop: &str, setting: &str| -> Result<&KdlEntry, DocError> {
+            entries
+                .props
+                .get(prop)
+                .copied()
+                .ok_or_else(|| self.err_node(node, format!("{setting} needs `{prop}=`")))
+        };
+
+        let interpolation = match name("interp")? {
+            None => Interpolation::Linear,
+            Some((n, entry)) => match n.as_str() {
+                "step" => Interpolation::Step,
+                "linear" => Interpolation::Linear,
+                "bezier" => Interpolation::Bezier,
+                "spring" => Interpolation::Spring {
+                    frequency: self
+                        .number(required("frequency", "interp=\"spring\"")?, "frequency")?,
+                    damping: self.number(required("damping", "interp=\"spring\"")?, "damping")?,
+                },
+                _ => {
+                    return Err(self.err_entry(
+                        entry,
+                        format!(
+                            "unknown interpolation \"{n}\"; expected one of {}",
+                            anim::list(anim::INTERPOLATIONS)
+                        ),
+                    ));
+                }
+            },
+        };
+        if !matches!(interpolation, Interpolation::Spring { .. }) {
+            only_with(&["frequency", "damping"], "interp=\"spring\"")?;
+        }
+
+        let tangent = match name("tangent")? {
+            None => Tangent::Auto,
+            Some((n, entry)) => match n.as_str() {
+                "auto" => Tangent::Auto,
+                "flat" => Tangent::Flat,
+                "explicit" => Tangent::Explicit {
+                    incoming: self
+                        .key_value(required("in", "tangent=\"explicit\"")?, "in tangent")?,
+                    outgoing: self
+                        .key_value(required("out", "tangent=\"explicit\"")?, "out tangent")?,
+                },
+                _ => {
+                    return Err(self.err_entry(
+                        entry,
+                        format!(
+                            "unknown tangent \"{n}\"; expected one of {}",
+                            anim::list(anim::TANGENTS)
+                        ),
+                    ));
+                }
+            },
+        };
+        if !matches!(tangent, Tangent::Explicit { .. }) {
+            only_with(&["in", "out"], "tangent=\"explicit\"")?;
+        }
+
+        Ok(Keyframe {
+            time,
+            value,
+            interpolation,
+            tangent,
+        })
+    }
+
+    /// A finite number; integers are accepted and stored as floats.
+    fn number(&self, entry: &KdlEntry, what: &str) -> Result<f64, DocError> {
+        match self.key_value(entry, what)? {
+            Value::Float(v) => Ok(v),
+            _ => Err(self.err_entry(entry, format!("{what} must be a number"))),
+        }
+    }
+
+    /// A value inside an animation: the usual encoding, with integers read
+    /// as floats (integers cannot be animated, so this is unambiguous).
+    fn key_value(&self, entry: &KdlEntry, what: &str) -> Result<Value, DocError> {
+        match decode(entry.ty().map(|t| t.value()), entry.value()) {
+            Ok(Value::Int(v)) => Ok(Value::Float(v as f64)),
+            Ok(v) => Ok(v),
+            Err(msg) => Err(self.err_entry(entry, format!("{what}: {msg}"))),
+        }
     }
 
     fn link(&self, node: &KdlNode) -> Result<DocLink, DocError> {

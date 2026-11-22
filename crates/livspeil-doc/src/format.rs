@@ -5,8 +5,12 @@
 
 use std::fmt::Write as _;
 
+use livspeil_node_api::Value;
+use livspeil_params::{AnimChannel, Extrapolation, Interpolation, Tangent};
+
+use crate::anim::{extrapolation_name, interpolation_name};
 use crate::error::DocError;
-use crate::model::{Document, ROOT_NETWORK};
+use crate::model::{DocNode, Document, ROOT_NETWORK};
 use crate::value::{format_float, format_value, is_finite, quote};
 
 const INDENT: &str = "  ";
@@ -14,7 +18,10 @@ const INDENT: &str = "  ";
 /// Write `doc` in canonical form.
 ///
 /// The output is deterministic: two-space indentation, nodes sorted by id,
-/// each node's inputs sorted by port name, links sorted by
+/// each node's inputs sorted by port name (one `input` per port holding,
+/// in this order, its static value, `expr=` and `anim` block; key
+/// properties in the order `interp`, `frequency`, `damping`, `tangent`,
+/// `in`, `out`, with default settings left out), links sorted by
 /// `(from node, from port, to node, to port)`, meta positions sorted by
 /// node name, floats in shortest round-trip form, strings always quoted.
 /// Comments are not part of the model and are not written.
@@ -49,29 +56,14 @@ pub fn format(doc: &Document) -> Result<String, DocError> {
                 quote(&node.type_id),
                 quote(&node.id.to_string())
             );
-            if node.inputs.is_empty() {
+            let ports: Vec<&str> = node.ports().collect();
+            if ports.is_empty() {
                 out.push('\n');
                 continue;
             }
             out.push_str(" {\n");
-            for (port, value) in &node.inputs {
-                if !is_finite(value) {
-                    return Err(DocError::NonFinite {
-                        node: node.name.clone(),
-                        port: port.clone(),
-                    });
-                }
-                let text = format_value(value).ok_or_else(|| {
-                    DocError::invalid(
-                        None,
-                        format!(
-                            "node '{}' input '{port}': {} values cannot be stored in documents yet",
-                            node.name,
-                            value.port_type()
-                        ),
-                    )
-                })?;
-                let _ = writeln!(out, "{INDENT}{INDENT}{INDENT}input {} {text}", quote(port));
+            for port in ports {
+                write_input(&mut out, node, port)?;
             }
             let _ = writeln!(out, "{INDENT}{INDENT}}}");
         }
@@ -108,4 +100,106 @@ pub fn format(doc: &Document) -> Result<String, DocError> {
 
     out.push_str("}\n");
     Ok(out)
+}
+
+/// One `input` line (and its `anim` block) for a port with any source.
+fn write_input(out: &mut String, node: &DocNode, port: &str) -> Result<(), DocError> {
+    let _ = write!(out, "{INDENT}{INDENT}{INDENT}input {}", quote(port));
+    if let Some(value) = node.inputs.get(port) {
+        let _ = write!(out, " {}", value_text(node, port, value)?);
+    }
+    if let Some(expr) = node.expressions.get(port) {
+        let _ = write!(out, " expr={}", quote(&expr.source));
+    }
+    let Some(anim) = node.animations.get(port) else {
+        out.push('\n');
+        return Ok(());
+    };
+    out.push_str(" {\n");
+    write_anim(out, node, port, &anim.channel)?;
+    let _ = writeln!(out, "{INDENT}{INDENT}{INDENT}}}");
+    Ok(())
+}
+
+fn write_anim(
+    out: &mut String,
+    node: &DocNode,
+    port: &str,
+    channel: &AnimChannel,
+) -> Result<(), DocError> {
+    let pad = INDENT.repeat(4);
+    out.push_str(&pad);
+    out.push_str("anim");
+    if channel.pre() != Extrapolation::Hold {
+        let _ = write!(out, " pre={}", quote(extrapolation_name(channel.pre())));
+    }
+    if channel.post() != Extrapolation::Hold {
+        let _ = write!(out, " post={}", quote(extrapolation_name(channel.post())));
+    }
+    // Compare bits so that an offset of -0.0 survives the round trip.
+    if channel.offset().to_bits() != 0 {
+        let _ = write!(out, " offset={}", float_text(node, port, channel.offset())?);
+    }
+    out.push_str(" {\n");
+    for key in channel.keys() {
+        let _ = write!(
+            out,
+            "{pad}{INDENT}key {} {}",
+            float_text(node, port, key.time)?,
+            value_text(node, port, &key.value)?
+        );
+        if key.interpolation != Interpolation::Linear {
+            let _ = write!(
+                out,
+                " interp={}",
+                quote(interpolation_name(&key.interpolation))
+            );
+        }
+        if let Interpolation::Spring { frequency, damping } = key.interpolation {
+            let _ = write!(
+                out,
+                " frequency={} damping={}",
+                float_text(node, port, frequency)?,
+                float_text(node, port, damping)?
+            );
+        }
+        match &key.tangent {
+            Tangent::Auto => {}
+            Tangent::Flat => out.push_str(" tangent=\"flat\""),
+            Tangent::Explicit { incoming, outgoing } => {
+                let _ = write!(
+                    out,
+                    " tangent=\"explicit\" in={} out={}",
+                    value_text(node, port, incoming)?,
+                    value_text(node, port, outgoing)?
+                );
+            }
+        }
+        out.push('\n');
+    }
+    let _ = writeln!(out, "{pad}}}");
+    Ok(())
+}
+
+fn float_text(node: &DocNode, port: &str, v: f64) -> Result<String, DocError> {
+    value_text(node, port, &Value::Float(v))
+}
+
+fn value_text(node: &DocNode, port: &str, value: &Value) -> Result<String, DocError> {
+    if !is_finite(value) {
+        return Err(DocError::NonFinite {
+            node: node.name.clone(),
+            port: port.to_owned(),
+        });
+    }
+    format_value(value).ok_or_else(|| {
+        DocError::invalid(
+            None,
+            format!(
+                "node '{}' input '{port}': {} values cannot be stored in documents yet",
+                node.name,
+                value.port_type()
+            ),
+        )
+    })
 }
