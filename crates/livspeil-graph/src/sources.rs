@@ -13,14 +13,25 @@
 //!
 //! # `ch()` paths
 //!
-//! A path names an input of a node in the same network: `"node/port"`, or
-//! equivalently `"../node/port"` (Houdini style, relative to the node that
-//! holds the expression). The port is the text after the last `/`; the node
-//! name is the text before it, after removing one leading `../`. So a node
-//! called `a/b` is reachable as `"a/b/port"`, and a node whose own name
-//! starts with `../` needs the prefix spelled out (`"../../x/port"`). Paths
-//! must name a node, so an expression cannot read an input of its own node
-//! (that would be a self-dependency and is rejected as a cycle).
+//! A path names an input of a node; the port is the text after the last
+//! `/`, the text before it is a node path (M0.7, see the crate docs on
+//! networks):
+//!
+//! * `"node/port"`: a node in the same network as the node that holds the
+//!   expression (a sibling); `"sub/inner/port"` descends into subnet `sub`.
+//! * `"../x/port"`: node `x` of the *parent* network (each leading `../`
+//!   goes up one network; at the root it stays at the root, so in the root
+//!   network `"../x/port"` and `"x/port"` are the same, as before M0.7).
+//! * `"/a/b/port"`: absolute, from the root network.
+//!
+//! Compatibility with flat graphs: in the root network a relative path is
+//! first read the pre-M0.7 way, removing one leading `../` and taking all
+//! the rest before the last `/` as a single node name, so root nodes whose
+//! names contain `/` stay reachable (`"a/b/port"` reads the root node
+//! called `a/b` when there is one). Only when no such node exists is the
+//! path walked through subnets. Paths must name a node, so an expression
+//! cannot read an input of its own node (that would be a self-dependency
+//! and is rejected as a cycle).
 //!
 //! `ch()` reads the *resolved* value of the input (after links,
 //! expressions and animation), with the input's port type.
@@ -37,14 +48,21 @@
 //! Expression sources stay the single source of truth, and they never
 //! dangle:
 //!
-//! * Renaming a node rewrites every `ch()` path literal that refers to it,
-//!   in every expression of the graph (the literal is re-rendered with
-//!   [`livspeil_params::expr::quote`], keeping a `../` prefix if it had
-//!   one). Renaming back rewrites them back.
+//! * Renaming a node rewrites every `ch()` path literal that refers to it
+//!   or passes through it (renaming a subnet rewrites the paths into it),
+//!   in every expression of the graph: only the path segment naming the
+//!   node changes, so relative paths stay relative and a `../` prefix is
+//!   kept; the literal is re-rendered with
+//!   [`livspeil_params::expr::quote`]. Renaming back rewrites them back.
+//! * Moving a node to another network ([`Graph::move_node`]) re-renders
+//!   the paths that would otherwise read something else, as the shortest
+//!   relative path from the reader's network.
 //! * Removing a node that another node's expression reads is refused with
 //!   [`GraphError::Referenced`]; clear or change those expressions first.
 
 use std::cell::RefCell;
+use std::collections::BTreeSet;
+use std::ops::Range;
 
 use livspeil_params::AnimChannel;
 use livspeil_params::expr::{self, Channel, Env, Program};
@@ -69,24 +87,115 @@ pub(crate) struct Expression {
     pub(crate) targets: Vec<InputRef>,
 }
 
-/// Split a `ch()` path into node name and port name.
+/// Split a `ch()` path the pre-M0.7 way into node name and port name.
 pub(crate) fn split_path(path: &str) -> Option<(&str, &str)> {
     let rest = path.strip_prefix("../").unwrap_or(path);
     let (node, port) = rest.rsplit_once('/')?;
     (!node.is_empty() && !port.is_empty()).then_some((node, port))
 }
 
+/// How a `ch()` path resolved to a node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Resolved {
+    pub(crate) node: NodeId,
+    /// The port name (text after the last `/`).
+    pub(crate) port: String,
+    /// Byte ranges of the path's name segments and the node each named.
+    pub(crate) segments: Vec<(Range<usize>, NodeId)>,
+    /// Resolved the pre-M0.7 way (a single literal name in the root).
+    pub(crate) legacy: bool,
+}
+
+/// Resolve the node part of `path` for a reader in network `network`
+/// (see the module docs).
+pub(crate) fn resolve_path(graph: &Graph, network: Option<NodeId>, path: &str) -> Option<Resolved> {
+    let (node_part, port) = path.rsplit_once('/')?;
+    if port.is_empty() {
+        return None;
+    }
+    let absolute = node_part.starts_with('/');
+    if network.is_none() && !absolute {
+        if let Some((name, port)) = split_path(path) {
+            if let Some(node) = graph.find_in(None, name) {
+                return Some(Resolved {
+                    node,
+                    port: port.to_owned(),
+                    segments: Vec::new(),
+                    legacy: true,
+                });
+            }
+        }
+    }
+    let (mut current, body, mut offset) = match node_part.strip_prefix('/') {
+        Some(rest) => (None, rest, 1),
+        None => (network, node_part, 0),
+    };
+    let mut found: Option<NodeId> = None;
+    let mut segments = Vec::new();
+    for segment in body.split('/') {
+        let range = offset..offset + segment.len();
+        offset += segment.len() + 1;
+        if segment == ".." && found.is_none() && !absolute {
+            current = current.and_then(|s| graph.parent(s));
+            continue;
+        }
+        if segment.is_empty() {
+            return None;
+        }
+        if let Some(prev) = found {
+            if !graph.is_subnet(prev) {
+                return None;
+            }
+            current = Some(prev);
+        }
+        let node = graph.find_in(current, segment)?;
+        segments.push((range, node));
+        found = Some(node);
+    }
+    Some(Resolved {
+        node: found?,
+        port: port.to_owned(),
+        segments,
+        legacy: false,
+    })
+}
+
+/// The shortest relative path from network `from` to input `port` of
+/// `target`: `../` per level up, then the names down.
+pub(crate) fn render_path(
+    graph: &Graph,
+    from: Option<NodeId>,
+    target: NodeId,
+    port: &str,
+) -> String {
+    let from_chain = graph.ancestors(from);
+    let to_chain = graph.ancestors(graph.parent(target));
+    let common = from_chain
+        .iter()
+        .zip(&to_chain)
+        .take_while(|(a, b)| a == b)
+        .count();
+    let mut path = "../".repeat(from_chain.len() - common);
+    for &n in to_chain.iter().skip(common).chain(std::iter::once(&target)) {
+        path.push_str(graph.node_name(n).unwrap_or_default());
+        path.push('/');
+    }
+    path.push_str(port);
+    path
+}
+
 /// Resolves `ch()` paths against a graph, assigning one slot per distinct
 /// input.
 struct GraphEnv<'a> {
     graph: &'a Graph,
+    network: Option<NodeId>,
     targets: RefCell<Vec<InputRef>>,
 }
 
 impl Env for GraphEnv<'_> {
     fn resolve(&self, path: &str) -> Option<Channel> {
-        let (node_name, port_name) = split_path(path)?;
-        let node = self.graph.find(node_name)?;
+        let resolved = resolve_path(self.graph, self.network, path)?;
+        let (node, port_name) = (resolved.node, resolved.port.as_str());
         let spec = self.graph.node_spec(node)?;
         let port = spec.input_index(port_name)?;
         let ty = spec.inputs.get(port)?.ty;
@@ -104,10 +213,16 @@ impl Env for GraphEnv<'_> {
     }
 }
 
-/// Compile `source` against the current names of `graph`.
-pub(crate) fn compile(graph: &Graph, source: &str) -> Result<Expression, GraphError> {
+/// Compile `source` against the current names of `graph`, for a reader in
+/// network `network`.
+pub(crate) fn compile(
+    graph: &Graph,
+    network: Option<NodeId>,
+    source: &str,
+) -> Result<Expression, GraphError> {
     let env = GraphEnv {
         graph,
+        network,
         targets: RefCell::new(Vec::new()),
     };
     let program = expr::compile(source, &env).map_err(|e| GraphError::Expression(Box::new(e)))?;
@@ -118,31 +233,57 @@ pub(crate) fn compile(graph: &Graph, source: &str) -> Result<Expression, GraphEr
     })
 }
 
-/// `source` with every `ch()` path that names node `old` changed to name
-/// `new`. Returns `None` when nothing changes.
-pub(crate) fn rewrite(source: &str, old: &str, new: &str) -> Option<String> {
+/// `source` (of an expression on a node in network `network`) with every
+/// `ch()` path that names node `renamed` changed to name it `new`, judged
+/// against the current names. Returns `None` when nothing changes.
+pub(crate) fn rewrite(
+    graph: &Graph,
+    network: Option<NodeId>,
+    source: &str,
+    renamed: NodeId,
+    new: &str,
+) -> Option<String> {
     let refs = expr::channel_refs(source).ok()?;
     let mut out = source.to_owned();
     let mut changed = false;
     // Back to front, so earlier spans stay valid.
     for r in refs.iter().rev() {
-        let Some((node, port)) = split_path(&r.path) else {
+        let Some(resolved) = resolve_path(graph, network, &r.path) else {
             continue;
         };
-        if node != old {
-            continue;
-        }
-        let prefix = if r.path.starts_with("../") || new.starts_with("../") {
-            "../"
+        let path = if resolved.legacy {
+            if resolved.node != renamed {
+                continue;
+            }
+            let prefix = if r.path.starts_with("../") || new.starts_with("../") {
+                "../"
+            } else {
+                ""
+            };
+            format!("{prefix}{new}/{}", resolved.port)
         } else {
-            ""
+            let mut path = r.path.clone();
+            let mut hit = false;
+            for (range, node) in resolved.segments.iter().rev() {
+                if *node == renamed {
+                    path.replace_range(range.clone(), new);
+                    hit = true;
+                }
+            }
+            if !hit {
+                continue;
+            }
+            path
         };
-        let literal = expr::quote(&format!("{prefix}{new}/{port}"));
-        out.replace_range(r.span.start..r.span.end, &literal);
+        out.replace_range(r.span.start..r.span.end, &expr::quote(&path));
         changed = true;
     }
     changed.then_some(out)
 }
+
+/// A pending change of an expression's source: `(node, input index, new
+/// source)`.
+pub(crate) type Rewrite = (NodeId, usize, String);
 
 impl Graph {
     /// Drive input `port` of `node` with an expression (see the
@@ -153,12 +294,15 @@ impl Graph {
     /// Priority of an input's sources: link, expression, animation channel,
     /// static value, spec default.
     ///
-    /// `ch()` paths: `"node/port"` or, equivalently, `"../node/port"` names
-    /// input `port` of the sibling node `node` in this (flat) network. The
-    /// port is the text after the last `/`; the node name is the text before
-    /// it after removing one leading `../`. `ch()` reads the input's
-    /// *resolved* value (after links, expressions and animation). A node
-    /// cannot read its own inputs.
+    /// `ch()` paths are relative to the network holding `node`:
+    /// `"x/port"` names input `port` of sibling `x` (`"sub/x/port"` looks
+    /// inside subnet `sub`), `"../x/port"` names node `x` of the parent
+    /// network (in the root network, the root itself, as before subnets
+    /// existed), and `"/a/x/port"` is absolute. In the root network a path
+    /// is first read the pre-M0.7 way (one leading `../` removed, the rest
+    /// before the last `/` as a single name). `ch()` reads the input's
+    /// *resolved* value (after links, expressions and animation), in any
+    /// network. A node cannot read its own inputs.
     ///
     /// Each `ch()` reference makes `node` depend on the node it reads, like
     /// a link: it must not close a cycle, and `node` re-cooks when the read
@@ -168,7 +312,9 @@ impl Graph {
     /// node, which keeps its last good output.
     ///
     /// Sources never dangle: [`Graph::rename`] rewrites every path literal
-    /// naming the renamed node (keeping a `../` prefix), and
+    /// naming the renamed node or passing through it (keeping a `../`
+    /// prefix), [`Graph::move_node`] re-renders paths a move would break,
+    /// and
     /// [`Graph::remove_node`] refuses to remove a node that is read
     /// ([`GraphError::Referenced`]).
     ///
@@ -185,7 +331,7 @@ impl Graph {
         source: &str,
     ) -> Result<(), GraphError> {
         let (index, ty) = self.input_port(node, port)?;
-        let compiled = compile(self, source)?;
+        let compiled = compile(self, self.parent(node), source)?;
         let found = compiled.program.result_type();
         if !ty.accepts(found) {
             return Err(GraphError::TypeMismatch {
@@ -379,36 +525,47 @@ impl Graph {
         }
     }
 
-    /// After renaming `node` from `old` to `new` (names already updated),
-    /// rewrite the paths of every expression that reads it. On error
-    /// nothing was changed.
-    pub(crate) fn rewrite_references(
-        &mut self,
-        node: NodeId,
-        old: &str,
-        new: &str,
-    ) -> Result<(), GraphError> {
-        let mut deps: Vec<(NodeId, usize)> = self.ch_dependents(node).collect();
-        deps.dedup();
-        let mut updates = Vec::with_capacity(deps.len());
-        for (dep, port) in deps {
+    /// Every `(reader, input index)` whose expression reads a node of
+    /// `node`'s subtree.
+    pub(crate) fn subtree_readers(&self, node: NodeId) -> BTreeSet<(NodeId, usize)> {
+        self.subtree(node)
+            .into_iter()
+            .flat_map(|n| self.ch_dependents(n).collect::<Vec<_>>())
+            .collect()
+    }
+
+    /// The expression rewrites renaming `node` to `new` needs, computed
+    /// against the current (old) names.
+    pub(crate) fn rename_rewrites(&self, node: NodeId, new: &str) -> Vec<Rewrite> {
+        self.subtree_readers(node)
+            .into_iter()
+            .filter_map(|(dep, port)| {
+                let n = self.node(dep)?;
+                let e = n.exprs.get(port)?.as_ref()?;
+                let source = rewrite(self, n.parent, &e.source, node, new)?;
+                Some((dep, port, source))
+            })
+            .collect()
+    }
+
+    /// Replace expression sources with rewritten ones that must read
+    /// exactly the same inputs. All or nothing; no revision bump, since the
+    /// programs read the same inputs and cooked results stay valid.
+    pub(crate) fn apply_rewrites(&mut self, rewrites: Vec<Rewrite>) -> Result<(), GraphError> {
+        let mut updates = Vec::with_capacity(rewrites.len());
+        for (dep, port, source) in rewrites {
             let Some(e) = self.node(dep).and_then(|n| n.exprs[port].as_ref()) else {
                 continue;
             };
-            let Some(source) = rewrite(&e.source, old, new) else {
-                continue;
-            };
-            let compiled = compile(self, &source)?;
+            let compiled = compile(self, self.parent(dep), &source)?;
             if compiled.targets != e.targets {
                 return Err(GraphError::Expression(Box::new(expr::ExprError::new(
-                    expr::ErrorKind::Internal("rename changed what an expression reads"),
+                    expr::ErrorKind::Internal("rewriting a path changed what an expression reads"),
                     expr::Span::default(),
                 ))));
             }
             updates.push((dep, port, compiled));
         }
-        // Same program and targets, new source text: no revision bump,
-        // cooked results stay valid.
         for (dep, port, compiled) in updates {
             if let Some(n) = self.node_mut(dep) {
                 n.exprs[port] = Some(compiled);
@@ -452,19 +609,5 @@ mod tests {
         assert_eq!(split_path("phase"), None);
         assert_eq!(split_path("sun/"), None);
         assert_eq!(split_path("../phase"), None);
-    }
-
-    #[test]
-    fn rewrite_keeps_prefixes_and_other_paths() {
-        let src = r#"ch("sun/phase") + ch("../sun/x") * ch("moon/phase")"#;
-        assert_eq!(
-            rewrite(src, "sun", "star").as_deref(),
-            Some(r#"ch("star/phase") + ch("../star/x") * ch("moon/phase")"#)
-        );
-        assert_eq!(rewrite(src, "nope", "x"), None);
-        assert_eq!(
-            rewrite(r#"ch("a/p")"#, "a", "q\"r").as_deref(),
-            Some(r#"ch("q\"r/p")"#)
-        );
     }
 }

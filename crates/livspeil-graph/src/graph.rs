@@ -13,6 +13,7 @@ use livspeil_params::AnimChannel;
 use livspeil_params::expr::ExprError;
 use uuid::Uuid;
 
+use crate::network::{self, CharmMeta, Subnet};
 use crate::snapshot::{GraphSnapshot, NamedLink, NodeSnapshot};
 use crate::sources::{Expression, InputRef};
 
@@ -79,7 +80,12 @@ pub struct Link {
 }
 
 /// Which side of a node a port is on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "snake_case")
+)]
 pub enum PortDirection {
     Input,
     Output,
@@ -129,6 +135,24 @@ pub enum GraphError {
         by: NodeId,
         port: String,
     },
+    /// The node is not a subnet, so it holds no network (and no
+    /// interface or Charm metadata).
+    NotASubnet(NodeId),
+    /// Interface inputs and promotion only exist inside a subnet; the node
+    /// (or the node to be created) is in the root network.
+    NotInSubnet(NodeId),
+    /// The name cannot be used where paths must address the node: names of
+    /// subnets and of nodes inside subnets must not contain `/` and must
+    /// not be `.` or `..`.
+    InvalidName(String),
+    /// The link would connect two networks other than through a subnet's
+    /// interface (see [`Graph::link`]).
+    CrossNetwork { from: NodeId, to: NodeId },
+    /// A port type was given for a node type whose ports are not
+    /// polymorphic (only `core.subnet.input@1` and `core.output@1` are).
+    NotPolymorphic(String),
+    /// The subnet cannot be moved into itself or one of its descendants.
+    WouldNest(NodeId),
 }
 
 impl fmt::Display for GraphError {
@@ -156,6 +180,24 @@ impl fmt::Display for GraphError {
                 f,
                 "node {node} is read by ch() in input '{port}' of node {by}"
             ),
+            GraphError::NotASubnet(id) => write!(f, "node {id} is not a subnet"),
+            GraphError::NotInSubnet(id) => {
+                write!(f, "node {id} is in the root network, not inside a subnet")
+            }
+            GraphError::InvalidName(name) => write!(
+                f,
+                "'{name}' cannot name a subnet or a node inside one (no '/', '.' or '..')"
+            ),
+            GraphError::CrossNetwork { from, to } => write!(
+                f,
+                "nodes {from} and {to} are in different networks; link through the subnet's interface"
+            ),
+            GraphError::NotPolymorphic(id) => {
+                write!(f, "node type '{id}' has no polymorphic ports")
+            }
+            GraphError::WouldNest(id) => {
+                write!(f, "subnet {id} cannot be moved into itself")
+            }
         }
     }
 }
@@ -167,6 +209,12 @@ pub(crate) struct Node {
     pub(crate) name: String,
     pub(crate) type_id: String,
     pub(crate) imp: Arc<dyn NodeImpl>,
+    /// The subnet whose network holds the node; `None` for the root
+    /// network.
+    pub(crate) parent: Option<NodeId>,
+    /// The declared port type of a boundary node (`core.subnet.input@1`,
+    /// `core.output@1`); `None` for other nodes.
+    pub(crate) port_type: Option<PortType>,
     /// Explicitly set input values, by input port index. `None` means "use
     /// the spec default".
     pub(crate) values: Vec<Option<Value>>,
@@ -256,7 +304,8 @@ impl DependentsIndex {
     }
 }
 
-/// A network of typed nodes (kernel spec, section 3).
+/// A network of typed nodes, with nested subnets (kernel spec, section 3;
+/// see the crate docs for the network model).
 ///
 /// # Storage and invalidation
 ///
@@ -300,7 +349,10 @@ pub struct Graph {
     /// The same links as `(source node, target node, target port)`, for fast
     /// downstream traversal.
     outgoing: BTreeSet<(NodeId, NodeId, usize)>,
+    /// Names of the root network's nodes.
     names: HashMap<String, NodeId>,
+    /// Every subnet: its child names and Charm metadata.
+    pub(crate) subnets: BTreeMap<NodeId, Subnet>,
     /// `ch()` references as `(read node, reading node, reading input)`.
     pub(crate) ch_edges: BTreeSet<(NodeId, NodeId, usize)>,
     rev_counter: u64,
@@ -335,6 +387,7 @@ impl Graph {
             links: BTreeMap::new(),
             outgoing: BTreeSet::new(),
             names: HashMap::new(),
+            subnets: BTreeMap::new(),
             ch_edges: BTreeSet::new(),
             rev_counter: 0,
             dirty: Vec::new(),
@@ -372,20 +425,65 @@ impl Graph {
         qualified_id: &str,
         name: &str,
     ) -> Result<NodeId, GraphError> {
-        if name.is_empty() {
-            return Err(GraphError::EmptyName);
+        self.add_node_in(None, id, qualified_id, name, None)
+    }
+
+    /// Add a node to the network of subnet `parent` (`None`: the root
+    /// network). `port_type` sets the type of a boundary node's ports
+    /// (`core.subnet.input@1`, `core.output@1`); `None` keeps the
+    /// registered type (`Float`).
+    ///
+    /// Adding a `core.subnet@1` node creates an empty network inside it.
+    ///
+    /// # Errors
+    /// Same as [`Graph::add_node_with_id`] (names are unique per network),
+    /// plus [`GraphError::UnknownNode`] / [`GraphError::NotASubnet`] for a
+    /// bad parent, [`GraphError::InvalidName`] (see the error),
+    /// [`GraphError::NotInSubnet`] for a `core.subnet.input@1` in the root
+    /// network and [`GraphError::NotPolymorphic`] for a port type on any
+    /// other node type.
+    pub fn add_node_in(
+        &mut self,
+        parent: Option<NodeId>,
+        id: NodeId,
+        qualified_id: &str,
+        name: &str,
+        port_type: Option<PortType>,
+    ) -> Result<NodeId, GraphError> {
+        if let Some(p) = parent {
+            if !self.index.contains_key(&p) {
+                return Err(GraphError::UnknownNode(p));
+            }
+            if !self.subnets.contains_key(&p) {
+                return Err(GraphError::NotASubnet(p));
+            }
         }
-        if self.names.contains_key(name) {
+        let is_subnet = qualified_id == network::SUBNET_TYPE;
+        network::check_name(name, parent.is_some() || is_subnet)?;
+        if self.find_in(parent, name).is_some() {
             return Err(GraphError::DuplicateName(name.to_owned()));
         }
         if self.index.contains_key(&id) {
             return Err(GraphError::DuplicateId(id));
         }
-        let imp = self
+        let boundary = network::is_boundary_type(qualified_id);
+        if port_type.is_some() && !boundary {
+            return Err(GraphError::NotPolymorphic(qualified_id.to_owned()));
+        }
+        if qualified_id == network::INPUT_TYPE && parent.is_none() {
+            return Err(GraphError::NotInSubnet(id));
+        }
+        let mut imp = self
             .registry
             .get(qualified_id)
             .ok_or_else(|| GraphError::UnknownNodeType(qualified_id.to_owned()))?
             .clone();
+        if let Some(ty) = port_type {
+            imp = network::retype(imp, ty);
+        }
+        let port_type = boundary
+            .then(|| imp.spec().inputs.first().map(|p| p.ty))
+            .flatten();
         let inputs = imp.spec().inputs.len();
         self.rev_counter += 1;
         self.topo_rev += 1;
@@ -394,6 +492,8 @@ impl Graph {
             name: name.to_owned(),
             type_id: qualified_id.to_owned(),
             imp,
+            parent,
+            port_type,
             values: vec![None; inputs],
             exprs: (0..inputs).map(|_| None).collect(),
             anims: vec![None; inputs],
@@ -417,23 +517,62 @@ impl Graph {
             }
         };
         self.index.insert(id, slot);
-        self.names.insert(name.to_owned(), id);
+        self.insert_name(parent, name, id);
+        if is_subnet {
+            self.subnets.insert(id, Subnet::default());
+        }
         Ok(id)
     }
 
     /// Remove a node and every link attached to it. Inputs that were fed by
     /// the node fall back to their own sources, values or defaults.
     ///
+    /// Removing a subnet removes everything inside it (its whole subtree).
+    ///
     /// # Errors
     /// Fails if the node does not exist, or with [`GraphError::Referenced`]
-    /// if another node's expression reads one of its inputs.
+    /// if an expression outside the removed subtree reads one of its
+    /// inputs.
     pub fn remove_node(&mut self, id: NodeId) -> Result<(), GraphError> {
+        if !self.index.contains_key(&id) {
+            return Err(GraphError::UnknownNode(id));
+        }
+        let subtree = self.subtree(id);
+        for &n in &subtree {
+            for (by, port) in self.ch_dependents(n) {
+                if !subtree.contains(&by) {
+                    let port = self
+                        .node(by)
+                        .and_then(|b| b.imp.spec().inputs.get(port))
+                        .map_or_else(String::new, |p| p.name.to_owned());
+                    return Err(GraphError::Referenced { node: n, by, port });
+                }
+            }
+        }
+        // Expressions inside the subtree may read each other: drop them all
+        // before removing any node.
+        if subtree.len() > 1 {
+            for &n in &subtree {
+                let inputs = self.node(n).map_or(0, |n| n.exprs.len());
+                for index in 0..inputs {
+                    self.unindex_expression(n, index);
+                    if let Some(node) = self.node_mut(n) {
+                        node.exprs[index] = None;
+                    }
+                }
+            }
+        }
+        for n in subtree {
+            self.remove_one(n)?;
+        }
+        Ok(())
+    }
+
+    /// Remove one node that no remaining expression reads.
+    fn remove_one(&mut self, id: NodeId) -> Result<(), GraphError> {
         let Some(&slot) = self.index.get(&id) else {
             return Err(GraphError::UnknownNode(id));
         };
-        if let Some((by, port)) = self.referenced_by(id).into_iter().next() {
-            return Err(GraphError::Referenced { node: id, by, port });
-        }
         self.topo_rev += 1;
         let inputs = self.node(id).map_or(0, |n| n.exprs.len());
         for index in 0..inputs {
@@ -473,7 +612,8 @@ impl Graph {
 
         self.index.remove(&id);
         let node = self.slots[slot].take().ok_or(GraphError::UnknownNode(id))?;
-        self.names.remove(&node.name);
+        self.remove_name(node.parent, &node.name);
+        self.subnets.remove(&id);
         self.dependents[slot].clear();
         self.deps_rev += 1;
         self.free.push(slot);
@@ -515,9 +655,17 @@ impl Graph {
 
     /// Connect `from.from_port` (an output) to `to.to_port` (an input).
     ///
+    /// Both nodes must be in the same network, or the link must cross one
+    /// subnet boundary through the interface: from the network around a
+    /// subnet into the `value` input of one of its `core.subnet.input@1`
+    /// nodes, or from the `value` output of one of its `core.output@1`
+    /// nodes to the network around it. An interface input's `value` input
+    /// cannot be fed from inside its subnet.
+    ///
     /// # Errors
-    /// Fails for unknown nodes or ports, incompatible types, an input that
-    /// already has a link, or a link that would create a cycle.
+    /// Fails for unknown nodes or ports, incompatible types,
+    /// [`GraphError::CrossNetwork`], an input that already has a link, or a
+    /// link that would create a cycle.
     pub fn link(
         &mut self,
         from: NodeId,
@@ -532,6 +680,9 @@ impl Graph {
                 expected: in_ty,
                 found: out_ty,
             });
+        }
+        if !self.link_visible(from, to, None) {
+            return Err(GraphError::CrossNetwork { from, to });
         }
         if self.links.contains_key(&(to, in_index)) {
             return Err(GraphError::InputOccupied {
@@ -590,8 +741,9 @@ impl Graph {
     /// what a node computes, so it does not invalidate cooked results.
     /// Renaming a node to its current name is a no-op.
     ///
-    /// Every `ch()` path that reads the node is rewritten to the new name
-    /// (see [`Graph::set_expression`]).
+    /// Every `ch()` path that reads the node, or passes through it (a
+    /// subnet), is rewritten to the new name (see
+    /// [`Graph::set_expression`]). Names are unique per network.
     ///
     /// # Errors
     /// Fails for an unknown node, an empty name or a name used by another
@@ -604,17 +756,21 @@ impl Graph {
         if current.name == name {
             return Ok(name.to_owned());
         }
-        if self.names.contains_key(name) {
+        let parent = current.parent;
+        network::check_name(name, parent.is_some() || self.is_subnet(id))?;
+        if self.find_in(parent, name).is_some() {
             return Err(GraphError::DuplicateName(name.to_owned()));
         }
+        // Rewrite the paths against the current names, then rename and
+        // check that every rewritten expression still reads the same.
+        let rewrites = self.rename_rewrites(id, name);
         let node = self.node_mut(id).ok_or(GraphError::UnknownNode(id))?;
         let old = std::mem::replace(&mut node.name, name.to_owned());
-        self.names.remove(&old);
-        self.names.insert(name.to_owned(), id);
-        if let Err(err) = self.rewrite_references(id, &old, name) {
-            // Unreachable in practice; restore the old name.
-            self.names.remove(name);
-            self.names.insert(old.clone(), id);
+        self.remove_name(parent, &old);
+        self.insert_name(parent, name, id);
+        if let Err(err) = self.apply_rewrites(rewrites) {
+            self.remove_name(parent, name);
+            self.insert_name(parent, &old, id);
             if let Some(node) = self.node_mut(id) {
                 node.name = old;
             }
@@ -742,6 +898,9 @@ impl Graph {
                     .animations(id)
                     .map(|(port, channel)| (port.to_owned(), channel.clone()))
                     .collect(),
+                parent: n.parent,
+                port_type: n.port_type,
+                charm: self.subnets.get(&id).and_then(|s| s.charm.clone()),
             })
             .collect();
         let links = self.links().filter_map(|l| self.named(l)).collect();
@@ -783,10 +942,66 @@ impl Graph {
         self.node(id).map(|n| n.imp.spec())
     }
 
-    /// Find a node by name.
+    /// Find a node of the root network by name (see [`Graph::find_in`]
+    /// and [`Graph::find_path`] for nested networks).
     #[must_use]
     pub fn find(&self, name: &str) -> Option<NodeId> {
         self.names.get(name).copied()
+    }
+
+    /// Find a node by name in the network of subnet `network` (`None`:
+    /// the root network).
+    #[must_use]
+    pub fn find_in(&self, network: Option<NodeId>, name: &str) -> Option<NodeId> {
+        match network {
+            None => self.names.get(name).copied(),
+            Some(s) => self.subnets.get(&s)?.names.get(name).copied(),
+        }
+    }
+
+    fn insert_name(&mut self, network: Option<NodeId>, name: &str, id: NodeId) {
+        match network {
+            None => {
+                self.names.insert(name.to_owned(), id);
+            }
+            Some(s) => {
+                if let Some(sub) = self.subnets.get_mut(&s) {
+                    sub.names.insert(name.to_owned(), id);
+                }
+            }
+        }
+    }
+
+    fn remove_name(&mut self, network: Option<NodeId>, name: &str) {
+        match network {
+            None => {
+                self.names.remove(name);
+            }
+            Some(s) => {
+                if let Some(sub) = self.subnets.get_mut(&s) {
+                    sub.names.remove(name);
+                }
+            }
+        }
+    }
+
+    /// Move node `id` (with its subtree) from its network to the network
+    /// of `parent`, updating the name tables. No checks.
+    pub(crate) fn set_parent(&mut self, id: NodeId, parent: Option<NodeId>) {
+        let Some(node) = self.node(id) else {
+            return;
+        };
+        let (old, name) = (node.parent, node.name.clone());
+        self.remove_name(old, &name);
+        self.insert_name(parent, &name, id);
+        if let Some(node) = self.node_mut(id) {
+            node.parent = parent;
+        }
+    }
+
+    /// Set the Charm metadata slot of a subnet (no checks).
+    pub(crate) fn charm_slot(&mut self, subnet: NodeId) -> Option<&mut Option<CharmMeta>> {
+        self.subnets.get_mut(&subnet).map(|s| &mut s.charm)
     }
 
     /// All links, ordered by target node and input port.
