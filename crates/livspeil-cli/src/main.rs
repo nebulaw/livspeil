@@ -50,6 +50,9 @@ COOK OPTIONS:
     --format text|jsonl     One line per frame and node (default), or one
                             JSON object per frame
     --stats                 Also print cooked/reused node counts per frame
+    --fs-root DIR           File root of file-system nodes such as
+                            core.fs.list_dir (default: the room package
+                            directory); paths outside it are refused
 
     Floats are printed with 6 decimals. Example:
         livspeil cook examples/sun-and-lamp.room --frames 600 --every 50
