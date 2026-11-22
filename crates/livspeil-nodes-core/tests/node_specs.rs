@@ -29,8 +29,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use livspeil_node_api::{
-    CookContext, Curve, CurveExtrapolation, CurveInterpolation, CurveKey, CurveTangent, NodeError,
-    NodeImpl, NodeSpec, PortType, SystemContext, Table, TableColumn, Value,
+    CookContext, Curve, CurveExtrapolation, CurveInterpolation, CurveKey, CurveTangent, Event,
+    EventCall, EventTrigger, NodeError, NodeImpl, NodeSpec, PortType, SystemContext, Table,
+    TableColumn, Value,
 };
 use livspeil_nodes_core::{MemFs, core_registry};
 
@@ -62,16 +63,25 @@ const TOP_KEYS: [&str; 9] = [
     "tests",
 ];
 const PORT_KEYS: [&str; 4] = ["name", "type", "default", "default_debug"];
-const TEST_KEYS: [&str; 8] = [
+const TEST_KEYS: [&str; 10] = [
     "name",
     "inputs",
     "context",
     "fs",
+    "events",
     "expect",
+    "expect_events",
     "expect_error",
     "tolerance",
     "note",
 ];
+const STEP_KEYS: [&str; 5] = ["input", "tick", "payload", "inputs", "context"];
+
+/// Whether a port's default is the `Event` placeholder, which spec files
+/// leave out (an `Event` port carries no value).
+fn event_placeholder(port: &livspeil_node_api::PortSpec) -> bool {
+    port.ty == PortType::Event && port.default == Some(Value::Event)
+}
 
 fn crate_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -564,7 +574,7 @@ fn render(node: &dyn NodeImpl, hand: &HandWritten) -> String {
         let _ = writeln!(out, "\n[[inputs]]");
         let _ = writeln!(out, "name = {}", quote(port.name));
         let _ = writeln!(out, "type = {}", quote(port.ty.name()));
-        if let Some(default) = &port.default {
+        if let Some(default) = port.default.as_ref().filter(|_| !event_placeholder(port)) {
             match encode(default) {
                 Some(text) => {
                     let _ = writeln!(out, "default = {text}");
@@ -676,7 +686,9 @@ fn check_header(node: &dyn NodeImpl, file: &toml::Table, problems: &mut Vec<Stri
             }
             let default = entry.get("default");
             let debug = entry.get("default_debug");
-            match (&port.default, is_input) {
+            // The `Event` placeholder default is not written (see the docs).
+            let want_default = port.default.as_ref().filter(|_| !event_placeholder(port));
+            match (want_default, is_input) {
                 (_, false) | (None, true) => {
                     if default.is_some() || debug.is_some() {
                         problem(format!(
@@ -804,10 +816,22 @@ fn run_case(node: &dyn NodeImpl, case: &toml::Value) -> Result<(), String> {
         .map(number)
         .transpose()?
         .unwrap_or(0.0);
-    let result = node.cook_with_system(&ctx, &system, &inputs);
+    // Event steps (optional), then the value cook from the reached state.
+    let (result, emitted) = match run_events(node, case.get("events"), &inputs, &ctx) {
+        Ok((state, emitted)) => (
+            node.cook_with_state(&ctx, &system, state.as_ref(), &inputs),
+            emitted,
+        ),
+        Err(StepFailure::Node(err)) => (Err(err), Vec::new()),
+        Err(StepFailure::Spec(e)) => return Err(e),
+    };
+    if let Some(want) = case.get("expect_events") {
+        check_events(want, &emitted, tolerance)?;
+    }
     match (case.get("expect"), case.get("expect_error"), result) {
         (Some(_), Some(_), _) => Err("give expect or expect_error, not both".to_owned()),
-        (None, None, _) => Err("a test needs expect or expect_error".to_owned()),
+        (None, None, _) if case.contains_key("expect_events") => Ok(()),
+        (None, None, _) => Err("a test needs expect, expect_events or expect_error".to_owned()),
         (None, Some(want), Ok(outputs)) => {
             let shown: Vec<String> = outputs.iter().map(show).collect();
             let _ = want;
@@ -864,6 +888,156 @@ fn run_case(node: &dyn NodeImpl, case: &toml::Value) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+/// Why event steps stopped: the node failed (checked against
+/// `expect_error`), or the spec file is malformed.
+/// Emitted events as `(output name, payload)`.
+type Emitted = Vec<(String, Option<Value>)>;
+
+enum StepFailure {
+    Node(NodeError),
+    Spec(String),
+}
+
+/// An event payload written in a spec: its TOML type picks the value type.
+fn untyped(v: &toml::Value) -> Result<Value, String> {
+    Ok(match v {
+        toml::Value::Integer(i) => Value::Int(*i),
+        toml::Value::Float(f) => Value::Float(*f),
+        toml::Value::Boolean(b) => Value::Bool(*b),
+        toml::Value::String(s) => Value::String(s.clone()),
+        other => {
+            return Err(format!(
+                "a payload must be a scalar, got a {}",
+                type_name(other)
+            ));
+        }
+    })
+}
+
+/// Run the `events` steps from the node's initial state. Returns the final
+/// state and the emitted events as `(output name, payload)`.
+fn run_events(
+    node: &dyn NodeImpl,
+    steps: Option<&toml::Value>,
+    inputs: &[Value],
+    ctx: &CookContext,
+) -> Result<(Option<Value>, Emitted), StepFailure> {
+    let spec = node.spec();
+    let mut state = node.initial_state();
+    let mut emitted = Vec::new();
+    let Some(steps) = steps else {
+        return Ok((state, emitted));
+    };
+    let steps = steps
+        .as_array()
+        .ok_or_else(|| StepFailure::Spec("events must be an array".to_owned()))?;
+    for (i, step) in steps.iter().enumerate() {
+        let what = format!("events[{i}]");
+        let step = table_of(step, &what).map_err(StepFailure::Spec)?;
+        check_keys(step, &STEP_KEYS, &what).map_err(StepFailure::Spec)?;
+        let mut step_inputs = inputs.to_vec();
+        if let Some(given) = step.get("inputs") {
+            for (name, v) in table_of(given, "inputs").map_err(StepFailure::Spec)? {
+                let index = spec
+                    .input_index(name)
+                    .ok_or_else(|| StepFailure::Spec(format!("{what}: no input port {name:?}")))?;
+                step_inputs[index] = decode(spec.inputs[index].ty, v)
+                    .map_err(|e| StepFailure::Spec(format!("{what}.inputs.{name}: {e}")))?;
+            }
+        }
+        let step_ctx = match step.get("context") {
+            Some(c) => context(Some(c)).map_err(StepFailure::Spec)?,
+            None => *ctx,
+        };
+        let event = Event {
+            payload: step
+                .get("payload")
+                .map(untyped)
+                .transpose()
+                .map_err(StepFailure::Spec)?,
+        };
+        let trigger = match (step.get("input"), step.get("tick")) {
+            (Some(port), None) => {
+                let name = port
+                    .as_str()
+                    .ok_or_else(|| StepFailure::Spec(format!("{what}.input must be a string")))?;
+                let port = spec
+                    .input_index(name)
+                    .filter(|&i| spec.inputs[i].ty == PortType::Event)
+                    .ok_or_else(|| StepFailure::Spec(format!("{what}: no Event input {name:?}")))?;
+                EventTrigger::Input {
+                    port,
+                    event: &event,
+                }
+            }
+            (None, Some(toml::Value::Boolean(true))) => EventTrigger::Tick,
+            _ => {
+                return Err(StepFailure::Spec(format!(
+                    "{what} needs input = \"<Event input>\" or tick = true"
+                )));
+            }
+        };
+        let mut call = EventCall::new(&step_ctx, trigger, &step_inputs, state.clone());
+        node.on_event(&mut call).map_err(StepFailure::Node)?;
+        let (next, out) = call.finish();
+        state = next;
+        for (port, event) in out {
+            let name = spec
+                .outputs
+                .get(port)
+                .filter(|p| p.ty == PortType::Event)
+                .ok_or_else(|| {
+                    StepFailure::Spec(format!("{what}: emitted on non-Event output {port}"))
+                })?
+                .name;
+            emitted.push((name.to_owned(), event.payload));
+        }
+    }
+    Ok((state, emitted))
+}
+
+/// Compare emitted events with `expect_events` (all of them, in order).
+fn check_events(
+    want: &toml::Value,
+    got: &[(String, Option<Value>)],
+    tolerance: f64,
+) -> Result<(), String> {
+    let shown = || {
+        got.iter()
+            .map(|(port, p)| match p {
+                Some(p) => format!("{port}({})", show(p)),
+                None => port.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let want = want.as_array().ok_or("expect_events must be an array")?;
+    if want.len() != got.len() {
+        return Err(format!(
+            "expected {} events, got {}: [{}]",
+            want.len(),
+            got.len(),
+            shown()
+        ));
+    }
+    for (i, (w, (port, payload))) in want.iter().zip(got).enumerate() {
+        let what = format!("expect_events[{i}]");
+        let w = table_of(w, &what)?;
+        check_keys(w, &["output", "payload"], &what)?;
+        let output = str_field(w, "output", &what)?;
+        let expected = w.get("payload").map(untyped).transpose()?;
+        let same = match (&expected, payload) {
+            (None, None) => true,
+            (Some(a), Some(b)) => values_close(a, b, tolerance),
+            _ => false,
+        };
+        if output != port || !same {
+            return Err(format!("{what} does not match; got [{}]", shown()));
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -936,7 +1110,9 @@ text above `[[tests]]`, such as comments, is not kept.
 | `fs` | Optional in-memory file system for nodes that read the system: `{ dirs = [{ path = "a", modified = 0 }], files = [{ path = "a/b.txt", size = 10, modified = 3 }] }`. Without it the node gets no system access. |
 | `expect` | Output port name to expected value. Floats compare exactly (`-0.0` differs from `0.0`; `nan` matches `nan`) unless `tolerance` is set. |
 | `tolerance` | Optional absolute tolerance for every float compared (also inside vectors, colors and tables). |
-| `expect_error` | The cook must fail: `port` (an invalid-input error on that port) and/or `message` (a substring of the error text); `{}` accepts any error. |
+| `events` | Optional event steps for event nodes, run in order from the node's initial state, the state carried from step to step: `{ input = "trigger", payload = 2.0 }` delivers an event (payload optional) to an `Event` input, `{ tick = true }` is the once-per-tick poll. A step may override `inputs` and `context` for itself. `expect` then checks the outputs cooked from the final state (`cook_with_state`); without `events` that is the initial state. |
+| `expect_events` | The events emitted by all steps, in order: `[{ output = "fired", payload = 1 }, { output = "out" }]` (payload left out: none). A payload's TOML type picks its value type (integer `Int`, float `Float`, boolean `Bool`, string `String`). May replace `expect`. |
+| `expect_error` | The cook (or an event step) must fail: `port` (an invalid-input error on that port) and/or `message` (a substring of the error text); `{}` accepts any error. |
 
 ### Values
 
@@ -961,7 +1137,9 @@ or `{ spring = { frequency = 2.0, damping = 0.3 } }`; `tangent` is
 Large values (tables) read better as TOML sub-tables, for example
 `[[tests.inputs.table.columns]]` with `name`, `type` and `values` keys.
 A default of a type the format cannot write yet is recorded as
-`default_debug` (its Rust `Debug` text) instead of `default`.
+`default_debug` (its Rust `Debug` text) instead of `default`. `Event`
+inputs list no default: in value cooking they carry the placeholder
+`Value::Event`, and events are tested with `events` and `expect_events`.
 "#;
 
 fn md_cell(text: &str) -> String {
@@ -976,7 +1154,7 @@ fn port_list(ports: &[livspeil_node_api::PortSpec], with_defaults: bool) -> Stri
         .iter()
         .map(|p| {
             let default = match (&p.default, with_defaults) {
-                (Some(d), true) => format!(" = {}", show(d)),
+                (Some(d), true) if !event_placeholder(p) => format!(" = {}", show(d)),
                 _ => String::new(),
             };
             md_cell(&format!("`{}: {}{}`", p.name, p.ty, default))

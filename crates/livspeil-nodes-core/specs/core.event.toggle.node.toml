@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.event.toggle"
+version = 1
+summary = "Flip a flag on every trigger event"
+time_dependent = false
+reads_system = false
+description = '''
+Flips `on` on every `trigger` event; the payload is ignored. State (runtime only, never saved): the flag, starting false.
+'''
+
+[[inputs]]
+name = "trigger"
+type = "Event"
+
+[[outputs]]
+name = "on"
+type = "Bool"
+
+[[tests]]
+name = "initial state"
+expect = { on = false }
+
+[[tests]]
+events = [{ input = "trigger" }]
+expect = { on = true }
+
+[[tests]]
+events = [{ input = "trigger" }, { input = "trigger" }, { input = "trigger", payload = false }]
+expect = { on = true }

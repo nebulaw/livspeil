@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.event.gate"
+version = 1
+summary = "Forward trigger events while open"
+time_dependent = false
+reads_system = false
+description = '''
+Forwards each `trigger` event, payload included, to `out` while `open` is true; drops it otherwise. Stateless. Value cooking yields only the `Event` placeholder.
+'''
+
+[[inputs]]
+name = "trigger"
+type = "Event"
+
+[[inputs]]
+name = "open"
+type = "Bool"
+default = true
+
+[[outputs]]
+name = "out"
+type = "Event"
+
+[[tests]]
+name = "open by default"
+events = [{ input = "trigger" }, { input = "trigger", payload = 2.0 }]
+expect_events = [{ output = "out" }, { output = "out", payload = 2.0 }]
+
+[[tests]]
+name = "closed drops"
+inputs = { open = false }
+events = [{ input = "trigger", payload = 2.0 }]
+expect_events = []
+
+[[tests]]
+name = "polls do nothing"
+events = [{ tick = true }]
+expect_events = []

@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.event.on_change"
+version = 1
+summary = "Fire with the new value when the input changes between ticks"
+time_dependent = false
+reads_system = false
+description = '''
+Polls once per tick and fires `changed` with the new value (Float payload) when `value` differs from its value at the previous tick. NaN counts as equal to NaN. The first tick only records the value. State (runtime only, never saved): the last value. Value cooking yields only the `Event` placeholder.
+'''
+
+[[inputs]]
+name = "value"
+type = "Float"
+default = 0.0
+
+[[outputs]]
+name = "changed"
+type = "Event"
+
+[[tests]]
+name = "first tick records, then changes fire"
+events = [
+  { tick = true, inputs = { value = 1.0 } },
+  { tick = true, inputs = { value = 1.0 } },
+  { tick = true, inputs = { value = 1.5 } },
+  { tick = true, inputs = { value = -2.0 } },
+]
+expect_events = [{ output = "changed", payload = 1.5 }, { output = "changed", payload = -2.0 }]
+
+[[tests]]
+name = "NaN equals NaN"
+events = [
+  { tick = true, inputs = { value = nan } },
+  { tick = true, inputs = { value = nan } },
+  { tick = true, inputs = { value = 0.0 } },
+]
+expect_events = [{ output = "changed", payload = 0.0 }]

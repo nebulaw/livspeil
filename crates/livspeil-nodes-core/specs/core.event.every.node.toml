@@ -1,0 +1,59 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.event.every"
+version = 1
+summary = "Fire each time the clock crosses offset + k * period"
+time_dependent = false
+reads_system = false
+description = '''
+Polls once per tick. In the tick at `time` with step `dt` it fires `fired` once for every integer `k` with `time - dt < offset + k * period <= time`, in increasing `k`, with payload `k` (Int); at most 1024 times per tick (the earliest crossings). Stateless: only the clock is used, so the result does not depend on earlier ticks. `period` must be positive and both inputs finite. Value cooking yields only the `Event` placeholder.
+'''
+
+[[inputs]]
+name = "period"
+type = "Float"
+default = 1.0
+
+[[inputs]]
+name = "offset"
+type = "Float"
+default = 0.0
+
+[[outputs]]
+name = "fired"
+type = "Event"
+
+[[tests]]
+name = "fires at t = 0 and t = 1, not in between"
+events = [
+  { tick = true, context = { time = 0.0, dt = 0.25 } },
+  { tick = true, context = { time = 0.5, dt = 0.25 } },
+  { tick = true, context = { time = 1.0, dt = 0.25 } },
+]
+expect_events = [{ output = "fired", payload = 0 }, { output = "fired", payload = 1 }]
+
+[[tests]]
+name = "a step longer than the period fires once per crossing"
+inputs = { period = 0.75, offset = 0.5 }
+events = [{ tick = true, context = { time = 2.75, dt = 1.75 } }]
+expect_events = [
+  { output = "fired", payload = 1 },
+  { output = "fired", payload = 2 },
+  { output = "fired", payload = 3 },
+]
+
+[[tests]]
+name = "dt = 0 never fires"
+events = [{ tick = true, context = { time = 1.0, dt = 0.0 } }]
+expect_events = []
+
+[[tests]]
+inputs = { period = 0.0 }
+events = [{ tick = true, context = { time = 1.0, dt = 0.25 } }]
+expect_error = { port = "period", message = "must be positive" }
