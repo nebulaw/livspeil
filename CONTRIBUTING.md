@@ -16,11 +16,11 @@ CI rejects pull requests with unsigned commits. Bot commits are exempt.
 
 ## 2. Contributor License Agreement (CLA)
 
-The CLA ([CLA.md](CLA.md)) lets the project keep its licensing flexible (for example loosening Livkit or SDK licenses later) while you keep the copyright to your work. The current text is a **draft pending legal review**; the CLA check is switched off until it is final. Until then, outside contributions are accepted only on the understanding that you will sign the final CLA before merge.
+The CLA ([CLA.md](CLA.md)) lets the project keep its licensing flexible (for example loosening the UI or SDK licenses later) while you keep the copyright to your work. The current text is a **draft pending legal review**; the CLA check is switched off until it is final. Until then, outside contributions are accepted only on the understanding that you will sign the final CLA before merge.
 
 ## 3. Licensing of your contribution
 
-Your contribution is licensed under the license of the part you modify: GPL-3.0-or-later by default, LGPL-3.0-or-later for `crates/livspeil-node-api`, CC BY 4.0 for docs and specs. Every file needs SPDX headers (`SPDX-FileCopyrightText` and `SPDX-License-Identifier`) or an entry in `REUSE.toml`. Dependencies must pass `cargo deny check`. Details: [docs/licensing.md](docs/licensing.md).
+Your contribution is licensed under the license of the part you modify: GPL-3.0-or-later by default, MPL-2.0 for `crates/livspeil-node-api`, CC BY 4.0 for docs and specs. Every file needs SPDX headers (`SPDX-FileCopyrightText` and `SPDX-License-Identifier`) or an entry in `REUSE.toml`. Dependencies must pass `cargo deny check`. Details: [docs/licensing.md](docs/licensing.md).
 
 ## 4. AI-assisted contributions
 

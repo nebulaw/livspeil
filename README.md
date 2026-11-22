@@ -8,7 +8,7 @@ Status: **Phase 0 (kernel)**. This repository currently holds the headless, cros
 
 | Path | What |
 |---|---|
-| `crates/livspeil-node-api` | Public node/Charm API surface (LGPL-3.0-or-later) |
+| `crates/livspeil-node-api` | Public node/Charm API surface (MPL-2.0) |
 | `crates/livspeil-graph` | Networks, type checking, cook scheduler (placeholder, M0.2) |
 | `crates/livspeil-params` | Parameters, animation, expressions (placeholder, M0.5) |
 | `crates/livspeil-doc` | Document model and KDL (placeholder, M0.4) |
@@ -30,4 +30,4 @@ Optional tools: `cargo install cargo-deny`, `pip install reuse`.
 
 ## License
 
-Core: GPL-3.0-or-later. Node API: LGPL-3.0-or-later. Docs and specs: CC BY 4.0. See [docs/licensing.md](docs/licensing.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+Core: GPL-3.0-or-later. Node API, SDK and Livspeil UI: MPL-2.0. Docs and specs: CC BY 4.0. See [docs/licensing.md](docs/licensing.md) and [CONTRIBUTING.md](CONTRIBUTING.md).

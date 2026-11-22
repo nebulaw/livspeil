@@ -19,3 +19,9 @@ path = ["README.md", "CONTRIBUTING.md", "CLAUDE.md", "TRADEMARKS.md", "CLA.md", 
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Livspeil contributors"
 SPDX-License-Identifier = "CC-BY-4.0"
+
+[[annotations]]
+path = ["LICENSE"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2007 Free Software Foundation, Inc. <https://fsf.org/>"
+SPDX-License-Identifier = "GPL-3.0-or-later"

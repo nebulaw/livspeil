@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Livspeil contributors
-// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 
 //! Public node and Charm API surface.
 //!
 //! This crate is the part of Livspeil that node and Charm authors compile
-//! against. It is licensed under the LGPL (decision D25); the rest of the
+//! against. It is licensed under the MPL-2.0 (weak, file-level copyleft; decision D33); the rest of the
 //! kernel is GPL. See `specs/livspeil-kernel-spec-v0.md`, sections 2 and 4.
 
 /// Value types that can flow through node ports (kernel spec, section 4).

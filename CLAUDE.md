@@ -7,7 +7,7 @@ Livspeil: an Arch-based OS whose desktop is a user-authored scene (Dream Mode ed
 
 ## Hard rules
 - The kernel crates never depend on Bevy, wgpu, Wayland, or any UI crate. Keep them headless and cross-platform (macOS and Linux).
-- Every file needs SPDX headers (see existing files) or an entry in `REUSE.toml`. `crates/livspeil-node-api` is LGPL-3.0-or-later; everything else in code is GPL-3.0-or-later; docs are CC-BY-4.0.
+- Every file needs SPDX headers (see existing files) or an entry in `REUSE.toml`. `crates/livspeil-node-api` is MPL-2.0; everything else in code is GPL-3.0-or-later; docs are CC-BY-4.0.
 - New dependencies must be license-compatible (see `deny.toml`). Do not add copyleft-incompatible or source-available code.
 - `unsafe` is forbidden by workspace lint. Panics must not cross node boundaries.
 - Nodes are deterministic pure functions of inputs, params, time (if flagged) and seeded RNG.
