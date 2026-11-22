@@ -1,0 +1,31 @@
+{"op":"changed","kind":"room-name","old":"\"Nested Before\"","new":"\"Nested After\""}
+{"op":"changed","kind":"min-tier","old":"\"T1\"","new":"\"T2\""}
+{"op":"changed","kind":"node-move","node":"bias","id":"01930000-0000-7000-8000-000000000002","path":"lamp/bias","old":"\"/\"","new":"\"/lamp\""}
+{"op":"changed","kind":"charm-field","node":"lamp","id":"01930000-0000-7000-8000-000000000010","field":"version","old":"\"1.0.0\"","new":"\"1.1.0\""}
+{"op":"removed","kind":"charm-field","node":"lamp","id":"01930000-0000-7000-8000-000000000010","field":"icon","old":"\"sun\""}
+{"op":"changed","kind":"charm-field","node":"lamp","id":"01930000-0000-7000-8000-000000000010","field":"min-tier","old":"\"T0\"","new":"\"T2\""}
+{"op":"added","kind":"charm-capability","node":"lamp","id":"01930000-0000-7000-8000-000000000010","new":"\"net\""}
+{"op":"changed","kind":"port-type","node":"hour","id":"01930000-0000-7000-8000-000000000011","path":"lamp/hour","old":"\"Float\"","new":"\"Int\""}
+{"op":"changed","kind":"input","node":"hour","id":"01930000-0000-7000-8000-000000000011","path":"lamp/hour","port":"value","old":"12.0","new":"12"}
+{"op":"changed","kind":"node-name","node":"dawn","id":"01930000-0000-7000-8000-000000000012","path":"lamp/dawn","old":"\"sunrise\"","new":"\"dawn\""}
+{"op":"changed","kind":"node-move","node":"scale","id":"01930000-0000-7000-8000-000000000013","old":"\"/lamp\"","new":"\"/\""}
+{"op":"changed","kind":"table","node":"palette","id":"01930000-0000-7000-8000-000000000020","port":"table","cells":3,"old":"2 cols x 3 rows","new":"2 cols x 4 rows"}
+{"op":"changed","kind":"table-row","node":"palette","id":"01930000-0000-7000-8000-000000000020","port":"table","row":1,"old":"\"b\" 2.0","new":"\"b\" 2.5"}
+{"op":"added","kind":"table-row","node":"palette","id":"01930000-0000-7000-8000-000000000020","port":"table","row":3,"new":"\"d\" 4.0"}
+{"op":"changed","kind":"table","node":"big","id":"01930000-0000-7000-8000-000000000021","port":"table","cells":23,"old":"2 cols x 12 rows","new":"2 cols x 12 rows"}
+{"op":"changed","kind":"curve-setting","node":"ramp","id":"01930000-0000-7000-8000-000000000022","port":"curve","setting":"pre","old":"\"loop\"","new":"\"hold\""}
+{"op":"changed","kind":"curve-key","node":"ramp","id":"01930000-0000-7000-8000-000000000022","port":"curve","time":"0.5","old":"1.0","new":"0.8 interp=\"step\""}
+{"op":"added","kind":"curve-key","node":"ramp","id":"01930000-0000-7000-8000-000000000022","port":"curve","time":"0.75","new":"0.5"}
+{"op":"removed","kind":"input","node":"fade","id":"01930000-0000-7000-8000-000000000023","port":"curve","old":"curve 2 keys 0.0..1.0"}
+{"op":"added","kind":"node","node":"fx","id":"01930000-0000-7000-8000-000000000030","new":"\"core.subnet@1\""}
+{"op":"added","kind":"charm","node":"fx","id":"01930000-0000-7000-8000-000000000030","new":"\"Sparkle\" version=\"0.1.0\" capability=\"gpu\""}
+{"op":"added","kind":"node","node":"amount","id":"01930000-0000-7000-8000-000000000031","path":"fx/amount","new":"\"core.subnet.input@1\""}
+{"op":"added","kind":"port-type","node":"amount","id":"01930000-0000-7000-8000-000000000031","path":"fx/amount","new":"\"Float\""}
+{"op":"added","kind":"input","node":"amount","id":"01930000-0000-7000-8000-000000000031","path":"fx/amount","port":"value","new":"0.5"}
+{"op":"added","kind":"link","from":"lamp.level","to":"scale.a"}
+{"op":"removed","kind":"link","from":"sun.hour","to":"lamp.hour"}
+{"op":"added","kind":"link","from":"bias.out","to":"level.value","network":"/lamp"}
+{"op":"added","kind":"link","from":"dawn.out","to":"bias.a","network":"/lamp"}
+{"op":"removed","kind":"link","from":"scale.out","to":"level.value","network":"/lamp"}
+{"op":"removed","kind":"link","from":"sunrise.out","to":"scale.a","network":"/lamp"}
+{"op":"changed","kind":"position","node":"lamp/dawn","id":"01930000-0000-7000-8000-000000000012","old":"10.0 20.0","new":"15.0 20.0"}

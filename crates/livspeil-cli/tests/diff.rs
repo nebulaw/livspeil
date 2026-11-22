@@ -67,6 +67,46 @@ fn jsonl_output_matches_golden_and_parses() {
 }
 
 #[test]
+fn nested_fixture_text_and_jsonl_match_goldens() {
+    let (a, b) = (fixture("nested-before"), fixture("nested-after"));
+    let out = livspeil(&["diff", &a, &b]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let text = stdout(&out);
+    for needle in [
+        r#"~ node "lamp/bias" moved: "/" -> "/lamp""#,
+        r#"+ node "lamp" charm capability: "net""#,
+        r#"~ node "lamp/hour" port-type: "Float" -> "Int""#,
+        r#"table: 2 cols x 3 rows -> 2 cols x 4 rows (3 cells changed)"#,
+        r#"+ node "ramp" input "curve" curve key 0.75: 0.5"#,
+        r#"+ link "dawn.out" -> "bias.a" in "/lamp""#,
+    ] {
+        assert!(text.contains(needle), "{needle}\n{text}");
+    }
+    assert!(!text.contains("meta"));
+    assert_golden(&golden_dir(), "diff-nested.text", &text);
+
+    let out = livspeil(&["diff", &a, &b, "--format", "jsonl", "--meta"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let text = stdout(&out);
+    let rows: Vec<serde_json::Value> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let find = |kind: &str| rows.iter().find(|v| v["kind"] == kind).unwrap();
+    assert_eq!(find("node-move")["path"], "lamp/bias");
+    assert_eq!(find("table")["cells"], 3);
+    assert_eq!(find("table-row")["row"], 1);
+    assert_eq!(find("charm-field")["field"], "version");
+    assert_eq!(find("curve-key")["time"], "0.5");
+    assert!(
+        rows.iter()
+            .any(|v| v["kind"] == "link" && v["network"] == "/lamp")
+    );
+    assert_eq!(find("position")["node"], "lamp/dawn");
+    assert_golden(&golden_dir(), "diff-nested.jsonl", &text);
+}
+
+#[test]
 fn equal_documents_exit_zero_with_no_output() {
     // A package and its room.kdl are the same document.
     let before = fixture("before");

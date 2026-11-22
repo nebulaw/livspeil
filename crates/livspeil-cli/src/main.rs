@@ -40,7 +40,7 @@ COMMANDS:
                             the outputs of its sinks (nodes with no
                             outgoing links)
     diff <a> <b> [OPTIONS]  Semantic diff of two documents (nodes matched
-                            by id)
+                            by id, also inside subnets)
     assets add <room> <file> --license SPDX [--source URL] [--author NAME]
                             Copy a file into <room>/assets/<sha256>.<ext>
                             and record it in assets.lock (source defaults
@@ -77,8 +77,14 @@ DIFF OPTIONS:
     --meta                  Also report editor positions (meta), which are
                             hidden by default
 
-    Text lines start with + (added), - (removed) or ~ (changed), e.g.
+    Text lines start with + (added), - (removed) or ~ (changed). Nodes
+    inside subnets are named by path; tables are summarized (with rows
+    and columns when at most 20 cells changed); curves are diffed per key:
         ~ node \"lamp\" input \"a\": 0.2 -> 0.3
+        ~ node \"desk/x\" moved: \"/\" -> \"/desk\"
+        + node \"desk\" charm capability: \"net\"
+        ~ node \"t\" input \"rows\" table: 2 cols x 3 rows -> 2 cols x 4 rows (2 cells changed)
+        + link \"in.value\" -> \"x.a\" in \"/desk\"
 
 ASSET LICENSES:
     license= is an SPDX expression. Allowed: CC0-1.0, CC-BY-4.0,
