@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.logic.not"
+version = 1
+summary = "Negate a"
+time_dependent = false
+reads_system = false
+description = '''
+`out = !a`.
+'''
+
+[[inputs]]
+name = "a"
+type = "Bool"
+default = false
+
+[[outputs]]
+name = "out"
+type = "Bool"
+
+[[tests]]
+name = "defaults"
+expect = { out = true }
+
+[[tests]]
+inputs = { a = true }
+expect = { out = false }

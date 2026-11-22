@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.color.compose"
+version = 1
+summary = "Build an OKLCH color (l, alpha clamped to [0, 1]; c >= 0; h wrapped to [0, 360))"
+time_dependent = false
+reads_system = false
+description = '''
+Builds an OKLCH color: `l` and `alpha` are clamped to `[0, 1]`, `c` to
+`>= 0`, and `h` is wrapped to `[0, 360)`. Negative zeros come out as `+0.0`.
+A `NaN` or infinite input is an invalid-input error on that port.
+'''
+
+[[inputs]]
+name = "l"
+type = "Float"
+default = 0.7
+
+[[inputs]]
+name = "c"
+type = "Float"
+default = 0.1
+
+[[inputs]]
+name = "h"
+type = "Float"
+default = 250.0
+
+[[inputs]]
+name = "alpha"
+type = "Float"
+default = 1.0
+
+[[outputs]]
+name = "out"
+type = "Color"
+
+[[tests]]
+name = "defaults"
+expect = { out = [0.7, 0.1, 250.0, 1.0] }
+
+[[tests]]
+name = "clamped and wrapped"
+inputs = { l = 1.5, c = -0.2, h = -30.0, alpha = 2.0 }
+expect = { out = [1.0, 0.0, 330.0, 1.0] }
+
+[[tests]]
+inputs = { l = 0.5, h = 725.5 }
+expect = { out = [0.5, 0.1, 5.5, 1.0] }
+tolerance = 1e-9
+
+[[tests]]
+inputs = { l = nan }
+expect_error = { port = "l", message = "finite" }

@@ -1,0 +1,58 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.logic.compare"
+version = 1
+summary = "Compare a and b with op (<, <=, ==, !=, >=, >)"
+time_dependent = false
+reads_system = false
+description = '''
+Compares `a` with `b` using `op`, one of `<`, `<=`, `==`, `!=`, `>=`, `>`
+(IEEE 754: `NaN` compares false except with `!=`, and `-0.0 == 0.0`). Any
+other `op` is an invalid-input error on `op`. `op` is a String for now and
+becomes an Enum parameter later.
+'''
+
+[[inputs]]
+name = "a"
+type = "Float"
+default = 0.0
+
+[[inputs]]
+name = "b"
+type = "Float"
+default = 0.0
+
+[[inputs]]
+name = "op"
+type = "String"
+default = "<"
+
+[[outputs]]
+name = "out"
+type = "Bool"
+
+[[tests]]
+inputs = { a = 1.0, b = 2.0 }
+expect = { out = true }
+
+[[tests]]
+inputs = { a = 2.0, b = 2.0, op = "<=" }
+expect = { out = true }
+
+[[tests]]
+inputs = { a = nan, b = 2.0, op = "!=" }
+expect = { out = true }
+
+[[tests]]
+inputs = { a = -0.0, b = 0.0, op = "==" }
+expect = { out = true }
+
+[[tests]]
+inputs = { op = "=>" }
+expect_error = { port = "op", message = "unknown operator" }

@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.logic.or"
+version = 1
+summary = "True when a or b (or both) is true"
+time_dependent = false
+reads_system = false
+description = '''
+`out = a || b`. Both inputs default to `false` (the identity), so linking only one passes it through.
+'''
+
+[[inputs]]
+name = "a"
+type = "Bool"
+default = false
+
+[[inputs]]
+name = "b"
+type = "Bool"
+default = false
+
+[[outputs]]
+name = "out"
+type = "Bool"
+
+[[tests]]
+name = "defaults"
+expect = { out = false }
+
+[[tests]]
+inputs = { b = true }
+expect = { out = true }
+
+[[tests]]
+inputs = { a = true, b = true }
+expect = { out = true }

@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.math.mul"
+version = 1
+summary = "Multiply a by b"
+time_dependent = false
+reads_system = false
+description = '''
+`out = a * b`. `b` defaults to 1, so linking only `a` passes it through.
+'''
+
+[[inputs]]
+name = "a"
+type = "Float"
+default = 0.0
+
+[[inputs]]
+name = "b"
+type = "Float"
+default = 1.0
+
+[[outputs]]
+name = "out"
+type = "Float"
+
+[[tests]]
+name = "b defaults to 1"
+inputs = { a = 2.5 }
+expect = { out = 2.5 }
+
+[[tests]]
+inputs = { a = 2.5, b = -4.0 }
+expect = { out = -10.0 }
+
+[[tests]]
+inputs = { a = -0.0, b = 3.0 }
+expect = { out = -0.0 }
+
+[[tests]]
+inputs = { a = 0.0, b = inf }
+expect = { out = nan }

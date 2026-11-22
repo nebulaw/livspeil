@@ -1,0 +1,180 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.table.get"
+version = 1
+summary = "One cell of a table as text and number"
+time_dependent = false
+reads_system = false
+description = '''
+One cell, three ways at once: `text` (the `str()` form: strings unchanged,
+floats in shortest round-trip form, vectors as `vec2(1.0, 2.0)`), `number`
+(Floats, Ints converted, Bools 0 or 1, anything else 0) and `found`. A row
+out of range (negative or past the end) gives `found = false`, `text = ""`,
+`number = 0`; an unknown column is an invalid-input error on `column`.
+'''
+
+[[inputs]]
+name = "table"
+type = "Table"
+default = { columns = [] }
+
+[[inputs]]
+name = "row"
+type = "Int"
+default = 0
+
+[[inputs]]
+name = "column"
+type = "String"
+default = "name"
+
+[[outputs]]
+name = "text"
+type = "String"
+
+[[outputs]]
+name = "number"
+type = "Float"
+
+[[outputs]]
+name = "found"
+type = "Bool"
+
+[[tests]]
+name = "defaults"
+expect = { text = "", number = 0.0, found = false }
+
+[[tests]]
+expect = { text = "Dune", number = 0.0, found = true }
+
+[[tests.inputs.table.columns]]
+name = "name"
+type = "String"
+values = ["Dune", "Emma", "dracula", "Ubik", "Émile"]
+
+[[tests.inputs.table.columns]]
+name = "pages"
+type = "Int"
+values = [412, 474, 418, 202, 412]
+
+[[tests.inputs.table.columns]]
+name = "rating"
+type = "Float"
+values = [4.5, 3.75, -0.0, nan, 0.0]
+
+[[tests.inputs.table.columns]]
+name = "read"
+type = "Bool"
+values = [true, false, true, false, false]
+
+[[tests]]
+expect = { text = "412", number = 412.0, found = true }
+
+[tests.inputs]
+column = "pages"
+
+[[tests.inputs.table.columns]]
+name = "name"
+type = "String"
+values = ["Dune", "Emma", "dracula", "Ubik", "Émile"]
+
+[[tests.inputs.table.columns]]
+name = "pages"
+type = "Int"
+values = [412, 474, 418, 202, 412]
+
+[[tests.inputs.table.columns]]
+name = "rating"
+type = "Float"
+values = [4.5, 3.75, -0.0, nan, 0.0]
+
+[[tests.inputs.table.columns]]
+name = "read"
+type = "Bool"
+values = [true, false, true, false, false]
+
+[[tests]]
+expect = { text = "-0.0", number = -0.0, found = true }
+
+[tests.inputs]
+row = 2
+column = "rating"
+
+[[tests.inputs.table.columns]]
+name = "name"
+type = "String"
+values = ["Dune", "Emma", "dracula", "Ubik", "Émile"]
+
+[[tests.inputs.table.columns]]
+name = "pages"
+type = "Int"
+values = [412, 474, 418, 202, 412]
+
+[[tests.inputs.table.columns]]
+name = "rating"
+type = "Float"
+values = [4.5, 3.75, -0.0, nan, 0.0]
+
+[[tests.inputs.table.columns]]
+name = "read"
+type = "Bool"
+values = [true, false, true, false, false]
+
+[[tests]]
+name = "row out of range"
+expect = { text = "", number = 0.0, found = false }
+
+[tests.inputs]
+row = -1
+
+[[tests.inputs.table.columns]]
+name = "name"
+type = "String"
+values = ["Dune", "Emma", "dracula", "Ubik", "Émile"]
+
+[[tests.inputs.table.columns]]
+name = "pages"
+type = "Int"
+values = [412, 474, 418, 202, 412]
+
+[[tests.inputs.table.columns]]
+name = "rating"
+type = "Float"
+values = [4.5, 3.75, -0.0, nan, 0.0]
+
+[[tests.inputs.table.columns]]
+name = "read"
+type = "Bool"
+values = [true, false, true, false, false]
+
+[[tests]]
+expect_error = { port = "column", message = "no column \"nope\"" }
+
+[tests.inputs]
+column = "nope"
+
+[[tests.inputs.table.columns]]
+name = "name"
+type = "String"
+values = ["Dune", "Emma", "dracula", "Ubik", "Émile"]
+
+[[tests.inputs.table.columns]]
+name = "pages"
+type = "Int"
+values = [412, 474, 418, 202, 412]
+
+[[tests.inputs.table.columns]]
+name = "rating"
+type = "Float"
+values = [4.5, 3.75, -0.0, nan, 0.0]
+
+[[tests.inputs.table.columns]]
+name = "read"
+type = "Bool"
+values = [true, false, true, false, false]

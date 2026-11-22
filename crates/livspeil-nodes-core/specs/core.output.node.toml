@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.output"
+version = 1
+summary = "An output of the enclosing subnet, or a sink of the root network"
+time_dependent = false
+reads_system = false
+description = '''
+One output port of the enclosing subnet (its input `value` is fed inside,
+its output `value` is read outside). In the root network it marks a sink:
+`livspeil cook` prints the root `core.output` nodes. Port-polymorphic like
+`core.subnet.input`; cooking copies the input to the output.
+'''
+
+[[inputs]]
+name = "value"
+type = "Float"
+default = 0.0
+
+[[outputs]]
+name = "value"
+type = "Float"
+
+[[tests]]
+inputs = { value = -1.0 }
+expect = { value = -1.0 }
+
+[[tests]]
+inputs = { value = nan }
+expect = { value = nan }

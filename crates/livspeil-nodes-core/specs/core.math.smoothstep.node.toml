@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.math.smoothstep"
+version = 1
+summary = "Smooth Hermite step from 0 to 1 as x goes from edge0 to edge1"
+time_dependent = false
+reads_system = false
+description = '''
+`t = clamp((x - edge0) / (edge1 - edge0), 0, 1)`, `out = 3t² - 2t³` (as in
+GLSL). `edge0 > edge1` is allowed and gives the falling curve. When
+`edge0 == edge1` (undefined in GLSL) the node is a step: `out = 0` for
+`x < edge0`, else `1`. A `NaN` `x` gives `NaN`.
+'''
+
+[[inputs]]
+name = "edge0"
+type = "Float"
+default = 0.0
+
+[[inputs]]
+name = "edge1"
+type = "Float"
+default = 1.0
+
+[[inputs]]
+name = "x"
+type = "Float"
+default = 0.0
+
+[[outputs]]
+name = "out"
+type = "Float"
+
+[[tests]]
+inputs = { x = 0.25 }
+expect = { out = 0.15625 }
+
+[[tests]]
+inputs = { x = 2.0 }
+expect = { out = 1.0 }
+
+[[tests]]
+name = "falling curve"
+inputs = { edge0 = 1.0, edge1 = 0.0, x = 0.25 }
+expect = { out = 0.84375 }
+
+[[tests]]
+name = "equal edges are a step"
+inputs = { edge0 = 0.5, edge1 = 0.5, x = 0.4 }
+expect = { out = 0.0 }
+
+[[tests]]
+inputs = { edge0 = 0.5, edge1 = 0.5, x = 0.5 }
+expect = { out = 1.0 }

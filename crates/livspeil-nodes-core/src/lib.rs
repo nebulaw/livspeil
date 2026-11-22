@@ -5,8 +5,9 @@
 //!
 //! See `specs/livspeil-kernel-spec-v0.md`, sections 8 and 9. Every node is
 //! version 1, pure and deterministic; each has unit tests and golden cases
-//! under `tests/golden/`. The specs are written in Rust for now;
-//! `*.node.toml` generation is a later step.
+//! under `tests/golden/`. Specs are built in Rust and mirrored by
+//! `specs/<id>.node.toml` files (checked by `tests/node_specs.rs`,
+//! refreshed with `cargo xtask node-specs`; see `docs/nodes.md`).
 //!
 //! # Node set
 //!

@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.vector.decompose3"
+version = 1
+summary = "Split a Vec3 into x, y and z"
+time_dependent = false
+reads_system = false
+
+[[inputs]]
+name = "v"
+type = "Vec3"
+default = [0.0, 0.0, 0.0]
+
+[[outputs]]
+name = "x"
+type = "Float"
+
+[[outputs]]
+name = "y"
+type = "Float"
+
+[[outputs]]
+name = "z"
+type = "Float"
+
+[[tests]]
+inputs = { v = [1.5, -2.0, inf] }
+expect = { x = 1.5, y = -2.0, z = inf }
+
+[[tests]]
+name = "defaults"
+expect = { x = 0.0, y = 0.0, z = 0.0 }

@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.math.max"
+version = 1
+summary = "The larger of a and b"
+time_dependent = false
+reads_system = false
+description = '''
+The larger of `a` and `b`, deterministic on every platform: a `NaN`
+operand is ignored (the other one is returned; `NaN` only if both are
+`NaN`), and `+0.0 > -0.0`.
+'''
+
+[[inputs]]
+name = "a"
+type = "Float"
+default = 0.0
+
+[[inputs]]
+name = "b"
+type = "Float"
+default = 0.0
+
+[[outputs]]
+name = "out"
+type = "Float"
+
+[[tests]]
+inputs = { a = 1.0, b = -2.0 }
+expect = { out = 1.0 }
+
+[[tests]]
+name = "positive zero is larger"
+inputs = { a = -0.0, b = 0.0 }
+expect = { out = 0.0 }
+
+[[tests]]
+name = "NaN is ignored"
+inputs = { a = 3.0, b = nan }
+expect = { out = 3.0 }

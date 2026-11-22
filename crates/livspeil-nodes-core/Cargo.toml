@@ -19,6 +19,8 @@ livspeil-params = { path = "../livspeil-params" }
 
 [dev-dependencies]
 livspeil-testkit = { path = "../livspeil-testkit" }
+# Parses the `specs/*.node.toml` files (tests/node_specs.rs, examples/dump-specs.rs).
+toml = { version = "1.2.2", default-features = false, features = ["std", "parse", "serde"] }
 
 [lints]
 workspace = true

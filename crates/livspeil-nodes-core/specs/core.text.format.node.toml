@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.text.format"
+version = 1
+summary = "Fill {a} and {b} in a template with numbers ({{ and }} for braces)"
+time_dependent = false
+reads_system = false
+description = '''
+In `template`, `{a}` and `{b}` are replaced by the numbers printed with
+`precision` decimals (platform-independent, half to even on the decimal
+value, no `-0.00`; `NaN`, `inf`, `-inf` for the specials; precision is
+clamped to `[0, 12]`), and `{{` and `}}` are literal braces. Placeholders
+may repeat or be absent. Anything else in braces (`{c}`, `{}`, `{ a }`),
+an unclosed `{` or a lone `}` is an invalid-input error on `template`.
+'''
+
+[[inputs]]
+name = "template"
+type = "String"
+default = "{a}"
+
+[[inputs]]
+name = "a"
+type = "Float"
+default = 0.0
+
+[[inputs]]
+name = "b"
+type = "Float"
+default = 0.0
+
+[[inputs]]
+name = "precision"
+type = "Int"
+default = 2
+
+[[outputs]]
+name = "out"
+type = "String"
+
+[[tests]]
+name = "defaults"
+expect = { out = "0.00" }
+
+[[tests]]
+inputs = { a = 12.3456 }
+expect = { out = "12.35" }
+
+[[tests]]
+inputs = { template = "{a} of {b}", a = 3.0, b = 10.0, precision = 0 }
+expect = { out = "3 of 10" }
+
+[[tests]]
+name = "escaped braces"
+inputs = { template = "{{a}} = {a}", a = 1.0 }
+expect = { out = "{a} = 1.00" }
+
+[[tests]]
+inputs = { template = "{c}" }
+expect_error = { port = "template", message = "unknown placeholder {c}" }
