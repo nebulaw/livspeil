@@ -13,7 +13,7 @@ Status: **Phase 0 (kernel)**. This repository currently holds the headless, cros
 | `crates/livspeil-params` | Parameters, animation, expressions (expression language done; parameters next, M0.5) |
 | `crates/livspeil-doc` | Document model, KDL v2 `room.kdl` format, canonical form, migrations (M0.4) |
 | `crates/livspeil-cmd` | Command bus, undo/redo, journal (M0.3) |
-| `crates/livspeil-nodes-core` | Core nodes: math, logic, vector, time, sky, color, text (M0.6; events, fs, tables, ramps and subnets deferred) |
+| `crates/livspeil-nodes-core` | Core nodes: math, logic, vector, time, sky, color, text (M0.6), subnet and output nodes (M0.7; events, fs, tables and ramps deferred) |
 | `crates/livspeil-testkit` | Golden-file harness |
 | `crates/livspeil-cli` | `livspeil` headless command line (`validate`, `fmt`, `cook`; `diff` reserved) |
 | `xtask` | Project automation (`cargo xtask check`) |
@@ -32,8 +32,8 @@ cargo run -p livspeil-cli -- cook examples/sun-and-lamp.room --frames 600 --ever
 
 `cook` drives the graph with a deterministic frame clock (frame `i` at
 `start + i/fps` seconds, `--fps 60` by default) and prints the outputs of
-the sinks, the nodes with no outgoing links (or the nodes named with
-`--node`). [`examples/sun-and-lamp.room`](examples/sun-and-lamp.room/room.kdl)
+the sinks: the root network's `core.output` nodes, or when it has none its
+nodes with no outgoing links (or the nodes named with `--node`). [`examples/sun-and-lamp.room`](examples/sun-and-lamp.room/room.kdl)
 is the Phase 0 acceptance scene: 600 frames cover one day starting at 06:00;
 the hour drives the sun (the window light) and a daylight factor that picks
 the lamp's color (night blue, warm, daylight) and intensity:
@@ -47,6 +47,11 @@ frame=300 time=5.000000 lamp_color.out=oklch(0.876543 0.075088 67.477719 1.00000
 frame=300 time=5.000000 lamp_intensity.out=0.407407
 frame=300 time=5.000000 sun.direction=vec3(-0.917409 0.264725 -0.297121) sun.elevation=15.350625 sun.azimuth=287.945568
 ```
+
+[`examples/charm-demo.room`](examples/charm-demo.room/room.kdl) shows
+subnets and Charms (M0.7): a "Daylight" Charm (hour in, lamp color and
+intensity out, two promoted parameters) instantiated twice with different
+parameters, printed through four `core.output` nodes.
 
 Floats are printed with six decimals so the output (and its golden files in
 `crates/livspeil-cli/tests/golden/`) is identical on macOS and Linux.

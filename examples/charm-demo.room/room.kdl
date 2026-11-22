@@ -1,0 +1,130 @@
+// SPDX-FileCopyrightText: 2026 Livspeil contributors
+// SPDX-License-Identifier: CC0-1.0
+
+// A reusable Charm, instantiated twice. "Daylight" turns the hour of the
+// day into a lamp color and intensity; its interface is the input "hour",
+// two promoted parameters ("warm", the evening color, and "dim", the
+// intensity in full daylight) and the outputs "color" and "intensity".
+//
+// The desk lamp and the porch lamp are two instances with different
+// promoted parameters. The porch's "dim" is an expression that reads the
+// desk lamp's through a relative ch() path ("../" is the room's network).
+// The root core.output nodes are what `livspeil cook` prints.
+//
+// clock -> day_seconds -> time_of_day.hour -> desk_lamp.hour, porch_lamp.hour
+
+room "Charm Demo" format=1 min-tier="T1" {
+  network "/" {
+    node "clock" type="core.time.clock@1" id="0193a6c0-1d2e-7b40-8000-000000000001"
+    node "day_seconds" type="core.math.mul@1" id="0193a6c0-1d2e-7b40-8000-000000000002" {
+      input "b" 8640.0
+    }
+    node "time_of_day" type="core.time.timeofday@1" id="0193a6c0-1d2e-7b40-8000-000000000003" {
+      input "offset" 6.0
+    }
+    node "desk_lamp" type="core.subnet@1" id="0193a6c0-1d2e-7b40-8000-000000000010" {
+      charm "Daylight" version="1.0.0" icon="sun" {
+        capability "time"
+      }
+      network {
+        node "hour" type="core.subnet.input@1" id="0193a6c0-1d2e-7b40-8000-000000000011" port-type="Float" {
+          input "value" 12.0
+        }
+        node "warm" type="core.subnet.input@1" id="0193a6c0-1d2e-7b40-8000-000000000012" port-type="Color" {
+          input "value" (color)"oklch(0.78 0.14 60.0 1.0)"
+        }
+        node "dim" type="core.subnet.input@1" id="0193a6c0-1d2e-7b40-8000-000000000013" port-type="Float" {
+          input "value" 0.3
+        }
+        node "sunrise" type="core.math.smoothstep@1" id="0193a6c0-1d2e-7b40-8000-000000000014" {
+          input "edge0" 5.0
+          input "edge1" 8.0
+        }
+        node "sunset" type="core.math.smoothstep@1" id="0193a6c0-1d2e-7b40-8000-000000000015" {
+          input "edge0" 17.0
+          input "edge1" 20.0
+        }
+        node "daylight" type="core.math.sub@1" id="0193a6c0-1d2e-7b40-8000-000000000016"
+        node "tint" type="core.color.gradient@1" id="0193a6c0-1d2e-7b40-8000-000000000017" {
+          input "c0" (color)"oklch(0.35 0.08 260.0 1.0)"
+          input "c2" (color)"oklch(0.95 0.03 95.0 1.0)"
+          input "p1" 0.4
+        }
+        node "level" type="core.math.remap@1" id="0193a6c0-1d2e-7b40-8000-000000000018" {
+          input "clamp" #true
+          input "out_min" 1.0
+        }
+        node "color" type="core.output@1" id="0193a6c0-1d2e-7b40-8000-000000000019" port-type="Color"
+        node "intensity" type="core.output@1" id="0193a6c0-1d2e-7b40-8000-00000000001a" port-type="Float"
+        link from="daylight.out" to="level.x"
+        link from="daylight.out" to="tint.t"
+        link from="dim.value" to="level.out_max"
+        link from="hour.value" to="sunrise.x"
+        link from="hour.value" to="sunset.x"
+        link from="level.out" to="intensity.value"
+        link from="sunrise.out" to="daylight.a"
+        link from="sunset.out" to="daylight.b"
+        link from="tint.out" to="color.value"
+        link from="warm.value" to="tint.c1"
+      }
+    }
+    node "porch_lamp" type="core.subnet@1" id="0193a6c0-1d2e-7b40-8000-000000000020" {
+      charm "Daylight" version="1.0.0" icon="sun" {
+        capability "time"
+      }
+      network {
+        node "hour" type="core.subnet.input@1" id="0193a6c0-1d2e-7b40-8000-000000000021" port-type="Float" {
+          input "value" 12.0
+        }
+        node "warm" type="core.subnet.input@1" id="0193a6c0-1d2e-7b40-8000-000000000022" port-type="Color" {
+          input "value" (color)"oklch(0.7 0.18 35.0 1.0)"
+        }
+        node "dim" type="core.subnet.input@1" id="0193a6c0-1d2e-7b40-8000-000000000023" port-type="Float" {
+          input "value" expr="ch(\"../desk_lamp/dim/value\") * 0.5"
+        }
+        node "sunrise" type="core.math.smoothstep@1" id="0193a6c0-1d2e-7b40-8000-000000000024" {
+          input "edge0" 5.0
+          input "edge1" 8.0
+        }
+        node "sunset" type="core.math.smoothstep@1" id="0193a6c0-1d2e-7b40-8000-000000000025" {
+          input "edge0" 17.0
+          input "edge1" 20.0
+        }
+        node "daylight" type="core.math.sub@1" id="0193a6c0-1d2e-7b40-8000-000000000026"
+        node "tint" type="core.color.gradient@1" id="0193a6c0-1d2e-7b40-8000-000000000027" {
+          input "c0" (color)"oklch(0.35 0.08 260.0 1.0)"
+          input "c2" (color)"oklch(0.95 0.03 95.0 1.0)"
+          input "p1" 0.4
+        }
+        node "level" type="core.math.remap@1" id="0193a6c0-1d2e-7b40-8000-000000000028" {
+          input "clamp" #true
+          input "out_min" 1.0
+        }
+        node "color" type="core.output@1" id="0193a6c0-1d2e-7b40-8000-000000000029" port-type="Color"
+        node "intensity" type="core.output@1" id="0193a6c0-1d2e-7b40-8000-00000000002a" port-type="Float"
+        link from="daylight.out" to="level.x"
+        link from="daylight.out" to="tint.t"
+        link from="dim.value" to="level.out_max"
+        link from="hour.value" to="sunrise.x"
+        link from="hour.value" to="sunset.x"
+        link from="level.out" to="intensity.value"
+        link from="sunrise.out" to="daylight.a"
+        link from="sunset.out" to="daylight.b"
+        link from="tint.out" to="color.value"
+        link from="warm.value" to="tint.c1"
+      }
+    }
+    node "desk_color" type="core.output@1" id="0193a6c0-1d2e-7b40-8000-000000000030" port-type="Color"
+    node "desk_intensity" type="core.output@1" id="0193a6c0-1d2e-7b40-8000-000000000031" port-type="Float"
+    node "porch_color" type="core.output@1" id="0193a6c0-1d2e-7b40-8000-000000000032" port-type="Color"
+    node "porch_intensity" type="core.output@1" id="0193a6c0-1d2e-7b40-8000-000000000033" port-type="Float"
+    link from="clock.time" to="day_seconds.a"
+    link from="day_seconds.out" to="time_of_day.seconds"
+    link from="desk_lamp.color" to="desk_color.value"
+    link from="desk_lamp.intensity" to="desk_intensity.value"
+    link from="porch_lamp.color" to="porch_color.value"
+    link from="porch_lamp.intensity" to="porch_intensity.value"
+    link from="time_of_day.hour" to="desk_lamp.hour"
+    link from="time_of_day.hour" to="porch_lamp.hour"
+  }
+}

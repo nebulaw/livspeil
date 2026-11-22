@@ -13,11 +13,15 @@
 //!
 //! # Sinks
 //!
-//! Until a `core.output` node marks outputs explicitly, the sinks of a
-//! network are its nodes with no outgoing links (a node that is only read by
-//! another node's `ch()` expression still counts as a sink). `--node NAME`
-//! (repeatable) prints the named nodes instead, sink or not. Nodes are
-//! printed sorted by name, ports in the order of the node type's spec.
+//! When the root network has `core.output` nodes, they are the sinks and
+//! only they are printed (each has one port, `value`). Otherwise the sinks
+//! are the root network's nodes with no outgoing links, subnets excluded (a
+//! node that is only read by another node's `ch()` expression still counts
+//! as a sink). Nodes inside subnets are never sinks. `--node NAME`
+//! (repeatable) prints the named nodes instead, sink or not; a node inside
+//! a subnet is named by its path (`lamp/color`, printed that way). Nodes
+//! are printed sorted by name, ports in the order of the node type's
+//! spec.
 //!
 //! # Text format
 //!
@@ -61,7 +65,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use livspeil_doc::parse;
-use livspeil_graph::{CookError, Cooker, Graph, NodeId};
+use livspeil_graph::{CookError, Cooker, Graph, NodeId, OUTPUT_TYPE};
 use livspeil_node_api::{CookContext, Value};
 use livspeil_nodes_core::core_registry;
 
@@ -271,15 +275,23 @@ fn output_failed(err: &io::Error) -> ExitCode {
 fn targets(graph: &Graph, requested: &[String]) -> Result<Vec<Target>, String> {
     let mut ids = Vec::new();
     if requested.is_empty() {
+        let root = graph.children(None);
         ids.extend(
-            graph
-                .node_ids()
-                .filter(|&id| graph.outgoing_links(id).is_empty()),
+            root.iter()
+                .copied()
+                .filter(|&id| graph.node_type(id) == Some(OUTPUT_TYPE)),
         );
+        if ids.is_empty() {
+            ids.extend(
+                root.into_iter()
+                    .filter(|&id| !graph.is_subnet(id) && graph.outgoing_links(id).is_empty()),
+            );
+        }
     } else {
         for name in requested {
             let id = graph
                 .find(name)
+                .or_else(|| graph.find_path(name))
                 .ok_or_else(|| format!("--node: no node named '{name}'"))?;
             if !ids.contains(&id) {
                 ids.push(id);
@@ -290,8 +302,12 @@ fn targets(graph: &Graph, requested: &[String]) -> Result<Vec<Target>, String> {
     let mut targets: Vec<Target> = ids
         .into_iter()
         .filter_map(|id| {
+            let name = match graph.parent(id) {
+                None => graph.node_name(id)?.to_owned(),
+                Some(_) => graph.path(id)?.trim_start_matches('/').to_owned(),
+            };
             Some(Target {
-                name: graph.node_name(id)?.to_owned(),
+                name,
                 id,
                 ports: graph
                     .node_spec(id)?
@@ -582,10 +598,14 @@ mod tests {
     /// `cos`, `atan2`, `cbrt`, ... in the sky and color nodes) differ by at
     /// most a few ulps, far below that, so the golden files are the same on
     /// macOS and Linux.
-    #[test]
-    fn acceptance_scene_is_far_from_rounding_boundaries() {
-        let room =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/sun-and-lamp.room/room.kdl");
+    /// Cook `room` (relative to the repository root) for 600 frames and
+    /// check that every float prints the same with six decimals after a
+    /// relative perturbation of 1e-12 (or an absolute one of 1e-15 near
+    /// zero). Returns the number of values checked.
+    fn far_from_rounding_boundaries(room: &str) -> usize {
+        let room = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(room);
         let text = std::fs::read_to_string(room).unwrap();
         let graph = parse(&text)
             .unwrap()
@@ -621,7 +641,29 @@ mod tests {
                 }
             }
         }
-        assert_eq!(checked, 600 * 5);
+        checked
+    }
+
+    /// Every float of the acceptance scene, over all 600 frames, is far
+    /// from a six-decimal rounding boundary. Platform math libraries
+    /// (`sin`, `cos`, `atan2`, `cbrt`, ... in the sky and color nodes)
+    /// differ by at most a few ulps, far below that, so the golden files
+    /// are the same on macOS and Linux.
+    #[test]
+    fn acceptance_scene_is_far_from_rounding_boundaries() {
+        assert_eq!(
+            far_from_rounding_boundaries("examples/sun-and-lamp.room/room.kdl"),
+            600 * 5
+        );
+    }
+
+    /// The same for the Charm demo (four root `core.output` nodes).
+    #[test]
+    fn charm_demo_is_far_from_rounding_boundaries() {
+        assert_eq!(
+            far_from_rounding_boundaries("examples/charm-demo.room/room.kdl"),
+            600 * 4
+        );
     }
 
     #[test]

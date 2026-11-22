@@ -339,3 +339,67 @@ fn cook_help_documents_options_and_exit_codes() {
         assert!(out.contains(needle), "help is missing '{needle}'");
     }
 }
+
+fn charm_demo() -> String {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/charm-demo.room")
+        .to_str()
+        .unwrap()
+        .to_owned()
+}
+
+/// The Charm demo: one "Daylight" Charm instantiated twice with different
+/// promoted parameters; the root `core.output` nodes are printed.
+#[test]
+fn charm_demo_text_golden() {
+    let demo = charm_demo();
+    let args = ["cook", &demo, "--frames", "600", "--every", "50"];
+    let out = ok(&args);
+    assert_eq!(out.lines().count(), 12 * 4);
+    assert!(
+        out.lines()
+            .all(|l| l.contains("_color.value=") || l.contains("_intensity.value="))
+    );
+    assert_golden(&golden_dir(), "charm-demo.text", &out);
+    assert_eq!(ok(&args), out);
+}
+
+/// Without `core.output` nodes the sinks are the root nodes without
+/// outgoing links (never subnets or nodes inside them); `--node` takes
+/// paths into subnets.
+#[test]
+fn sinks_and_paths_with_subnets() {
+    const ROOM: &str = r#"room "subnets" format=1 {
+  network "/" {
+    node "x" type="core.math.add@1" id="01920000-0000-7000-8000-000000000001" {
+      input "a" 1.5
+    }
+    node "s" type="core.subnet@1" id="01920000-0000-7000-8000-000000000002" {
+      network {
+        node "in" type="core.subnet.input@1" id="01920000-0000-7000-8000-000000000003" port-type="Float"
+        node "double" type="core.math.mul@1" id="01920000-0000-7000-8000-000000000004" {
+          input "b" 2.0
+        }
+        node "out" type="core.output@1" id="01920000-0000-7000-8000-000000000005" port-type="Float"
+        link from="double.out" to="out.value"
+        link from="in.value" to="double.a"
+      }
+    }
+    node "y" type="core.math.add@1" id="01920000-0000-7000-8000-000000000006"
+    link from="s.out" to="y.a"
+    link from="x.out" to="s.in"
+  }
+}
+"#;
+    let room = TempRoom::new("subnets", ROOM);
+    let path = room.path();
+    assert_eq!(
+        ok(&["cook", &path]),
+        "frame=0 time=0.000000 y.out=3.000000\n"
+    );
+    assert_eq!(
+        ok(&["cook", &path, "--node", "s/double", "--node", "/s/in"]),
+        "frame=0 time=0.000000 s/double.out=3.000000\n\
+         frame=0 time=0.000000 s/in.value=1.500000\n"
+    );
+}
