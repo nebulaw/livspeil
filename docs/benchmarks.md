@@ -34,6 +34,15 @@ the re-run is reported. Numbers are criterion's point estimate (the middle of
 the confidence interval). Treat them as orders of magnitude, not as a
 baseline for regression checks.
 
+The cook scheduler was measured twice: first for the original lazy
+scheduler (M0.2, the expression and command bus results below are from the
+same session), then again for M0.2b (push-based invalidation) with the old
+scheduler re-measured back to back on the same VM, same commands and
+settings, so the before/after tables are comparable. During the second
+session other agents were compiling on the VM; the re-measured old
+scheduler came out 20 to 60 % slower than in the first session, which
+gives an idea of the noise.
+
 ## Graph shapes
 
 All graphs consist of `core.math.add@1` nodes (two `Float` inputs, one
@@ -55,54 +64,87 @@ cutoff case cooks exactly 1 node.
 
 ## How the spec's targets map onto the scheduler
 
-The scheduler has **no separate "mark dirty" step**. `Graph::set_input` only
-stores the value and bumps the node's revision (`O(log n)`). Invalidation is
-lazy: the next `Cooker::cook(sink)` walks everything the sink depends on
-(an iterative DFS for the evaluation order), and for each node compares a
-signature (own revision, upstream output versions, frame) with the cached
-one. A node whose signature matches is reused; otherwise it is re-cooked, and
-if its outputs come out equal its version is kept, so its dependents'
-signatures still match (early cutoff).
+Since M0.2b invalidation is **push-based** (design in the module docs of
+`crates/livspeil-graph/src/cook.rs` and on `Graph` in `graph.rs`):
 
-So "mark the affected subgraph dirty" corresponds to two costs:
+1. An edit such as `Graph::set_input` gets a new epoch and marks the node
+   and everything downstream of it (links and `ch()` readers) dirty with
+   that epoch. This *is* the spec's "mark the affected subgraph dirty". The
+   walk stops at nodes that are already dirty for every cooker, so a second
+   edit before the next cook (a slider drag between frames) is `O(1)`.
+2. A cook of a target that is not dirty (and not downstream of a
+   time-dependent node after a clock change) is `O(1)`. Otherwise the
+   cooker walks the target's cached evaluation order and visits only the
+   dirty nodes; a dirty node re-cooks only if something it reads really
+   changed, and a re-cooked node with equal outputs stops propagation
+   (early cutoff).
 
-1. `set_input`: the edit itself. This is what a UI pays synchronously.
-2. The validation pass of the next cook, which is what actually discovers
-   the affected subgraph. Its cost is the **warm** case (nothing changed: the
-   pass visits and validates every dependency of the sink and cooks
-   nothing). It is paid on every cook regardless of how small the change is.
+So the costs that map onto the spec are:
 
-"Cook 10,000 trivial nodes" corresponds to **cold** (empty cache) and to
-**edit_head** on chain and dag (a change that forces all 10,000 nodes to
-re-cook).
+- **mark_dirty**: `set_input` right after a cook, which walks the whole
+  affected subgraph (the cook in between is not timed). The worst case is an
+  edit at the head of the chain or dag, which marks all 10,000 nodes.
+- **warm**: a cook with nothing dirty (the validation the old scheduler
+  paid on every cook).
+- **cold** (empty cache) and **edit_head** on chain and dag (an edit that
+  forces all 10,000 nodes to re-cook): "cook 10,000 trivial nodes".
+
+Before M0.2b there was no mark step: `set_input` only bumped a revision and
+every cook re-validated everything upstream of the sink (the warm case),
+so finding the affected subgraph cost a full validation pass.
 
 ## Results: cook scheduler
 
 Times per operation. `edit_head` is `set_input` + re-cook of the sink;
-`edit_head_cook_only` times only the re-cook; `cutoff` is two `set_input`s
-that swap the head's inputs (same sum) + re-cook; `build` is `add_node` for
-every node plus every `link`.
+`edit_head_cook_only` times only the re-cook; `mark_dirty` times only a
+`set_input` that follows a cook; `cutoff` is two `set_input`s that swap the
+head's inputs (same sum) + re-cook; `set_input` is the edit repeated without
+cooks in between; `build` is `add_node` for every node plus every `link`.
+
+Before (lazy scheduler, `main` at `022a31d`, re-measured back to back with
+the "after" table):
 
 | Case | chain 1k | chain 10k | tree 1k | tree 10k | dag 1k | dag 10k |
 |---|---:|---:|---:|---:|---:|---:|
-| cold | 564 µs | 6.83 ms | 1.05 ms | 8.39 ms | 600 µs | 7.15 ms |
-| warm (nothing changed) | 302 µs | 4.58 ms | 520 µs | 5.21 ms | 427 µs | 6.15 ms |
-| set_input | 46 ns | 55 ns | 203 ns | 187 ns | 45 ns | 52 ns |
-| edit_head | 486 µs | 6.51 ms | 506 µs | 4.85 ms | 602 µs | 8.72 ms |
-| edit_head_cook_only | 514 µs | 6.39 ms | 355 µs | 4.74 ms | 550 µs | 8.37 ms |
-| cutoff | 344 µs | 4.88 ms | 363 µs | 4.86 ms | 475 µs | 5.29 ms |
+| cold | 826 µs | 12.1 ms | 872 µs | 12.1 ms | 922 µs | 12.3 ms |
+| warm (nothing changed) | 522 µs | 7.62 ms | 500 µs | 9.99 ms | 570 µs | 7.86 ms |
+| set_input | 60 ns | 65 ns | 144 ns | 208 ns | 55 ns | 69 ns |
+| edit_head | 726 µs | 8.69 ms | 590 µs | 8.23 ms | 793 µs | 11.3 ms |
+| edit_head_cook_only | 743 µs | 8.36 ms | 553 µs | 9.79 ms | 735 µs | 10.9 ms |
+| cutoff | 500 µs | 6.72 ms | 523 µs | 9.47 ms | 625 µs | 8.10 ms |
+| build | 1.39 ms | 15.6 ms | 1.19 ms | 13.4 ms | 1.92 ms | 21.0 ms |
+
+After (M0.2b: push-based invalidation, cached evaluation order, dense
+slots, no allocation for reused nodes):
+
+| Case | chain 1k | chain 10k | tree 1k | tree 10k | dag 1k | dag 10k |
+|---|---:|---:|---:|---:|---:|---:|
+| cold | 99 µs | 1.66 ms | 112 µs | 2.10 ms | 118 µs | 2.47 ms |
+| warm (nothing changed) | 57 ns | 86 ns | 38 ns | 40 ns | 60 ns | 74 ns |
+| set_input | 53 ns | 57 ns | 135 ns | 227 ns | 47 ns | 53 ns |
+| mark_dirty | 5.8 µs | 59.8 µs | 354 ns | 660 ns | 5.7 µs | 97.0 µs |
+| edit_head | 77.6 µs | 893 µs | 3.15 µs | 43.6 µs | 73.8 µs | 1.48 ms |
+| edit_head_cook_only | 63.2 µs | 860 µs | 2.64 µs | 33.2 µs | 73.2 µs | 1.25 ms |
+| cutoff | 12.6 µs | 368 µs | 2.25 µs | 26.2 µs | 15.9 µs | 502 µs |
+| build | 1.52 ms | 18.0 ms | 1.46 ms | 12.1 ms | 2.11 ms | 26.8 ms |
 | nodes cooked by edit_head / cutoff | 1000 / 1 | 10000 / 1 | 10 / 1 | 14 / 1 | 1000 / 1 | 10000 / 1 |
-| build | 1.29 ms | 15.4 ms | 1.07 ms | 10.8 ms | 1.65 ms | 24.1 ms |
+
+The `warm` time is mostly cloning the sink's output `Vec` that `cook`
+returns. `CookStats` are unchanged by M0.2b (a warm cook still reports
+`cooked = 0, reused = n`; nodes that are not dirty count as reused without
+being visited), and the benchmark's sanity checks assert the same counts as
+before.
 
 ## Comparison with the targets (10,000 nodes)
 
-| Target | Measured | Result |
-|---|---|---|
-| Change one parameter: the edit (`set_input`) < 0.2 ms | 52 to 187 ns | **pass** (by 1000x) |
-| Change one parameter and find the affected subgraph < 0.2 ms (validation pass = warm cook) | 4.6 to 6.2 ms | **fail** (about 25 to 30x over) |
-| Cook 10,000 trivial nodes < 5 ms single-threaded (cold) | 6.8 to 8.4 ms | **fail** (1.4 to 1.7x over) |
-| Re-cook 10,000 trivial nodes after an edit < 5 ms (chain, dag `edit_head`) | 6.5 to 8.7 ms | **fail** (1.3 to 1.7x over) |
-| Early cutoff limits the work to the changed node | 1 node cooked | **works**, but the cook still costs as much as a warm cook (4.9 to 5.3 ms) |
+| Target | Before | After | Result |
+|---|---|---|---|
+| Change one parameter: the edit (`set_input`) < 0.2 ms | 55 to 208 ns | 53 to 227 ns | **pass** |
+| Change one parameter and mark the affected subgraph dirty < 0.2 ms (`mark_dirty`; before M0.2b: the validation pass, `warm`) | 7.6 to 10.0 ms | 0.7 to 97 µs (all 10,000 nodes affected on chain and dag) | **pass** (was **fail**) |
+| A cook with nothing dirty (`warm`) | 7.6 to 10.0 ms | 40 to 86 ns | `O(1)` |
+| Cook 10,000 trivial nodes < 5 ms single-threaded (`cold`) | 12.1 to 12.3 ms | 1.7 to 2.5 ms | **pass** (was **fail**) |
+| Re-cook 10,000 trivial nodes after an edit < 5 ms (chain, dag `edit_head`) | 8.7 to 11.3 ms | 0.9 to 1.5 ms | **pass** (was **fail**) |
+| Early cutoff limits the work to the changed node | 1 node cooked, 6.7 to 9.5 ms | 1 node cooked, 26 µs (tree) to 0.5 ms (dag) | **works**; the remaining cost is marking and checking the 10,000 conservatively dirty nodes |
 
 ## Results: expression language
 
@@ -145,63 +187,43 @@ editing session is far from being a bottleneck.
 
 ## Observations
 
-**Where the time goes (cook).** The per-node overhead of the scheduler is
-about 450 to 600 ns (warm) and the work of actually cooking an `add` node
-adds only about 150 to 200 ns on top (compare `edit_head` with `cutoff` on
-the chain). The cost is dominated by bookkeeping, not by node work. Reading
-`cook.rs` and `graph.rs` (not profiled), per visited node the scheduler:
+**Where the time goes (cook, before M0.2b).** The old scheduler's per-node
+overhead was about 450 to 600 ns (warm), against about 150 to 200 ns for
+actually cooking an `add` node: per visited node it hashed UUIDs into a
+`HashSet` and a `HashMap`, did two `BTreeMap` range queries over the links
+and allocated two `Vec`s even when the node was reused. And because
+invalidation was lazy, every cook paid a full validation of the sink's
+dependencies, so the cost of finding the affected subgraph scaled with the
+graph, not with the change.
 
-- inserts the node into a `HashSet<NodeId>` (SipHash of a 16-byte UUID) and
-  walks its links with a `BTreeMap` range query in `eval_order`;
-- in `cook_one`, looks the node up in a `BTreeMap<NodeId, Node>`, walks the
-  links again with a second `BTreeMap` range query, looks up every upstream
-  node in the `HashMap<NodeId, Entry>` cache, and allocates two `Vec`s
-  (`linked` and the signature's `upstream`) even when the node is reused;
-- when it re-cooks, additionally allocates the input `Vec`, clones upstream
-  `Value`s, allocates the output `Vec`, compares it with the cached outputs
-  and re-inserts the cache entry.
+**What M0.2b changed.** In order of impact:
 
-The tree is slower per node than the chain on cold and warm cooks because
-its DFS stack and the UUID-keyed maps are accessed in a less cache-friendly
-order.
+1. *Push-based invalidation* (edits mark the downstream dirty, cooks visit
+   only dirty nodes): warm cooks went from milliseconds to tens of
+   nanoseconds, and small edits (tree) re-cook in microseconds.
+2. *Cached evaluation order* per target (the last 8 targets), plus each
+   target's upstream size and the time-dependent closure, until the node
+   set, links, `ch()` edges or time dependence change.
+3. *Dense slots*: nodes live in a slab indexed by `usize` slots; link
+   sources, `ch()` targets, dependents and the cooker's cache are indexed
+   by slot, and the dirty walk reads a compact (CSR) copy of the
+   dependents lists. The hot paths hash no UUIDs.
+4. *No allocation for reused nodes*: per-node signatures became a single
+   stamp compared with upstream versions, and gathered inputs reuse a
+   buffer. A re-cooked node still allocates its output `Vec` (the node API
+   returns one).
 
-**Why the "mark dirty" target fails.** The edit itself is cheap, but the
-lazy design makes every cook pay for a full validation of the sink's
-dependencies, so the cost of finding the affected subgraph scales with the
-graph, not with the change: an edit in the tree that re-cooks 14 nodes still
-costs 4.9 ms, and early cutoff (1 node re-cooked) costs as much as a warm
-cook. Early cutoff works as designed; it saves node work but not traversal.
+**What is left.** A re-cooked `add` node costs about 85 to 125 ns in total
+(`edit_head_cook_only` / 10,000). Cutoff on the chain and dag still marks
+all 10,000 nodes dirty and checks each one (about 35 to 50 ns per node)
+because invalidation is conservative: it cannot know before cooking that
+the head's output will not change. `build` got 15 to 27 % slower on chain and dag
+(tree 10 % faster; partly noise): each link now also updates the dense
+mirrors. Construction still allocates the node name twice,
+generates a UUID v7 per node and inserts into ordered maps, which is fine
+for document loading at this size.
 
-**Optimization opportunities** (not implemented here; listed roughly by
-expected impact):
-
-1. *Push-based invalidation.* On an edit, walk the `outgoing` index
-   downstream from the edited node and mark dependents dirty (cost
-   proportional to the affected subgraph, the spec's model). A cook then
-   visits only dirty nodes and a cook with nothing dirty is `O(1)`. This is
-   the only change that can meet the 0.2 ms target on a 10k graph; the others
-   shave constant factors.
-2. *Cache the evaluation order* per sink, keyed by a structural revision of
-   the graph that changes only on add/remove/link/unlink. Value edits (the
-   common case: slider drags, animation) would then skip the DFS and its
-   `HashSet` entirely.
-3. *Dense node indices.* Map `NodeId` (UUID) to a `u32` slot once and keep
-   nodes, links and the cook cache in `Vec`s indexed by slot (or at least
-   use a cheaper hasher than SipHash for UUID keys). This removes most
-   `BTreeMap`/`HashMap` lookups from the hot loop.
-4. *No allocations for reused nodes.* Compare the signature in place
-   (or with a fixed-size buffer / small-vector) instead of building
-   `linked` and `upstream` `Vec`s per visit, and gather links once instead
-   of twice.
-5. *Construction* (10 to 24 ms for 10k nodes, 1 to 2.4 µs per node and
-   link) allocates the node name twice (node and name index), generates a
-   UUID v7 per node and inserts into three ordered maps. Fine for document
-   loading at this size; dense indices would help here too.
-
-Items 1 to 4 together should bring cold cooks of 10k trivial nodes well
-under 5 ms on this machine (the node work itself is about 1.5 to 2 ms) and make
-small edits cost microseconds. Parallel evaluation is not needed to reach
-the targets.
+Parallel evaluation is not needed to reach the targets.
 
 **Command bus.** `History::apply` costs about twice `Command::apply`: it
 clones the command for the journal entry and stores both the command and its
