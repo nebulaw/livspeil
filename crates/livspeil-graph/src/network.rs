@@ -37,7 +37,7 @@ pub struct CharmMeta {
     /// Icon name.
     #[cfg_attr(feature = "serde", serde(default))]
     pub icon: Option<String>,
-    /// Capabilities the Charm needs (host I/O and the like), sorted.
+    /// Capabilities the Charm needs (host I/O and the like), in order.
     #[cfg_attr(feature = "serde", serde(default))]
     pub capabilities: Vec<String>,
     /// Minimum hardware tier (`T<n>`), 0 by default.
@@ -70,12 +70,17 @@ pub(crate) fn is_boundary_type(qualified_id: &str) -> bool {
 }
 
 /// Names used in paths (subnets and their contents) must be single path
-/// segments.
-pub(crate) fn check_name(name: &str, in_path: bool) -> Result<(), GraphError> {
+/// segments; names of interface ports (boundary nodes inside a subnet)
+/// additionally cannot contain `.`, since documents write them as
+/// `subnet.port`.
+pub(crate) fn check_name(name: &str, in_path: bool, port: bool) -> Result<(), GraphError> {
     if name.is_empty() {
         return Err(GraphError::EmptyName);
     }
     if in_path && (name.contains('/') || name == "." || name == "..") {
+        return Err(GraphError::InvalidName(name.to_owned()));
+    }
+    if port && name.contains('.') {
         return Err(GraphError::InvalidName(name.to_owned()));
     }
     Ok(())
@@ -372,7 +377,8 @@ impl Graph {
         if parent.is_none() && self.node_type(id) == Some(INPUT_TYPE) {
             return Err(GraphError::NotInSubnet(id));
         }
-        check_name(&name, parent.is_some() || self.is_subnet(id))?;
+        let port = parent.is_some() && self.node_type(id).is_some_and(is_boundary_type);
+        check_name(&name, parent.is_some() || self.is_subnet(id), port)?;
         if self.find_in(parent, &name).is_some() {
             return Err(GraphError::DuplicateName(name));
         }

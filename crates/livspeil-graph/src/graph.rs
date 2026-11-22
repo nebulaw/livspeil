@@ -143,7 +143,8 @@ pub enum GraphError {
     NotInSubnet(NodeId),
     /// The name cannot be used where paths must address the node: names of
     /// subnets and of nodes inside subnets must not contain `/` and must
-    /// not be `.` or `..`.
+    /// not be `.` or `..`; names of interface ports (boundary nodes inside
+    /// a subnet) must not contain `.` either.
     InvalidName(String),
     /// The link would connect two networks other than through a subnet's
     /// interface (see [`Graph::link`]).
@@ -186,7 +187,7 @@ impl fmt::Display for GraphError {
             }
             GraphError::InvalidName(name) => write!(
                 f,
-                "'{name}' cannot name a subnet or a node inside one (no '/', '.' or '..')"
+                "'{name}' cannot name a subnet or a node inside one (no '/', not '.' or '..'; no '.' in interface ports)"
             ),
             GraphError::CrossNetwork { from, to } => write!(
                 f,
@@ -459,14 +460,18 @@ impl Graph {
             }
         }
         let is_subnet = qualified_id == network::SUBNET_TYPE;
-        network::check_name(name, parent.is_some() || is_subnet)?;
+        let boundary = network::is_boundary_type(qualified_id);
+        network::check_name(
+            name,
+            parent.is_some() || is_subnet,
+            parent.is_some() && boundary,
+        )?;
         if self.find_in(parent, name).is_some() {
             return Err(GraphError::DuplicateName(name.to_owned()));
         }
         if self.index.contains_key(&id) {
             return Err(GraphError::DuplicateId(id));
         }
-        let boundary = network::is_boundary_type(qualified_id);
         if port_type.is_some() && !boundary {
             return Err(GraphError::NotPolymorphic(qualified_id.to_owned()));
         }
@@ -757,7 +762,8 @@ impl Graph {
             return Ok(name.to_owned());
         }
         let parent = current.parent;
-        network::check_name(name, parent.is_some() || self.is_subnet(id))?;
+        let port = parent.is_some() && network::is_boundary_type(&current.type_id);
+        network::check_name(name, parent.is_some() || self.is_subnet(id), port)?;
         if self.find_in(parent, name).is_some() {
             return Err(GraphError::DuplicateName(name.to_owned()));
         }

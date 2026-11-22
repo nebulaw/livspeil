@@ -10,7 +10,7 @@ use livspeil_params::{AnimChannel, Extrapolation, Interpolation, Tangent};
 
 use crate::anim::{extrapolation_name, interpolation_name};
 use crate::error::DocError;
-use crate::model::{DocNode, Document, ROOT_NETWORK};
+use crate::model::{DocNode, Document, Network, ROOT_NETWORK, Tier};
 use crate::value::{format_float, format_value, is_finite, quote};
 
 const INDENT: &str = "  ";
@@ -24,6 +24,10 @@ const INDENT: &str = "  ";
 /// `in`, `out`, with default settings left out), links sorted by
 /// `(from node, from port, to node, to port)`, meta positions sorted by
 /// node name, floats in shortest round-trip form, strings always quoted.
+/// A subnet node lists its inputs, then its `charm` block (properties in the
+/// order `version`, `icon`, `min-tier`; `min-tier` left out at `T0`), then
+/// its nested `network` (written bare when empty); boundary nodes carry
+/// `port-type=` after `id=`.
 /// Comments are not part of the model and are not written.
 ///
 /// # Errors
@@ -44,39 +48,7 @@ pub fn format(doc: &Document) -> Result<String, DocError> {
     );
 
     let _ = write!(out, "{INDENT}network {}", quote(ROOT_NETWORK));
-    if network.nodes.is_empty() && network.links.is_empty() {
-        out.push('\n');
-    } else {
-        out.push_str(" {\n");
-        for node in &network.nodes {
-            let _ = write!(
-                out,
-                "{INDENT}{INDENT}node {} type={} id={}",
-                quote(&node.name),
-                quote(&node.type_id),
-                quote(&node.id.to_string())
-            );
-            let ports: Vec<&str> = node.ports().collect();
-            if ports.is_empty() {
-                out.push('\n');
-                continue;
-            }
-            out.push_str(" {\n");
-            for port in ports {
-                write_input(&mut out, node, port)?;
-            }
-            let _ = writeln!(out, "{INDENT}{INDENT}}}");
-        }
-        for link in &network.links {
-            let _ = writeln!(
-                out,
-                "{INDENT}{INDENT}link from={} to={}",
-                quote(&format!("{}.{}", link.from_node, link.from_port)),
-                quote(&format!("{}.{}", link.to_node, link.to_port)),
-            );
-        }
-        let _ = writeln!(out, "{INDENT}}}");
-    }
+    write_network(&mut out, &network, 1)?;
 
     if !doc.meta.is_empty() {
         let _ = writeln!(out, "{INDENT}meta {{");
@@ -102,9 +74,84 @@ pub fn format(doc: &Document) -> Result<String, DocError> {
     Ok(out)
 }
 
-/// One `input` line (and its `anim` block) for a port with any source.
-fn write_input(out: &mut String, node: &DocNode, port: &str) -> Result<(), DocError> {
-    let _ = write!(out, "{INDENT}{INDENT}{INDENT}input {}", quote(port));
+/// The body of a `network` block whose header (indented `depth` levels)
+/// is already written: ` {` ... `}` and a newline, or just a newline when
+/// it is empty.
+fn write_network(out: &mut String, network: &Network, depth: usize) -> Result<(), DocError> {
+    if network.nodes.is_empty() && network.links.is_empty() {
+        out.push('\n');
+        return Ok(());
+    }
+    let pad = INDENT.repeat(depth + 1);
+    out.push_str(" {\n");
+    for node in &network.nodes {
+        let _ = write!(
+            out,
+            "{pad}node {} type={} id={}",
+            quote(&node.name),
+            quote(&node.type_id),
+            quote(&node.id.to_string())
+        );
+        if let Some(ty) = node.port_type {
+            let _ = write!(out, " port-type={}", quote(ty.name()));
+        }
+        let ports: Vec<&str> = node.ports().collect();
+        if ports.is_empty() && node.charm.is_none() && node.network.is_none() {
+            out.push('\n');
+            continue;
+        }
+        out.push_str(" {\n");
+        for port in ports {
+            write_input(out, node, port, depth + 2)?;
+        }
+        if let Some(charm) = &node.charm {
+            let _ = write!(out, "{pad}{INDENT}charm {}", quote(&charm.name));
+            if let Some(version) = &charm.version {
+                let _ = write!(out, " version={}", quote(version));
+            }
+            if let Some(icon) = &charm.icon {
+                let _ = write!(out, " icon={}", quote(icon));
+            }
+            if charm.min_tier != 0 {
+                let _ = write!(
+                    out,
+                    " min-tier={}",
+                    quote(&Tier(charm.min_tier).to_string())
+                );
+            }
+            if charm.capabilities.is_empty() {
+                out.push('\n');
+            } else {
+                out.push_str(" {\n");
+                for capability in &charm.capabilities {
+                    let _ = writeln!(out, "{pad}{INDENT}{INDENT}capability {}", quote(capability));
+                }
+                let _ = writeln!(out, "{pad}{INDENT}}}");
+            }
+        }
+        if let Some(inner) = &node.network {
+            let _ = write!(out, "{pad}{INDENT}network");
+            write_network(out, inner, depth + 2)?;
+        }
+        let _ = writeln!(out, "{pad}}}");
+    }
+    for link in &network.links {
+        let _ = writeln!(
+            out,
+            "{pad}link from={} to={}",
+            quote(&format!("{}.{}", link.from_node, link.from_port)),
+            quote(&format!("{}.{}", link.to_node, link.to_port)),
+        );
+    }
+    let _ = writeln!(out, "{}}}", INDENT.repeat(depth));
+    Ok(())
+}
+
+/// One `input` line (and its `anim` block) for a port with any source,
+/// indented `depth` levels.
+fn write_input(out: &mut String, node: &DocNode, port: &str, depth: usize) -> Result<(), DocError> {
+    let indent = INDENT.repeat(depth);
+    let _ = write!(out, "{indent}input {}", quote(port));
     if let Some(value) = node.inputs.get(port) {
         let _ = write!(out, " {}", value_text(node, port, value)?);
     }
@@ -116,8 +163,8 @@ fn write_input(out: &mut String, node: &DocNode, port: &str) -> Result<(), DocEr
         return Ok(());
     };
     out.push_str(" {\n");
-    write_anim(out, node, port, &anim.channel)?;
-    let _ = writeln!(out, "{INDENT}{INDENT}{INDENT}}}");
+    write_anim(out, node, port, &anim.channel, depth + 1)?;
+    let _ = writeln!(out, "{indent}}}");
     Ok(())
 }
 
@@ -126,8 +173,9 @@ fn write_anim(
     node: &DocNode,
     port: &str,
     channel: &AnimChannel,
+    depth: usize,
 ) -> Result<(), DocError> {
-    let pad = INDENT.repeat(4);
+    let pad = INDENT.repeat(depth);
     out.push_str(&pad);
     out.push_str("anim");
     if channel.pre() != Extrapolation::Hold {

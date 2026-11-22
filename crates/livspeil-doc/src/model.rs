@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
 
-use livspeil_graph::NodeId;
-use livspeil_node_api::Value;
+use livspeil_graph::{CharmMeta, NodeId, SUBNET_TYPE};
+use livspeil_node_api::{PortType, Value};
 use livspeil_params::AnimChannel;
 
 use crate::error::Location;
@@ -16,7 +16,8 @@ use crate::error::Location;
 /// The newest document format this build reads and the one it writes.
 pub const CURRENT_FORMAT: u32 = 1;
 
-/// Path of the root network. Subnets arrive with Charms.
+/// Path of the root network. Subnets hold nested, unnamed `network`
+/// blocks inside their `node`.
 pub const ROOT_NETWORK: &str = "/";
 
 /// Minimum hardware tier a room needs, written `T0`, `T1`, ...
@@ -106,10 +107,34 @@ pub struct Network {
 }
 
 impl Network {
-    /// Sort nodes and links into canonical order.
+    /// Sort nodes and links into canonical order, in nested subnet
+    /// networks too.
     pub fn sort(&mut self) {
         self.nodes.sort_by_key(|n| n.id);
         self.links.sort();
+        for node in &mut self.nodes {
+            if let Some(network) = &mut node.network {
+                network.sort();
+            }
+        }
+    }
+
+    /// Every node of this network and of the nested ones, with its path
+    /// relative to this network (`name`, `sub/name`, ...), parents first.
+    #[must_use]
+    pub fn walk(&self) -> Vec<(String, &DocNode)> {
+        let mut out = Vec::new();
+        let mut stack: Vec<(String, &Network)> = vec![(String::new(), self)];
+        while let Some((prefix, network)) = stack.pop() {
+            for node in &network.nodes {
+                let path = format!("{prefix}{}", node.name);
+                if let Some(inner) = &node.network {
+                    stack.push((format!("{path}/"), inner));
+                }
+                out.push((path, node));
+            }
+        }
+        out
     }
 }
 
@@ -128,6 +153,14 @@ pub struct DocNode {
     pub expressions: BTreeMap<String, DocExpr>,
     /// Animation channels driving inputs, by port name.
     pub animations: BTreeMap<String, DocAnim>,
+    /// Declared port type of a boundary node (`core.subnet.input@1`,
+    /// `core.output@1`), written `port-type="Color"`.
+    pub port_type: Option<PortType>,
+    /// Charm metadata of a subnet (`charm` block).
+    pub charm: Option<CharmMeta>,
+    /// The network inside a subnet (nested `network` block). Always `Some`
+    /// for subnets built by [`Document::from_graph`].
+    pub network: Option<Network>,
     pub at: SourceLoc,
 }
 
@@ -142,8 +175,17 @@ impl DocNode {
             inputs: BTreeMap::new(),
             expressions: BTreeMap::new(),
             animations: BTreeMap::new(),
+            port_type: None,
+            charm: None,
+            network: None,
             at: SourceLoc::default(),
         }
+    }
+
+    /// Whether the node is a subnet (`core.subnet@1`).
+    #[must_use]
+    pub fn is_subnet(&self) -> bool {
+        self.type_id == SUBNET_TYPE
     }
 
     /// Every port that has at least one source (static value, expression
@@ -204,6 +246,11 @@ impl DocAnim {
 /// A link from `from_node.from_port` (an output) to `to_node.to_port` (an
 /// input), by name. Written `link from="sun.phase" to="lamp.t"`; node names
 /// may contain dots because the port is everything after the last dot.
+///
+/// Both nodes are in the network holding the link. When a node is a
+/// subnet, the port names one of its interface ports (`lamp.hour` is the
+/// subnet's input `hour`, that is the `value` input of its
+/// `core.subnet.input@1` node `hour`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct DocLink {
     pub from_node: String,
@@ -256,7 +303,9 @@ impl Ord for DocLink {
 
 /// Editor-only data, written last so logic diffs stay clean.
 ///
-/// Positions are keyed by node *name*, like links and `ch()` paths. A tool
+/// Positions are keyed by node *name*, like links and `ch()` paths; nodes
+/// inside subnets by their path from the root without the leading `/`
+/// (`lamp/hour`). A tool
 /// that renames a node must rename its meta entry too (the graph rewrites
 /// its own `ch()` paths on rename, but knows nothing about meta). Keying by
 /// id would survive renames but make hand-edited files much harder to
