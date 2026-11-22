@@ -3,8 +3,11 @@
 
 //! Commands, their inverses and the changes they report.
 
-use livspeil_graph::{Graph, NamedLink, NodeId};
-use livspeil_node_api::Value;
+use livspeil_graph::{
+    CharmMeta, Graph, GraphError, INPUT_TYPE, INTERFACE_PORT, NamedLink, NodeId, OUTPUT_TYPE,
+    PortDirection, SUBNET_TYPE,
+};
+use livspeil_node_api::{PortType, Value};
 use livspeil_params::AnimChannel;
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +28,8 @@ pub enum Command {
         type_id: String,
         name: String,
     },
-    /// Remove a node and every link attached to it.
+    /// Remove a node and every link attached to it. Deleting a subnet
+    /// deletes everything inside it (its inverse restores all of it).
     DeleteNode { id: NodeId },
     /// Set an input's static value. `Int` values are accepted for `Float`
     /// inputs and stored as `Float`.
@@ -71,6 +75,67 @@ pub enum Command {
     /// Apply the commands in order, all or nothing. An empty transaction is
     /// a no-op.
     Transaction(Vec<Command>),
+    /// Add a node to the network of subnet `parent` (`None`: the root),
+    /// optionally with the port type of a boundary node
+    /// (`core.subnet.input@1`, `core.output@1`).
+    CreateNodeIn {
+        id: NodeId,
+        #[serde(default)]
+        parent: Option<NodeId>,
+        type_id: String,
+        name: String,
+        #[serde(default)]
+        port_type: Option<PortType>,
+    },
+    /// Add an empty subnet (`core.subnet@1`) to a network.
+    CreateSubnet {
+        id: NodeId,
+        #[serde(default)]
+        parent: Option<NodeId>,
+        name: String,
+    },
+    /// Add an interface port to a subnet: a `core.subnet.input@1`
+    /// (input) or `core.output@1` (output) node `id` called `name`.
+    AddInterfacePort {
+        id: NodeId,
+        subnet: NodeId,
+        direction: PortDirection,
+        name: String,
+        port_type: PortType,
+    },
+    /// Remove a subnet's interface port (its boundary node and links).
+    RemoveInterfacePort {
+        subnet: NodeId,
+        direction: PortDirection,
+        name: String,
+    },
+    /// Move a node (a subnet with its contents) to the network of
+    /// `parent` (`None`: the root). `ch()` paths that would break are
+    /// re-rendered; the inverse restores their exact text.
+    MoveNode {
+        node: NodeId,
+        #[serde(default)]
+        parent: Option<NodeId>,
+    },
+    /// Expose input `port` of `node` (inside a subnet) as interface input
+    /// `name` (new node `interface`) of the subnet; see
+    /// `livspeil_graph::Graph::promote`.
+    Promote {
+        node: NodeId,
+        port: String,
+        interface: NodeId,
+        name: String,
+    },
+    /// Undo a promotion of input `port` of `node`; see
+    /// `livspeil_graph::Graph::unpromote`. A port not fed by an interface
+    /// input is a successful no-op.
+    Unpromote { node: NodeId, port: String },
+    /// Set (`Some`) or remove (`None`) the Charm metadata of a subnet.
+    SetCharm {
+        subnet: NodeId,
+        #[serde(default)]
+        charm: Option<CharmMeta>,
+    },
 }
 
 /// A change to the document, reported by every applied command so a UI can
@@ -108,6 +173,17 @@ pub enum DocChange {
     AnimationChanged {
         node: NodeId,
         port: String,
+    },
+    /// A node moved between networks; followed by `ExpressionChanged` for
+    /// every expression whose `ch()` paths were re-rendered.
+    NodeMoved {
+        node: NodeId,
+        from: Option<NodeId>,
+        to: Option<NodeId>,
+    },
+    /// A subnet's Charm metadata was set or removed.
+    CharmChanged {
+        subnet: NodeId,
     },
 }
 
@@ -178,49 +254,7 @@ impl Command {
                 changes.push(DocChange::NodeAdded { id: *id });
                 Ok(Command::DeleteNode { id: *id })
             }
-            Command::DeleteNode { id } => {
-                let id = *id;
-                let (Some(name), Some(type_id)) = (graph.node_name(id), graph.node_type(id)) else {
-                    return Err(livspeil_graph::GraphError::UnknownNode(id).into());
-                };
-                let mut restore = vec![Command::CreateNode {
-                    id,
-                    type_id: type_id.to_owned(),
-                    name: name.to_owned(),
-                }];
-                restore.extend(
-                    graph
-                        .input_values(id)
-                        .map(|(port, value)| Command::SetInput {
-                            node: id,
-                            port: port.to_owned(),
-                            value: value.clone(),
-                        }),
-                );
-                restore.extend(graph.expressions(id).map(|(port, source)| {
-                    Command::SetExpression {
-                        node: id,
-                        port: port.to_owned(),
-                        source: source.to_owned(),
-                    }
-                }));
-                restore.extend(
-                    graph
-                        .animations(id)
-                        .map(|(port, channel)| Command::SetAnimation {
-                            node: id,
-                            port: port.to_owned(),
-                            channel: channel.clone(),
-                        }),
-                );
-                let mut links = graph.incoming_links(id);
-                links.extend(graph.outgoing_links(id));
-                restore.extend(links.iter().map(link_command));
-                graph.remove_node(id)?;
-                changes.extend(links.into_iter().map(DocChange::Unlinked));
-                changes.push(DocChange::NodeRemoved { id });
-                Ok(Command::Transaction(restore))
-            }
+            Command::DeleteNode { id } => delete_node(graph, *id, changes),
             Command::SetInput { node, port, value } => {
                 let previous = graph.input_value(*node, port)?.cloned();
                 graph.set_input(*node, port, value.clone())?;
@@ -278,7 +312,7 @@ impl Command {
                 Ok(inverse)
             }
             Command::Rename { node, name } => {
-                let readers = graph.referenced_by(*node);
+                let readers = subtree_reader_sources(graph, *node);
                 let old = graph.rename(*node, name)?;
                 if old != *name {
                     changes.push(DocChange::Renamed {
@@ -289,7 +323,10 @@ impl Command {
                     changes.extend(
                         readers
                             .into_iter()
-                            .map(|(node, port)| DocChange::ExpressionChanged { node, port }),
+                            .filter(|(node, port, source)| {
+                                graph.expression(*node, port).ok().flatten() != Some(source)
+                            })
+                            .map(|(node, port, _)| DocChange::ExpressionChanged { node, port }),
                     );
                 }
                 Ok(Command::Rename {
@@ -341,6 +378,166 @@ impl Command {
                 }
                 Ok(restore_animation(*node, port, previous))
             }
+            Command::CreateNodeIn {
+                id,
+                parent,
+                type_id,
+                name,
+                port_type,
+            } => {
+                graph.add_node_in(*parent, *id, type_id, name, *port_type)?;
+                changes.push(DocChange::NodeAdded { id: *id });
+                Ok(Command::DeleteNode { id: *id })
+            }
+            Command::CreateSubnet { id, parent, name } => Command::CreateNodeIn {
+                id: *id,
+                parent: *parent,
+                type_id: SUBNET_TYPE.to_owned(),
+                name: name.clone(),
+                port_type: None,
+            }
+            .apply_into(graph, changes),
+            Command::AddInterfacePort {
+                id,
+                subnet,
+                direction,
+                name,
+                port_type,
+            } => {
+                if !graph.contains(*subnet) {
+                    return Err(GraphError::UnknownNode(*subnet).into());
+                }
+                if !graph.is_subnet(*subnet) {
+                    return Err(GraphError::NotASubnet(*subnet).into());
+                }
+                Command::CreateNodeIn {
+                    id: *id,
+                    parent: Some(*subnet),
+                    type_id: boundary_type(*direction).to_owned(),
+                    name: name.clone(),
+                    port_type: Some(*port_type),
+                }
+                .apply_into(graph, changes)
+            }
+            Command::RemoveInterfacePort {
+                subnet,
+                direction,
+                name,
+            } => {
+                let id = graph
+                    .interface_port(*subnet, *direction, name)
+                    .ok_or_else(|| GraphError::UnknownPort {
+                        node: *subnet,
+                        port: name.clone(),
+                        direction: *direction,
+                    })?;
+                Command::DeleteNode { id }.apply_into(graph, changes)
+            }
+            Command::MoveNode { node, parent } => {
+                if !graph.contains(*node) {
+                    return Err(GraphError::UnknownNode(*node).into());
+                }
+                let from = graph.parent(*node);
+                let rewritten = graph.move_node(*node, *parent)?;
+                if from == *parent {
+                    return Ok(Command::noop());
+                }
+                changes.push(DocChange::NodeMoved {
+                    node: *node,
+                    from,
+                    to: *parent,
+                });
+                let mut inverse = vec![Command::MoveNode {
+                    node: *node,
+                    parent: from,
+                }];
+                for (reader, port, source) in rewritten {
+                    changes.push(DocChange::ExpressionChanged {
+                        node: reader,
+                        port: port.clone(),
+                    });
+                    inverse.push(Command::SetExpression {
+                        node: reader,
+                        port,
+                        source,
+                    });
+                }
+                Ok(Command::Transaction(inverse))
+            }
+            Command::Promote {
+                node,
+                port,
+                interface,
+                name,
+            } => {
+                let ty = graph
+                    .node_spec(*node)
+                    .ok_or(GraphError::UnknownNode(*node))?
+                    .inputs
+                    .iter()
+                    .find(|p| p.name == port)
+                    .map(|p| p.ty)
+                    .ok_or_else(|| GraphError::UnknownPort {
+                        node: *node,
+                        port: port.clone(),
+                        direction: PortDirection::Input,
+                    })?;
+                let subnet = graph.parent(*node).ok_or(GraphError::NotInSubnet(*node))?;
+                let mut steps = vec![Command::CreateNodeIn {
+                    id: *interface,
+                    parent: Some(subnet),
+                    type_id: INPUT_TYPE.to_owned(),
+                    name: name.clone(),
+                    port_type: Some(ty),
+                }];
+                if let Some(value) = graph.input_value(*node, port)? {
+                    steps.push(Command::SetInput {
+                        node: *interface,
+                        port: INTERFACE_PORT.to_owned(),
+                        value: value.clone(),
+                    });
+                }
+                steps.push(Command::Link {
+                    from: *interface,
+                    from_port: INTERFACE_PORT.to_owned(),
+                    to: *node,
+                    to_port: port.clone(),
+                });
+                Command::Transaction(steps).apply_into(graph, changes)
+            }
+            Command::Unpromote { node, port } => {
+                let Some((iface, _)) = graph.link_source(*node, port)? else {
+                    return Ok(Command::noop());
+                };
+                if graph.node_type(iface) != Some(INPUT_TYPE)
+                    || graph.parent(iface) != graph.parent(*node)
+                {
+                    return Ok(Command::noop());
+                }
+                let mut steps = vec![Command::Unlink {
+                    to: *node,
+                    to_port: port.clone(),
+                }];
+                if let Some(value) = graph.input_value(iface, INTERFACE_PORT)? {
+                    steps.push(Command::SetInput {
+                        node: *node,
+                        port: port.clone(),
+                        value: value.clone(),
+                    });
+                }
+                if graph.outgoing_links(iface).len() == 1 && graph.referenced_by(iface).is_empty() {
+                    steps.push(Command::DeleteNode { id: iface });
+                }
+                Command::Transaction(steps).apply_into(graph, changes)
+            }
+            Command::SetCharm { subnet, charm } => {
+                let previous = graph.set_charm(*subnet, charm.clone())?;
+                changes.push(DocChange::CharmChanged { subnet: *subnet });
+                Ok(Command::SetCharm {
+                    subnet: *subnet,
+                    charm: previous,
+                })
+            }
             Command::Transaction(steps) => {
                 let mark = changes.len();
                 let mut inverses = Vec::with_capacity(steps.len());
@@ -369,6 +566,135 @@ impl Command {
             }
         }
     }
+}
+
+fn boundary_type(direction: PortDirection) -> &'static str {
+    match direction {
+        PortDirection::Input => INPUT_TYPE,
+        PortDirection::Output => OUTPUT_TYPE,
+    }
+}
+
+/// The expressions reading `node` or anything inside it, as `(reader,
+/// port, source)`.
+fn subtree_reader_sources(graph: &Graph, node: NodeId) -> Vec<(NodeId, String, String)> {
+    let mut readers = Vec::new();
+    for n in subtree(graph, node) {
+        for (reader, port) in graph.referenced_by(n) {
+            if let Ok(Some(source)) = graph.expression(reader, &port) {
+                let entry = (reader, port.clone(), source.to_owned());
+                if !readers.contains(&entry) {
+                    readers.push(entry);
+                }
+            }
+        }
+    }
+    readers
+}
+
+/// `node` and everything inside it, descendants first.
+fn subtree(graph: &Graph, node: NodeId) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    let mut stack = vec![(node, false)];
+    while let Some((n, expanded)) = stack.pop() {
+        if expanded {
+            out.push(n);
+            continue;
+        }
+        stack.push((n, true));
+        if graph.is_subnet(n) {
+            stack.extend(graph.children(Some(n)).into_iter().map(|c| (c, false)));
+        }
+    }
+    out
+}
+
+/// Delete a node. A non-empty subnet becomes a transaction: clear every
+/// expression inside (they may read each other), delete the children,
+/// then the subnet, so the inverse restores everything exactly.
+fn delete_node(
+    graph: &mut Graph,
+    id: NodeId,
+    changes: &mut Vec<DocChange>,
+) -> Result<Command, CmdError> {
+    if graph.is_subnet(id) && !graph.children(Some(id)).is_empty() {
+        let nodes = subtree(graph, id);
+        let mut steps: Vec<Command> = nodes
+            .iter()
+            .flat_map(|&n| {
+                graph
+                    .expressions(n)
+                    .map(|(port, _)| Command::ClearExpression {
+                        node: n,
+                        port: port.to_owned(),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        steps.extend(nodes.into_iter().map(|n| Command::DeleteNode { id: n }));
+        return Command::Transaction(steps).apply_into(graph, changes);
+    }
+    let (Some(name), Some(type_id)) = (graph.node_name(id), graph.node_type(id)) else {
+        return Err(GraphError::UnknownNode(id).into());
+    };
+    let parent = graph.parent(id);
+    let port_type = graph.port_type(id);
+    let create = if parent.is_none() && port_type.is_none() {
+        Command::CreateNode {
+            id,
+            type_id: type_id.to_owned(),
+            name: name.to_owned(),
+        }
+    } else {
+        Command::CreateNodeIn {
+            id,
+            parent,
+            type_id: type_id.to_owned(),
+            name: name.to_owned(),
+            port_type,
+        }
+    };
+    let mut restore = vec![create];
+    if let Some(charm) = graph.charm(id) {
+        restore.push(Command::SetCharm {
+            subnet: id,
+            charm: Some(charm.clone()),
+        });
+    }
+    restore.extend(
+        graph
+            .input_values(id)
+            .map(|(port, value)| Command::SetInput {
+                node: id,
+                port: port.to_owned(),
+                value: value.clone(),
+            }),
+    );
+    restore.extend(
+        graph
+            .expressions(id)
+            .map(|(port, source)| Command::SetExpression {
+                node: id,
+                port: port.to_owned(),
+                source: source.to_owned(),
+            }),
+    );
+    restore.extend(
+        graph
+            .animations(id)
+            .map(|(port, channel)| Command::SetAnimation {
+                node: id,
+                port: port.to_owned(),
+                channel: channel.clone(),
+            }),
+    );
+    let mut links = graph.incoming_links(id);
+    links.extend(graph.outgoing_links(id));
+    restore.extend(links.iter().map(link_command));
+    graph.remove_node(id)?;
+    changes.extend(links.into_iter().map(DocChange::Unlinked));
+    changes.push(DocChange::NodeRemoved { id });
+    Ok(Command::Transaction(restore))
 }
 
 fn restore_input(node: NodeId, port: &str, previous: Option<Value>) -> Command {

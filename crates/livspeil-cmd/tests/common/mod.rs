@@ -62,6 +62,16 @@ pub fn registry() -> Arc<NodeRegistry> {
                 .output("n", PortType::Int),
         )))
         .expect("flag registers");
+    // Subnets and their boundary nodes (structural, M0.7).
+    registry
+        .register(Arc::new(livspeil_nodes_core::Subnet::new()))
+        .expect("subnet registers");
+    registry
+        .register(Arc::new(livspeil_nodes_core::SubnetInput::new()))
+        .expect("subnet input registers");
+    registry
+        .register(Arc::new(livspeil_nodes_core::Output::new()))
+        .expect("output registers");
     Arc::new(registry)
 }
 
