@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.math.sin"
+version = 1
+summary = "Sine of x (radians)"
+time_dependent = false
+reads_system = false
+description = '''
+`sin(±0) == ±0`; an infinite or `NaN` `x` gives `NaN`. Platform math library (see `core.math.pow`).
+'''
+
+[[inputs]]
+name = "x"
+type = "Float"
+default = 0.0
+
+[[outputs]]
+name = "out"
+type = "Float"
+
+[[tests]]
+inputs = { x = 1.5707963267948966 }
+expect = { out = 1.0 }
+
+[[tests]]
+inputs = { x = -0.0 }
+expect = { out = -0.0 }
+
+[[tests]]
+inputs = { x = inf }
+expect = { out = nan }

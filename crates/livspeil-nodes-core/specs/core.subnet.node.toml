@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.subnet"
+version = 1
+summary = "A node that contains a network (a Charm when it has metadata)"
+time_dependent = false
+reads_system = false
+description = '''
+Contains a network. It has no ports of its own: its interface is made of
+the `core.subnet.input` and `core.output` boundary nodes inside it.
+'''
+inputs = []
+outputs = []
+
+[[tests]]
+name = "cooks to nothing"
+expect = {}

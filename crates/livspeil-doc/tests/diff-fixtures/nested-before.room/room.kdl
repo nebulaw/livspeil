@@ -1,0 +1,88 @@
+// SPDX-FileCopyrightText: 2026 Livspeil contributors
+// SPDX-License-Identifier: CC0-1.0
+
+// Diff fixture: subnets, Charm metadata, tables and curves (see
+// nested-after.room for the other side).
+
+room "Nested Before" format=1 min-tier="T1" {
+  network "/" {
+    node "sun" type="core.time.timeofday@1" id="01930000-0000-7000-8000-000000000001"
+    node "bias" type="core.math.add@1" id="01930000-0000-7000-8000-000000000002" {
+      input "b" 0.1
+    }
+    node "lamp" type="core.subnet@1" id="01930000-0000-7000-8000-000000000010" {
+      charm "Glow" version="1.0.0" icon="sun" {
+        capability "time"
+      }
+      network {
+        node "hour" type="core.subnet.input@1" id="01930000-0000-7000-8000-000000000011" port-type="Float" {
+          input "value" 12.0
+        }
+        node "sunrise" type="core.math.smoothstep@1" id="01930000-0000-7000-8000-000000000012" {
+          input "edge0" 5.0
+          input "edge1" 8.0
+        }
+        node "scale" type="core.math.mul@1" id="01930000-0000-7000-8000-000000000013" {
+          input "b" 2.0
+        }
+        node "level" type="core.output@1" id="01930000-0000-7000-8000-000000000014" port-type="Float"
+        link from="hour.value" to="sunrise.x"
+        link from="scale.out" to="level.value"
+        link from="sunrise.out" to="scale.a"
+      }
+    }
+    node "palette" type="core.table.sort@1" id="01930000-0000-7000-8000-000000000020" {
+      input "table" {
+        table {
+          column "name" type="String"
+          column "weight" type="Float"
+          row "a" 1.0
+          row "b" 2.0
+          row "c" 3.0
+        }
+      }
+    }
+    node "big" type="core.table.count@1" id="01930000-0000-7000-8000-000000000021" {
+      input "table" {
+        table {
+          column "x" type="Int"
+          column "y" type="Int"
+          row 0 0
+          row 1 2
+          row 2 4
+          row 3 6
+          row 4 8
+          row 5 10
+          row 6 12
+          row 7 14
+          row 8 16
+          row 9 18
+          row 10 20
+          row 11 22
+        }
+      }
+    }
+    node "ramp" type="core.curve.ramp@1" id="01930000-0000-7000-8000-000000000022" {
+      input "curve" {
+        curve pre="loop" {
+          key 0.0 0.0
+          key 0.5 1.0
+          key 1.0 0.0
+        }
+      }
+    }
+    node "fade" type="core.curve.ramp@1" id="01930000-0000-7000-8000-000000000023" {
+      input "curve" {
+        curve {
+          key 0.0 0.0
+          key 1.0 1.0
+        }
+      }
+    }
+    link from="sun.hour" to="lamp.hour"
+  }
+  meta {
+    node "lamp" x=0.0 y=0.0
+    node "lamp/sunrise" x=10.0 y=20.0
+  }
+}

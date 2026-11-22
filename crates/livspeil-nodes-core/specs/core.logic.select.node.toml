@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.logic.select"
+version = 1
+summary = "Pick a when cond is true, else b"
+time_dependent = false
+reads_system = false
+description = '''
+`out = cond ? a : b`. Float-only for now; it becomes polymorphic once the node API has constraint classes.
+'''
+
+[[inputs]]
+name = "cond"
+type = "Bool"
+default = false
+
+[[inputs]]
+name = "a"
+type = "Float"
+default = 1.0
+
+[[inputs]]
+name = "b"
+type = "Float"
+default = 0.0
+
+[[outputs]]
+name = "out"
+type = "Float"
+
+[[tests]]
+name = "defaults"
+expect = { out = 0.0 }
+
+[[tests]]
+inputs = { cond = true, a = 2.0, b = -3.0 }
+expect = { out = 2.0 }
+
+[[tests]]
+inputs = { cond = false, a = 2.0, b = -3.0 }
+expect = { out = -3.0 }

@@ -62,13 +62,20 @@ option and exit code (0 ok, 1 load error, 2 usage error, 3 node error).
 ### `diff`
 
 `livspeil diff <a> <b> [--format text|jsonl] [--meta]` compares two
-documents semantically: nodes are matched by id, so a rename is one change
-and does not show its links as changed. It reports header changes (name,
-min-tier), added and removed nodes, renames, type changes, input values,
-expressions, animations (settings and keys, matched by time), and links;
-editor positions (`meta`) only with `--meta`. Values are shown in their
-canonical `room.kdl` text. The order is deterministic: header, nodes by id
-(each node's ports by name), links, meta.
+documents semantically: nodes are matched by id across the whole tree (the
+root network and every subnet), so a rename is one change and does not show
+its links as changed, and a node moved into or out of a subnet is one
+`moved` change. It reports header changes (name, min-tier), added and
+removed nodes, renames, type changes, moves between networks, `port-type`
+changes, Charm metadata (name, version, icon, min-tier, capabilities added
+or removed), input values, expressions, animations and `Curve` values
+(settings and keys, matched by time), `Table` values (a size summary with
+the number of changed cells, plus changed columns and rows when at most 20
+cells changed), and links (with their network); editor positions (`meta`)
+only with `--meta`. Nodes are named by path (`lamp`, `desk_lamp/sunrise`).
+Values are shown in their canonical `room.kdl` text. The order is
+deterministic: header, nodes by id (each node's ports by name), links by
+network, meta.
 
 ```text
 ~ room min-tier: "T0" -> "T1"
@@ -77,6 +84,14 @@ canonical `room.kdl` text. The order is deterministic: header, nodes by id
 ~ node "lamp" input "t" anim key 1.0: 0.8 interp="bezier" tangent="flat" -> 0.9 interp="step"
 + node "glow" type="core.math.add@1" id="01920000-0000-7000-8000-000000000005"
 - link "light.out" -> "old_add.b"
+~ node "lamp/bias" moved: "/" -> "/lamp"
+~ node "lamp" charm version: "1.0.0" -> "1.1.0"
++ node "lamp" charm capability: "net"
+~ node "lamp/hour" port-type: "Float" -> "Int"
+~ node "palette" input "table" table: 2 cols x 3 rows -> 2 cols x 4 rows (3 cells changed)
+~ node "palette" input "table" table row 1: "b" 2.0 -> "b" 2.5
++ node "ramp" input "curve" curve key 0.75: 0.5
++ link "dawn.out" -> "bias.a" in "/lamp"
 ```
 
 `--format jsonl` prints one object per change, keys in a fixed order and
@@ -84,19 +99,32 @@ left out when they do not apply:
 
 ```json
 {"op":"changed","kind":"input","node":"lamp","id":"01920000-0000-7000-8000-000000000002","port":"a","old":"0.2","new":"0.3"}
+{"op":"changed","kind":"node-move","node":"bias","id":"01930000-0000-7000-8000-000000000002","path":"lamp/bias","old":"\"/\"","new":"\"/lamp\""}
 ```
 
 - `op`: `added`, `removed`, `changed`.
 - `kind`: `room-name`, `format`, `min-tier`, `node`, `node-name`,
-  `node-type`, `input`, `expr`, `anim` (a whole channel), `anim-setting`,
-  `anim-key`, `link`, `position`.
-- `node`, `id`: the node (its new name if renamed); `port`: the input;
-  `setting`: `pre`, `post` or `offset`; `time`: the key time; `from`, `to`:
-  link endpoints as `node.port`.
+  `node-type`, `node-move`, `port-type`, `charm` (a whole block),
+  `charm-field`, `charm-capability`, `input`, `expr`, `anim` (a whole
+  channel), `anim-setting`, `anim-key`, `table`, `table-column`,
+  `table-row`, `curve-setting`, `curve-key`, `link`, `position`.
+- `node`, `id`: the node (its new name if renamed); `path`: its path, only
+  for nodes inside a subnet; `port`: the input; `setting`: `pre`, `post` or
+  `offset`; `time`: the key time (curve key position); `field`: the Charm
+  field (`name`, `version`, `icon`, `min-tier`); `cells` (number): changed
+  table cells; `column`: table column name; `row` (number): table row
+  index; `from`, `to`: link endpoints as `node.port`; `network`: the
+  link's network path, only inside a subnet.
 - `old`, `new`: canonical KDL text of the value (`"0.2"`, `"\"text\""`,
   `"(color)\"oklch(...)\""`), left out for additions and removals
   respectively; for `node` the quoted type id, for `anim` a summary such as
-  `"3 keys 0.0..2.0 pre=\"loop\""`, for `position` `"x y"`.
+  `"3 keys 0.0..2.0 pre=\"loop\""`, for `charm` a summary, for `table`
+  the size (`"2 cols x 3 rows"`), for `table-row` the row's cells, for
+  Table/Curve `input` values `"table 2 cols x 3 rows"` or
+  `"curve 2 keys 0.0..1.0"`, for `node-move` the quoted network path, for
+  `position` `"x y"`.
+
+New kinds and keys may be added; existing ones keep their meaning.
 
 Exit codes follow `git diff --exit-code`: 0 no differences, 1 differences,
 2 usage error, 3 a document cannot be read or parsed. The diff is the
@@ -125,7 +153,10 @@ livspeil assets check examples/sun-and-lamp.room [--strict]
 ```
 
 `assets add` copies the file to `assets/<sha256>.<ext>` and updates
-`assets.lock`. `assets check` (and `validate`, whenever the package has an
+`assets.lock`. If the path is already listed with other data (license,
+source, author, or a stale hash or size) it refuses, unless `--replace`,
+which rewrites that entry canonically. `livspeil fmt` also rewrites the
+package's `assets.lock` canonically, and `fmt --check` fails if it is not. `assets check` (and `validate`, whenever the package has an
 `assets.lock` or `assets/`) reports, as errors, hash or size mismatches,
 missing files, files in `assets/` that are not listed, and malformed license
 expressions (or `NONE`/`NOASSERTION`). Licenses outside the allow-list

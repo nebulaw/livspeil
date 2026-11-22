@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.subnet.input"
+version = 1
+summary = "An input port of the enclosing subnet"
+time_dependent = false
+reads_system = false
+description = '''
+One input port of the enclosing subnet. Its input `value` is fed from
+outside the subnet (a link in the outer network, or its own static value:
+the promoted parameter); its output `value` is read inside. The registered
+spec uses `Float`; `livspeil-graph` retypes both ports to the interface
+port's declared type. Cooking copies the input to the output.
+'''
+
+[[inputs]]
+name = "value"
+type = "Float"
+default = 0.0
+
+[[outputs]]
+name = "value"
+type = "Float"
+
+[[tests]]
+inputs = { value = 2.5 }
+expect = { value = 2.5 }
+
+[[tests]]
+name = "defaults"
+expect = { value = 0.0 }

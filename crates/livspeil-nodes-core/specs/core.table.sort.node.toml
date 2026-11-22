@@ -1,0 +1,92 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.table.sort"
+version = 1
+summary = "Sort the rows of a table by a column"
+time_dependent = false
+reads_system = false
+description = '''
+`table` with its rows sorted by `column`, ascending unless `ascending` is
+false. The sort is stable in both directions (rows with equal keys keep
+their order). Numbers sort by IEEE total order (`-0.0` before `0.0`, `NaN`
+after infinity), `false` before `true`, strings by Unicode scalar values,
+vectors and colors component by component.
+'''
+
+[[inputs]]
+name = "table"
+type = "Table"
+default = { columns = [] }
+
+[[inputs]]
+name = "column"
+type = "String"
+default = "name"
+
+[[inputs]]
+name = "ascending"
+type = "Bool"
+default = true
+
+[[outputs]]
+name = "out"
+type = "Table"
+
+[[tests]]
+name = "names by Unicode scalar value"
+expect = { out = { columns = [{ name = "tag", type = "String", values = ["", "Sci-Fi", "classic", "sci-fi"] }] } }
+
+[tests.inputs]
+column = "tag"
+
+[[tests.inputs.table.columns]]
+name = "tag"
+type = "String"
+values = ["sci-fi", "classic", "Sci-Fi", ""]
+
+[[tests]]
+name = "descending and stable"
+expect = { out = { columns = [{ name = "name", type = "String", values = ["Emma", "dracula", "Dune", "Émile", "Ubik"] }, { name = "pages", type = "Int", values = [474, 418, 412, 412, 202] }] } }
+
+[tests.inputs]
+column = "pages"
+ascending = false
+
+[[tests.inputs.table.columns]]
+name = "name"
+type = "String"
+values = ["Dune", "Emma", "dracula", "Ubik", "Émile"]
+
+[[tests.inputs.table.columns]]
+name = "pages"
+type = "Int"
+values = [412, 474, 418, 202, 412]
+
+[[tests]]
+name = "floats by total order"
+expect = { out = { columns = [{ name = "rating", type = "Float", values = [-0.0, 0.0, 3.75, 4.5, nan] }] } }
+
+[tests.inputs]
+column = "rating"
+
+[[tests.inputs.table.columns]]
+name = "rating"
+type = "Float"
+values = [4.5, 3.75, -0.0, nan, 0.0]
+
+[[tests]]
+expect_error = { port = "column", message = "no column \"x\"" }
+
+[tests.inputs]
+column = "x"
+
+[[tests.inputs.table.columns]]
+name = "tag"
+type = "String"
+values = ["sci-fi", "classic", "Sci-Fi", ""]

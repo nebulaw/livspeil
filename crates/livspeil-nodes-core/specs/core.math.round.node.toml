@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.math.round"
+version = 1
+summary = "Round x to the nearest multiple of step (halves away from zero)"
+time_dependent = false
+reads_system = false
+description = '''
+Rounds `x` to the nearest multiple of `step` (halves away from zero; the
+sign of `step` does not matter). When `1 / step` is a whole number (steps
+such as 0.1, 0.25 or 1) the node computes `round(x * (1/step)) / (1/step)`,
+so `round(0.3, 0.1)` is `0.3` rather than `0.30000000000000004`. A zero,
+`NaN` or infinite `step` is an invalid-input error on `step`.
+'''
+
+[[inputs]]
+name = "x"
+type = "Float"
+default = 0.0
+
+[[inputs]]
+name = "step"
+type = "Float"
+default = 1.0
+
+[[outputs]]
+name = "out"
+type = "Float"
+
+[[tests]]
+inputs = { x = 2.5 }
+expect = { out = 3.0 }
+
+[[tests]]
+inputs = { x = -2.5 }
+expect = { out = -3.0 }
+
+[[tests]]
+name = "decimal steps round as on paper"
+inputs = { x = 0.25, step = 0.1 }
+expect = { out = 0.3 }
+
+[[tests]]
+inputs = { x = 1.234567, step = 0.01 }
+expect = { out = 1.23 }
+
+[[tests]]
+inputs = { x = 1.0, step = 0.0 }
+expect_error = { port = "step", message = "must not be zero" }

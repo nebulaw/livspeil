@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.math.cos"
+version = 1
+summary = "Cosine of x (radians)"
+time_dependent = false
+reads_system = false
+description = '''
+`cos(±0) == 1`; an infinite or `NaN` `x` gives `NaN`. Platform math library (see `core.math.pow`).
+'''
+
+[[inputs]]
+name = "x"
+type = "Float"
+default = 0.0
+
+[[outputs]]
+name = "out"
+type = "Float"
+
+[[tests]]
+name = "defaults"
+expect = { out = 1.0 }
+
+[[tests]]
+inputs = { x = 3.141592653589793 }
+expect = { out = -1.0 }
+
+[[tests]]
+inputs = { x = -inf }
+expect = { out = nan }

@@ -1,0 +1,30 @@
+~ room name: "Nested Before" -> "Nested After"
+~ room min-tier: "T1" -> "T2"
+~ node "lamp/bias" moved: "/" -> "/lamp"
+~ node "lamp" charm version: "1.0.0" -> "1.1.0"
+- node "lamp" charm icon: "sun"
+~ node "lamp" charm min-tier: "T0" -> "T2"
++ node "lamp" charm capability: "net"
+~ node "lamp/hour" port-type: "Float" -> "Int"
+~ node "lamp/hour" input "value": 12.0 -> 12
+~ node "lamp/dawn" renamed: "sunrise" -> "dawn"
+~ node "scale" moved: "/lamp" -> "/"
+~ node "palette" input "table" table: 2 cols x 3 rows -> 2 cols x 4 rows (3 cells changed)
+~ node "palette" input "table" table row 1: "b" 2.0 -> "b" 2.5
++ node "palette" input "table" table row 3: "d" 4.0
+~ node "big" input "table" table: 2 cols x 12 rows -> 2 cols x 12 rows (23 cells changed)
+~ node "ramp" input "curve" curve pre: "loop" -> "hold"
+~ node "ramp" input "curve" curve key 0.5: 1.0 -> 0.8 interp="step"
++ node "ramp" input "curve" curve key 0.75: 0.5
+- node "fade" input "curve": curve 2 keys 0.0..1.0
++ node "fx" type="core.subnet@1" id="01930000-0000-7000-8000-000000000030"
++ node "fx" charm: "Sparkle" version="0.1.0" capability="gpu"
++ node "fx/amount" type="core.subnet.input@1" id="01930000-0000-7000-8000-000000000031"
++ node "fx/amount" port-type: "Float"
++ node "fx/amount" input "value": 0.5
++ link "lamp.level" -> "scale.a"
+- link "sun.hour" -> "lamp.hour"
++ link "bias.out" -> "level.value" in "/lamp"
++ link "dawn.out" -> "bias.a" in "/lamp"
+- link "scale.out" -> "level.value" in "/lamp"
+- link "sunrise.out" -> "scale.a" in "/lamp"
