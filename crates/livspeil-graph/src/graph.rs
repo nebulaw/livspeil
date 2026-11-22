@@ -129,7 +129,7 @@ pub enum GraphError {
     /// check.
     Expression(Box<ExprError>),
     /// The node cannot be removed: input `port` of node `by` reads it
-    /// through `ch()`.
+    /// through `ch()` or `out()`.
     Referenced {
         node: NodeId,
         by: NodeId,
@@ -179,7 +179,7 @@ impl fmt::Display for GraphError {
             GraphError::Expression(err) => write!(f, "expression error: {err}"),
             GraphError::Referenced { node, by, port } => write!(
                 f,
-                "node {node} is read by ch() in input '{port}' of node {by}"
+                "node {node} is read by ch() or out() in input '{port}' of node {by}"
             ),
             GraphError::NotASubnet(id) => write!(f, "node {id} is not a subnet"),
             GraphError::NotInSubnet(id) => {

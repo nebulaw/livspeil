@@ -310,7 +310,8 @@ impl Rng {
 
 /// Property: two long-lived cookers that each cook random subsets of the
 /// nodes after random edits (including node removal and re-adding, which
-/// reuses slots, and clock changes) always agree with a fresh cooker.
+/// reuses slots, clock changes, and `ch()`/`out()` expressions) always
+/// agree with a fresh cooker.
 #[test]
 fn long_lived_cookers_match_fresh_cookers() {
     const PORTS: [&str; 2] = ["a", "b"];
@@ -321,6 +322,11 @@ fn long_lived_cookers_match_fresh_cookers() {
         "ch(\"../{n}/{p}\") + ch(\"{m}/{q}\")",
         "sin($T) + ch(\"{n}/{p}\")",
         "3",
+        // out() (M0.11): outputs of other nodes, mixed with ch().
+        "out(\"{n}/out\") * 0.5",
+        "out(\"{n}/out\") + ch(\"{m}/{q}\")",
+        "out(\"../{m}/time\") + out(\"{n}/frame\") * 0.25",
+        "out(\"{n}/out\") > 1 ? out(\"{m}/out\") : 2",
     ];
     for seed in 1..=300u64 {
         let mut rng = Rng(seed.wrapping_mul(0x2545_F491_4F6C_DD1D) | 1);
@@ -376,7 +382,7 @@ fn long_lived_cookers_match_fresh_cookers() {
                 9 => g.unlink(node, port).map(|_| ()),
                 10 => g.rename(node, &format!("r{step}")).map(|_| ()),
                 _ => {
-                    // Remove a node (refused if read through ch()) and add
+                    // Remove a node (refused if read through ch() or out()) and add
                     // a new one, which reuses the slot.
                     let idx = rng.below(ids.len());
                     if g.remove_node(ids[idx]).is_ok() {
