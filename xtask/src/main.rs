@@ -13,6 +13,8 @@ TASKS:
              the tools are installed (cargo-deny, reuse)
     fmt      Format the whole workspace
     test     Run all tests
+    bench    Run all benchmarks (release mode, criterion); extra arguments
+             go to criterion, e.g. `cargo xtask bench -- --quick`
     deny     Run cargo-deny (license and advisory checks)
     reuse    Run reuse lint (SPDX compliance)
 ";
@@ -23,6 +25,7 @@ fn main() -> ExitCode {
         Some("check") => check(),
         Some("fmt") => run("cargo", &["fmt", "--all"]),
         Some("test") => run("cargo", &["test", "--workspace"]),
+        Some("bench") => bench(),
         Some("deny") => run_required("cargo", &["deny", "check"], "cargo-deny"),
         Some("reuse") => run_required("reuse", &["lint"], "reuse"),
         None | Some("help" | "-h" | "--help") => {
@@ -58,6 +61,21 @@ fn check() -> bool {
         && run("cargo", &["test", "--workspace"])
         && run_optional("cargo", &["deny", "check"], "cargo-deny")
         && run_optional("reuse", &["lint"], "reuse")
+}
+
+/// Run every criterion benchmark in the workspace. Arguments after
+/// `cargo xtask bench` are passed on (a leading `--` is accepted).
+fn bench() -> bool {
+    let extra: Vec<String> = std::env::args()
+        .skip(2)
+        .skip_while(|arg| arg == "--")
+        .collect();
+    let mut args = vec!["bench", "--workspace", "--bench", "*"];
+    if !extra.is_empty() {
+        args.push("--");
+        args.extend(extra.iter().map(String::as_str));
+    }
+    run("cargo", &args)
 }
 
 /// Run a command, inheriting stdio. Returns whether it succeeded.
