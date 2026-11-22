@@ -226,6 +226,36 @@ impl fmt::Debug for Node {
     }
 }
 
+/// `dependents` in compressed sparse row form: the dependents of slot `s`
+/// are `targets[offsets[s]..offsets[s + 1]]`. Contiguous, so the downstream
+/// walk does not chase one heap allocation per node.
+#[derive(Debug, Default)]
+struct DependentsIndex {
+    /// The `deps_rev` this copy was built for.
+    built_for: Option<u64>,
+    offsets: Vec<usize>,
+    targets: Vec<usize>,
+}
+
+impl DependentsIndex {
+    fn rebuild(&mut self, dependents: &[Vec<usize>]) {
+        self.offsets.clear();
+        self.targets.clear();
+        self.offsets.push(0);
+        for list in dependents {
+            self.targets.extend_from_slice(list);
+            self.offsets.push(self.targets.len());
+        }
+    }
+
+    fn dependents(&self, slot: usize) -> &[usize] {
+        match (self.offsets.get(slot), self.offsets.get(slot + 1)) {
+            (Some(&start), Some(&end)) => self.targets.get(start..end).unwrap_or(&[]),
+            _ => &[],
+        }
+    }
+}
+
 /// A network of typed nodes (kernel spec, section 3).
 ///
 /// # Storage and invalidation
@@ -240,6 +270,9 @@ impl fmt::Debug for Node {
 /// A cooker remembers, per node, the epoch at which it last validated the
 /// node; the node is stale for that cooker when `dirty > validated`. See
 /// the `cook` module for the cooker side.
+///
+/// The walk uses a compact copy of the dependents lists that is rebuilt
+/// (in `O(nodes + edges)`) by the first edit after the lists changed.
 ///
 /// The downstream walk stops at nodes that are already stale for *every*
 /// cooker: `observed` is the largest epoch any cooker has started a cook
@@ -277,6 +310,10 @@ pub struct Graph {
     /// Per slot: direct dependents (link targets and `ch()` readers), with
     /// one entry per link or `ch()` edge.
     dependents: Vec<Vec<usize>>,
+    /// Changes whenever `dependents` changes.
+    deps_rev: u64,
+    /// A compact copy of `dependents` for the downstream walk.
+    walk: DependentsIndex,
     /// Largest epoch any cooker has started a cook at.
     observed: AtomicU64,
     /// Revision of the dependency structure and time dependence.
@@ -302,6 +339,8 @@ impl Graph {
             rev_counter: 0,
             dirty: Vec::new(),
             dependents: Vec::new(),
+            deps_rev: 0,
+            walk: DependentsIndex::default(),
             observed: AtomicU64::new(0),
             topo_rev: 0,
             mark_stack: Vec::new(),
@@ -365,12 +404,14 @@ impl Graph {
             Some(slot) => {
                 self.slots[slot] = Some(node);
                 self.dependents[slot].clear();
+                self.deps_rev += 1;
                 self.dirty[slot] = self.rev_counter;
                 slot
             }
             None => {
                 self.slots.push(Some(node));
                 self.dependents.push(Vec::new());
+                self.deps_rev += 1;
                 self.dirty.push(self.rev_counter);
                 self.slots.len() - 1
             }
@@ -393,6 +434,7 @@ impl Graph {
         if let Some((by, port)) = self.referenced_by(id).into_iter().next() {
             return Err(GraphError::Referenced { node: id, by, port });
         }
+        self.topo_rev += 1;
         let inputs = self.node(id).map_or(0, |n| n.exprs.len());
         for index in 0..inputs {
             self.unindex_expression(id, index);
@@ -433,9 +475,9 @@ impl Graph {
         let node = self.slots[slot].take().ok_or(GraphError::UnknownNode(id))?;
         self.names.remove(&node.name);
         self.dependents[slot].clear();
+        self.deps_rev += 1;
         self.free.push(slot);
         self.rev_counter += 1;
-        self.topo_rev += 1;
         Ok(())
     }
 
@@ -515,7 +557,7 @@ impl Graph {
         if let Some(n) = self.node_mut(to) {
             n.link_in[in_index] = Some((from_slot, out_index));
         }
-        self.dependents[from_slot].push(to_slot);
+        self.add_dependent(from_slot, to_slot);
         self.topo_rev += 1;
         self.bump(to);
         Ok(())
@@ -815,6 +857,7 @@ impl Graph {
     pub(crate) fn add_dependent(&mut self, from: usize, to: usize) {
         if let Some(list) = self.dependents.get_mut(from) {
             list.push(to);
+            self.deps_rev += 1;
         }
     }
 
@@ -823,6 +866,7 @@ impl Graph {
         if let Some(list) = self.dependents.get_mut(from) {
             if let Some(pos) = list.iter().position(|&s| s == to) {
                 list.swap_remove(pos);
+                self.deps_rev += 1;
             }
         }
     }
@@ -845,19 +889,26 @@ impl Graph {
     /// are already stale for every cooker (see [`Graph`]).
     fn mark_dirty(&mut self, start: usize, epoch: u64) {
         let observed = *self.observed.get_mut();
+        match self.dirty.get_mut(start) {
+            Some(dirty) if *dirty <= observed => *dirty = epoch,
+            _ => return,
+        }
+        if self.walk.built_for != Some(self.deps_rev) {
+            self.walk.rebuild(&self.dependents);
+            self.walk.built_for = Some(self.deps_rev);
+        }
+        // Nodes are marked when pushed, so each is pushed at most once.
         let mut stack = std::mem::take(&mut self.mark_stack);
         stack.clear();
         stack.push(start);
         while let Some(slot) = stack.pop() {
-            let Some(dirty) = self.dirty.get_mut(slot) else {
-                continue;
-            };
-            if *dirty > observed {
-                continue;
-            }
-            *dirty = epoch;
-            if let Some(next) = self.dependents.get(slot) {
-                stack.extend_from_slice(next);
+            for &dep in self.walk.dependents(slot) {
+                if let Some(dirty) = self.dirty.get_mut(dep) {
+                    if *dirty <= observed {
+                        *dirty = epoch;
+                        stack.push(dep);
+                    }
+                }
             }
         }
         self.mark_stack = stack;

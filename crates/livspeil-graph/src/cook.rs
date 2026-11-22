@@ -178,8 +178,11 @@ pub struct Cooker {
     clock_gen: u64,
     /// Cached results by slot.
     entries: Vec<Option<Entry>>,
-    /// Slot of every node with an entry (for [`Cooker::error`]).
-    ids: HashMap<NodeId, usize>,
+    /// Slot of every node whose entry carries an error (for
+    /// [`Cooker::error`]; empty when nothing fails, so cooks hash no ids).
+    failed: HashMap<NodeId, usize>,
+    /// Per slot: whether the node itself is time-dependent.
+    time_dependent: Vec<bool>,
     /// Per slot: whether the node or something upstream is time-dependent.
     tainted: Vec<bool>,
     /// Per slot: size of the node's upstream, itself included, if known.
@@ -232,7 +235,7 @@ impl Cooker {
     /// The error state of a node after the last cook that visited it.
     #[must_use]
     pub fn error(&self, id: NodeId) -> Option<&CookError> {
-        let slot = *self.ids.get(&id)?;
+        let slot = *self.failed.get(&id)?;
         self.entries
             .get(slot)?
             .as_ref()
@@ -318,7 +321,7 @@ impl Cooker {
             self.graph = Some(graph.uid());
             self.topo_rev = None;
             self.entries.clear();
-            self.ids.clear();
+            self.failed.clear();
         }
         if self.topo_rev == Some(graph.topo_rev()) {
             return;
@@ -333,7 +336,7 @@ impl Cooker {
                 .is_some_and(|e| graph.node_at(slot).is_none_or(|n| n.id != e.id));
             if stale {
                 if let Some(e) = entry.take() {
-                    self.ids.remove(&e.id);
+                    self.failed.remove(&e.id);
                 }
             }
         }
@@ -342,11 +345,12 @@ impl Cooker {
         self.plans.clear();
 
         // Downstream closure of the time-dependent nodes.
+        self.time_dependent.clear();
+        self.time_dependent
+            .extend((0..slots).map(|slot| graph.node_at(slot).is_some_and(Node::time_dependent)));
         self.tainted.clear();
         self.tainted.resize(slots, false);
-        let mut stack: Vec<usize> = (0..slots)
-            .filter(|&slot| graph.node_at(slot).is_some_and(|n| n.time_dependent()))
-            .collect();
+        let mut stack: Vec<usize> = (0..slots).filter(|&s| self.time_dependent[s]).collect();
         while let Some(slot) = stack.pop() {
             if std::mem::replace(&mut self.tainted[slot], true) {
                 continue;
@@ -438,7 +442,13 @@ impl Cooker {
         let Some(node) = graph.node_at(slot) else {
             return false;
         };
-        let clock = node.time_dependent().then(|| clock_key(&self.clock));
+        let time_dependent = self.time_dependent.get(slot).copied().unwrap_or(true);
+        debug_assert_eq!(
+            time_dependent,
+            node.time_dependent(),
+            "stale time dependence"
+        );
+        let clock = time_dependent.then(|| clock_key(&self.clock));
         let clock_gen = self.clock_gen;
 
         let changed = match self.entries[slot].as_ref() {
@@ -511,17 +521,22 @@ impl Cooker {
             Err(_) => None,
         };
         let stamp = self.version_counter;
-        let entry = self.entry_mut(slot, node.id);
+        let entry = self.entries[slot].get_or_insert_with(|| Entry::new(node.id));
         match result {
             Ok(outputs) => {
                 if let Some(v) = version {
                     entry.version = v;
                     entry.outputs = Some(outputs);
                 }
-                entry.error = None;
+                if entry.error.take().is_some() {
+                    self.failed.remove(&node.id);
+                }
             }
             // Keep the last good output, version and inputs.
-            Err(error) => entry.error = Some(error),
+            Err(error) => {
+                entry.error = Some(error);
+                self.failed.insert(node.id, slot);
+            }
         }
         entry.rev = node.rev;
         entry.clock = clock;
@@ -533,11 +548,7 @@ impl Cooker {
 
     /// The entry of `slot`, created for node `id` if missing.
     fn entry_mut(&mut self, slot: usize, id: NodeId) -> &mut Entry {
-        let entry = &mut self.entries[slot];
-        if entry.is_none() {
-            self.ids.insert(id, slot);
-        }
-        entry.get_or_insert_with(|| Entry::new(id))
+        self.entries[slot].get_or_insert_with(|| Entry::new(id))
     }
 }
 

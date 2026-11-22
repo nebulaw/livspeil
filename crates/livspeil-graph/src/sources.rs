@@ -303,11 +303,15 @@ impl Graph {
     /// Fails for an unknown node or port.
     pub fn clear_animation(&mut self, node: NodeId, port: &str) -> Result<(), GraphError> {
         let (index, _) = self.input_port(node, port)?;
+        let before = self.time_dependent(node);
         let had = self
             .node_mut(node)
             .and_then(|n| n.anims[index].take())
             .is_some();
         if had {
+            if self.time_dependent(node) != before {
+                self.structure_changed();
+            }
             self.bump(node);
         }
         Ok(())
