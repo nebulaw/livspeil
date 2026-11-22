@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.math.abs"
+version = 1
+summary = "Absolute value of x"
+time_dependent = false
+reads_system = false
+description = '''
+Clears the sign bit, so `abs(-0.0) == +0.0`, `abs(-inf) == inf` and a `NaN` stays `NaN`.
+'''
+
+[[inputs]]
+name = "x"
+type = "Float"
+default = 0.0
+
+[[outputs]]
+name = "out"
+type = "Float"
+
+[[tests]]
+inputs = { x = -2.5 }
+expect = { out = 2.5 }
+
+[[tests]]
+inputs = { x = -0.0 }
+expect = { out = 0.0 }
+
+[[tests]]
+inputs = { x = -inf }
+expect = { out = inf }

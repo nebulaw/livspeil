@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.math.pow"
+version = 1
+summary = "base raised to the power exponent"
+time_dependent = false
+reads_system = false
+description = '''
+`base` raised to `exponent`, from the platform math library: the IEEE
+special cases are exact everywhere, ordinary results may differ in the
+last bit between platforms.
+'''
+
+[[inputs]]
+name = "base"
+type = "Float"
+default = 0.0
+
+[[inputs]]
+name = "exponent"
+type = "Float"
+default = 1.0
+
+[[outputs]]
+name = "out"
+type = "Float"
+
+[[tests]]
+inputs = { base = 2.0, exponent = 10.0 }
+expect = { out = 1024.0 }
+
+[[tests]]
+inputs = { base = 4.0, exponent = 0.5 }
+expect = { out = 2.0 }
+
+[[tests]]
+name = "negative base, fractional exponent"
+inputs = { base = -8.0, exponent = 0.5 }
+expect = { out = nan }
+
+[[tests]]
+inputs = { base = 0.0, exponent = -1.0 }
+expect = { out = inf }

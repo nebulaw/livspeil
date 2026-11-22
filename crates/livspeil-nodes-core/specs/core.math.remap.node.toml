@@ -1,0 +1,78 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.math.remap"
+version = 1
+summary = "Map x linearly from [in_min, in_max] to [out_min, out_max]"
+time_dependent = false
+reads_system = false
+description = '''
+`out = out_min + (out_max - out_min) * t` with
+`t = (x - in_min) / (in_max - in_min)`. With `clamp` set, `t` is limited to
+`[0, 1]`, so the output stays between `out_min` and `out_max` (in either
+order). Reversed ranges are allowed and invert the mapping.
+`in_min == in_max` is an invalid-input error on `in_max`.
+'''
+
+[[inputs]]
+name = "x"
+type = "Float"
+default = 0.0
+
+[[inputs]]
+name = "in_min"
+type = "Float"
+default = 0.0
+
+[[inputs]]
+name = "in_max"
+type = "Float"
+default = 1.0
+
+[[inputs]]
+name = "out_min"
+type = "Float"
+default = 0.0
+
+[[inputs]]
+name = "out_max"
+type = "Float"
+default = 1.0
+
+[[inputs]]
+name = "clamp"
+type = "Bool"
+default = false
+
+[[outputs]]
+name = "out"
+type = "Float"
+
+[[tests]]
+inputs = { x = 2.5, in_max = 10.0, out_min = 100.0, out_max = 200.0 }
+expect = { out = 125.0 }
+
+[[tests]]
+name = "extrapolates without clamp"
+inputs = { x = 20.0, in_max = 10.0, out_min = 100.0, out_max = 200.0 }
+expect = { out = 300.0 }
+
+[[tests]]
+name = "clamped"
+inputs = { x = 20.0, in_max = 10.0, out_min = 100.0, out_max = 200.0, clamp = true }
+expect = { out = 200.0 }
+
+[[tests]]
+name = "reversed output range"
+inputs = { x = 0.25, out_min = 1.0, out_max = 0.0 }
+expect = { out = 0.75 }
+
+[[tests]]
+name = "empty input range"
+inputs = { x = 1.0, in_min = 2.0, in_max = 2.0 }
+expect_error = { port = "in_max", message = "input range is empty" }

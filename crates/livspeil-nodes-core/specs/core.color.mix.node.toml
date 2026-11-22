@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.color.mix"
+version = 1
+summary = "Mix two OKLCH colors in OKLab space (t clamped to [0, 1])"
+time_dependent = false
+reads_system = false
+description = '''
+Mixes two OKLCH colors in OKLab: `L`, OKLab `a`/`b` and alpha are
+interpolated linearly by `t` (clamped to `[0, 1]`), then converted back to
+OKLCH with the hue in `[0, 360)`. When the resulting chroma is below
+`CHROMA_EPSILON` the hue is 0.
+'''
+
+[[inputs]]
+name = "a"
+type = "Color"
+default = [0.8, 0.12, 60.0, 1.0]
+
+[[inputs]]
+name = "b"
+type = "Color"
+default = [0.9, 0.08, 80.0, 1.0]
+
+[[inputs]]
+name = "t"
+type = "Float"
+default = 0.5
+
+[[outputs]]
+name = "out"
+type = "Color"
+
+[[tests]]
+name = "defaults"
+expect = { out = [0.85, 0.098542, 67.980279, 1.0] }
+tolerance = 1e-6
+
+[[tests]]
+name = "t is clamped"
+inputs = { t = 2.0 }
+expect = { out = [0.9, 0.08, 80.0, 1.0] }
+tolerance = 1e-9
+
+[[tests]]
+name = "hue across 0 degrees"
+inputs = { a = [0.6, 0.1, 350.0, 1.0], b = [0.6, 0.1, 10.0, 1.0] }
+expect = { out = [0.6, 0.098481, 0.0, 1.0] }
+tolerance = 1e-6
+
+[[tests]]
+name = "opposite hues meet at grey"
+inputs = { a = [0.5, 0.1, 30.0, 1.0], b = [0.5, 0.1, 210.0, 0.0] }
+expect = { out = [0.5, 0.0, 0.0, 0.5] }
+tolerance = 1e-6

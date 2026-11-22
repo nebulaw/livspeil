@@ -326,3 +326,254 @@ fn golden_fixture_diff() {
         &text,
     );
 }
+
+#[test]
+fn golden_nested_fixture_diff() {
+    let d = diff(&load("nested-before"), &load("nested-after"));
+    let mut text = String::new();
+    for change in &d.changes {
+        text.push_str(&change.to_string());
+        text.push('\n');
+    }
+    assert_golden(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden"),
+        "diff_nested_fixtures",
+        &text,
+    );
+}
+
+/// A subnet `s` (Charm `C`) holding `x` and `y`, plus a root node `r`.
+const NESTED: &str = r#"room "N" format=1 {
+  network "/" {
+    node "r" type="core.math.add@1" id="01920000-0000-7000-8000-000000000001"
+    node "s" type="core.subnet@1" id="01920000-0000-7000-8000-000000000002" {
+      charm "C" version="1.0" {
+        capability "a"
+        capability "b"
+      }
+      network {
+        node "x" type="core.subnet.input@1" id="01920000-0000-7000-8000-000000000003" port-type="Float"
+        node "y" type="core.math.add@1" id="01920000-0000-7000-8000-000000000004" {
+          input "a" 1.0
+        }
+        link from="x.value" to="y.b"
+      }
+    }
+  }
+  meta {
+    node "s/y" x=1.0 y=1.0
+  }
+}
+"#;
+
+fn nested(from: &str, to: &str) -> Vec<String> {
+    assert!(NESTED.contains(from), "{from}");
+    lines(&diff(&doc(NESTED), &doc(&NESTED.replacen(from, to, 1))))
+}
+
+#[test]
+fn nested_nodes_are_named_by_path() {
+    assert_eq!(
+        nested("input \"a\" 1.0", "input \"a\" 2.0"),
+        [r#"~ node "s/y" input "a": 1.0 -> 2.0"#]
+    );
+    let d = diff(
+        &doc(NESTED),
+        &doc(&NESTED.replace("input \"a\" 1.0", "input \"a\" 2.0")),
+    );
+    let node = d.changes[0].subject.node().unwrap();
+    assert_eq!((node.name.as_str(), node.path.as_str()), ("y", "s/y"));
+    assert!(node.is_nested());
+    // Renaming the subnet renames paths but changes nothing inside it.
+    let renamed = NESTED
+        .replace("node \"s\"", "node \"t\"")
+        .replace("\"s/y\"", "\"t/y\"");
+    assert_eq!(
+        lines(&diff(&doc(NESTED), &doc(&renamed))),
+        [r#"~ node "t" renamed: "s" -> "t""#]
+    );
+}
+
+#[test]
+fn moves_between_networks_are_one_change() {
+    let moved = NESTED
+        .replace(
+            "        node \"y\" type=\"core.math.add@1\" id=\"01920000-0000-7000-8000-000000000004\" {\n          input \"a\" 1.0\n        }\n",
+            "",
+        )
+        .replace(
+            "    node \"s\"",
+            "    node \"y\" type=\"core.math.add@1\" id=\"01920000-0000-7000-8000-000000000004\" {\n      input \"a\" 1.0\n    }\n    node \"s\"",
+        )
+        .replace("        link from=\"x.value\" to=\"y.b\"\n", "")
+        .replace("\"s/y\"", "\"y\"");
+    assert_eq!(
+        lines(&diff(&doc(NESTED), &doc(&moved))),
+        [
+            r#"~ node "y" moved: "/s" -> "/""#,
+            r#"- link "x.value" -> "y.b" in "/s""#,
+        ]
+    );
+}
+
+#[test]
+fn port_type_and_charm_metadata() {
+    assert_eq!(
+        nested("port-type=\"Float\"", "port-type=\"Color\""),
+        [r#"~ node "s/x" port-type: "Float" -> "Color""#]
+    );
+    assert_eq!(
+        nested(
+            "charm \"C\" version=\"1.0\" {\n        capability \"a\"",
+            "charm \"D\" icon=\"i\" min-tier=\"T3\" {\n        capability \"c\"",
+        ),
+        [
+            r#"~ node "s" charm name: "C" -> "D""#,
+            r#"- node "s" charm version: "1.0""#,
+            r#"+ node "s" charm icon: "i""#,
+            r#"~ node "s" charm min-tier: "T0" -> "T3""#,
+            r#"- node "s" charm capability: "a""#,
+            r#"+ node "s" charm capability: "c""#,
+        ]
+    );
+    assert_eq!(
+        nested(
+            "capability \"a\"\n        capability \"b\"",
+            "capability \"b\"\n        capability \"a\""
+        ),
+        [r#"~ node "s" charm capabilities: "a" "b" -> "b" "a""#]
+    );
+    let d = diff(
+        &doc(NESTED),
+        &doc(&NESTED.replace(
+            "      charm \"C\" version=\"1.0\" {\n        capability \"a\"\n        capability \"b\"\n      }\n",
+            "",
+        )),
+    );
+    assert_eq!(
+        lines(&d),
+        [r#"- node "s" charm: "C" version="1.0" capability="a" capability="b""#]
+    );
+    assert_eq!(d.changes[0].subject.kind(), "charm");
+}
+
+#[test]
+fn nested_links_and_meta_by_path() {
+    assert_eq!(
+        nested(
+            "link from=\"x.value\" to=\"y.b\"",
+            "link from=\"x.value\" to=\"y.a\""
+        ),
+        [
+            r#"+ link "x.value" -> "y.a" in "/s""#,
+            r#"- link "x.value" -> "y.b" in "/s""#,
+        ]
+    );
+    let d = diff(
+        &doc(NESTED),
+        &doc(&NESTED.replace("node \"s/y\" x=1.0", "node \"s/y\" x=2.0")),
+    );
+    assert_eq!(
+        lines(&d),
+        [r#"~ meta node "s/y" position: 1.0 1.0 -> 2.0 1.0"#]
+    );
+    match &d.changes[0].subject {
+        Subject::Position { id, .. } => assert!(id.is_some()),
+        other => panic!("{other:?}"),
+    }
+}
+
+fn table_doc(rows: &str) -> String {
+    format!(
+        "room \"T\" format=1 {{\n  network \"/\" {{\n    node \"t\" type=\"core.table.sort@1\" id=\"01920000-0000-7000-8000-000000000001\" {{\n      input \"table\" {{\n        table {{\n{rows}        }}\n      }}\n    }}\n  }}\n}}\n"
+    )
+}
+
+#[test]
+fn small_table_changes_list_columns_and_rows() {
+    let a = table_doc(
+        "          column \"n\" type=\"String\"\n          row \"a\"\n          row \"b\"\n",
+    );
+    let b = table_doc(
+        "          column \"n\" type=\"String\"\n          column \"w\" type=\"Float\"\n          row \"a\" 1.0\n",
+    );
+    let d = diff(&doc(&a), &doc(&b));
+    assert_eq!(
+        lines(&d),
+        [
+            r#"~ node "t" input "table" table: 1 col x 2 rows -> 2 cols x 1 row (2 cells changed)"#,
+            r#"+ node "t" input "table" table column "w": "Float""#,
+            r#"~ node "t" input "table" table row 0: "a" -> "a" 1.0"#,
+            r#"- node "t" input "table" table row 1: "b""#,
+        ]
+    );
+    assert_eq!(
+        d.changes
+            .iter()
+            .map(|c| c.subject.kind())
+            .collect::<Vec<_>>(),
+        ["table", "table-column", "table-row", "table-row"]
+    );
+}
+
+#[test]
+fn large_table_changes_are_summarized() {
+    let rows = |k: i64| -> String {
+        (0..21)
+            .map(|i| format!("          row {}\n", i * k))
+            .collect()
+    };
+    let head = "          column \"x\" type=\"Int\"\n";
+    let a = table_doc(&format!("{head}{}", rows(1)));
+    let b = table_doc(&format!("{head}{}", rows(-1)));
+    // Row 0 is 0 on both sides: 20 cells changed, still detailed.
+    let d = diff(&doc(&a), &doc(&b));
+    assert_eq!(d.len(), 21);
+    let b = table_doc(&format!("{head}{}", rows(2)));
+    let d = diff(&doc(&a), &doc(&b.replace("row 0\n", "row 99\n")));
+    assert_eq!(
+        lines(&d),
+        [
+            r#"~ node "t" input "table" table: 1 col x 21 rows -> 1 col x 21 rows (21 cells changed)"#
+        ]
+    );
+    match &d.changes[0].subject {
+        Subject::Table { cells, .. } => assert_eq!(*cells, 21),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn curve_keys_are_matched_by_position() {
+    let curve = |body: &str| {
+        format!(
+            "room \"C\" format=1 {{\n  network \"/\" {{\n    node \"r\" type=\"core.curve.ramp@1\" id=\"01920000-0000-7000-8000-000000000001\" {{\n      input \"curve\" {{\n        {body}\n      }}\n    }}\n  }}\n}}\n"
+        )
+    };
+    let a = curve("curve {\n          key 0.0 0.0\n          key 1.0 1.0\n        }");
+    let b = curve(
+        "curve post=\"loop\" {\n          key 0.0 0.0\n          key 0.5 0.2 interp=\"bezier\"\n          key 1.0 0.9\n        }",
+    );
+    let d = diff(&doc(&a), &doc(&b));
+    assert_eq!(
+        lines(&d),
+        [
+            r#"~ node "r" input "curve" curve post: "hold" -> "loop""#,
+            r#"+ node "r" input "curve" curve key 0.5: 0.2 interp="bezier""#,
+            r#"~ node "r" input "curve" curve key 1.0: 1.0 -> 0.9"#,
+        ]
+    );
+    assert_eq!(d.changes[1].subject.kind(), "curve-key");
+    // A curve replaced by a plain value is shown by summary.
+    let c = a.replace(
+        "input \"curve\" {\n        curve {\n          key 0.0 0.0\n          key 1.0 1.0\n        }\n      }",
+        "input \"position\" 0.5",
+    );
+    assert_eq!(
+        lines(&diff(&doc(&a), &doc(&c))),
+        [
+            r#"- node "r" input "curve": curve 2 keys 0.0..1.0"#,
+            r#"+ node "r" input "position": 0.5"#,
+        ]
+    );
+}

@@ -20,7 +20,10 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use livspeil_doc::{DocError, canonicalize, parse, room_file};
+use livspeil_doc::assets::ASSETS_LOCK_FILE;
+use livspeil_doc::{
+    DocError, canonicalize, canonicalize_assets_lock, package_dir, parse, room_file,
+};
 use livspeil_nodes_core::core_registry;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -34,17 +37,20 @@ USAGE:
 COMMANDS:
     validate <path>         Check a document against the core nodes, and
                             its assets.lock and assets/ when present
-    fmt <path> [--check]    Rewrite a document in canonical form; with
-                            --check, write nothing and fail if it is not
+    fmt <path> [--check]    Rewrite a document (and the package's
+                            assets.lock, if any) in canonical form; with
+                            --check, write nothing and fail if either is not
     cook <path> [OPTIONS]   Cook a document over a frame clock and print
                             the outputs of its sinks (nodes with no
                             outgoing links)
     diff <a> <b> [OPTIONS]  Semantic diff of two documents (nodes matched
-                            by id)
+                            by id, also inside subnets)
     assets add <room> <file> --license SPDX [--source URL] [--author NAME]
-                            Copy a file into <room>/assets/<sha256>.<ext>
+               [--replace]  Copy a file into <room>/assets/<sha256>.<ext>
                             and record it in assets.lock (source defaults
-                            to \"original\")
+                            to \"original\"); an entry already listed with
+                            other data is refused unless --replace, which
+                            updates it
     assets check <room> [--strict]
                             Verify assets.lock against assets/ (hashes,
                             sizes, unlisted files, licenses); --strict
@@ -82,8 +88,14 @@ DIFF OPTIONS:
     --meta                  Also report editor positions (meta), which are
                             hidden by default
 
-    Text lines start with + (added), - (removed) or ~ (changed), e.g.
+    Text lines start with + (added), - (removed) or ~ (changed). Nodes
+    inside subnets are named by path; tables are summarized (with rows
+    and columns when at most 20 cells changed); curves are diffed per key:
         ~ node \"lamp\" input \"a\": 0.2 -> 0.3
+        ~ node \"desk/x\" moved: \"/\" -> \"/desk\"
+        + node \"desk\" charm capability: \"net\"
+        ~ node \"t\" input \"rows\" table: 2 cols x 3 rows -> 2 cols x 4 rows (2 cells changed)
+        + link \"in.value\" -> \"x.a\" in \"/desk\"
 
 ASSET LICENSES:
     license= is an SPDX expression. Allowed: CC0-1.0, CC-BY-4.0,
@@ -204,31 +216,56 @@ fn fmt(path: &Path, check: bool) -> ExitCode {
         Ok(v) => v,
         Err(code) => return code,
     };
-    let canonical = match canonicalize(&text) {
+    let room = fmt_file(&file, &text, check, canonicalize);
+    // The package's assets.lock, when present, is checked and written too.
+    let lock_file = package_dir(&file).join(ASSETS_LOCK_FILE);
+    let lock = match fs::read_to_string(&lock_file) {
+        Ok(text) => fmt_file(&lock_file, &text, check, canonicalize_assets_lock),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => true,
+        Err(err) => {
+            eprintln!("{}: cannot read: {err}", lock_file.display());
+            false
+        }
+    };
+    if room && lock {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+/// Check or rewrite one file in canonical form; false on failure.
+fn fmt_file(
+    file: &Path,
+    text: &str,
+    check: bool,
+    canonical: fn(&str) -> Result<String, DocError>,
+) -> bool {
+    let canonical = match canonical(text) {
         Ok(c) => c,
         Err(err) => {
-            report(&file, &err);
-            return ExitCode::FAILURE;
+            report(file, &err);
+            return false;
         }
     };
     if canonical == text {
-        return ExitCode::SUCCESS;
+        return true;
     }
     if check {
         eprintln!(
             "{}: not in canonical form (run `livspeil fmt` to fix)",
             file.display()
         );
-        return ExitCode::FAILURE;
+        return false;
     }
-    match fs::write(&file, canonical) {
+    match fs::write(file, canonical) {
         Ok(()) => {
             println!("{}: formatted", file.display());
-            ExitCode::SUCCESS
+            true
         }
         Err(err) => {
             eprintln!("{}: cannot write: {err}", file.display());
-            ExitCode::FAILURE
+            false
         }
     }
 }

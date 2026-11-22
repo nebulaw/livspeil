@@ -64,6 +64,20 @@ pub fn canonicalize(text: &str) -> Result<String, DocError> {
     Ok(out)
 }
 
+/// The canonical form of a whole `assets.lock` file: the prolog comment
+/// lines (as in [`canonicalize`]) followed by [`AssetsLock::format`] of the
+/// parsed lock. This is what [`write_assets_lock`] writes. Idempotent.
+///
+/// # Errors
+/// Any error of [`AssetsLock::parse`].
+pub fn canonicalize_assets_lock(text: &str) -> Result<String, DocError> {
+    let (prolog, _) = split_prolog(text);
+    let lock = AssetsLock::parse(text)?;
+    let mut out = canonical_prolog(prolog);
+    out.push_str(&lock.format());
+    Ok(out)
+}
+
 /// The package directory of `path`: `path` itself if it is a directory,
 /// else the directory holding the `room.kdl` file.
 #[must_use]
@@ -193,17 +207,33 @@ pub fn write_assets_lock(dir: &Path, lock: &AssetsLock) -> Result<(), AssetsErro
 pub struct AddedAsset {
     /// The entry as recorded.
     pub entry: AssetEntry,
-    /// False if the identical entry was already there (nothing written).
+    /// False if the identical entry was already there (nothing written)
+    /// or an existing entry was replaced.
     pub added: bool,
+    /// True if an existing entry with other data was replaced (only with
+    /// [`AddMode::Replace`]).
+    pub replaced: bool,
     /// License ids outside the allow-list (a warning, see
     /// [`check_license`]).
     pub unlisted_licenses: Vec<String>,
 }
 
+/// What [`add_asset_with`] does when the asset's path is already listed
+/// with other data (another license, source or author, or a stale hash or
+/// size).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AddMode {
+    /// Refuse with [`AssetsError::Conflict`].
+    #[default]
+    Add,
+    /// Replace the entry (hash, size, license, source, author).
+    Replace,
+}
+
 /// Copy `file` into `dir/assets/<sha256>.<ext>` and record it in
 /// `dir/assets.lock` (created if missing, written canonically). `ext` is
 /// the file's extension in lower case, left out if it is not plain ASCII
-/// letters and digits.
+/// letters and digits. Same as [`add_asset_with`] in [`AddMode::Add`].
 ///
 /// # Errors
 /// [`AssetsError::License`] for a license that [`check_license`] rejects
@@ -216,6 +246,23 @@ pub fn add_asset(
     license: &str,
     source: &str,
     author: Option<&str>,
+) -> Result<AddedAsset, AssetsError> {
+    add_asset_with(dir, file, license, source, author, AddMode::Add)
+}
+
+/// [`add_asset`], with `mode` choosing what happens when the path is
+/// already listed with other data.
+///
+/// # Errors
+/// As [`add_asset`]; [`AssetsError::Conflict`] for a listed path only in
+/// [`AddMode::Add`].
+pub fn add_asset_with(
+    dir: &Path,
+    file: &Path,
+    license: &str,
+    source: &str,
+    author: Option<&str>,
+    mode: AddMode,
 ) -> Result<AddedAsset, AssetsError> {
     let unlisted_licenses = check_license(license).map_err(|message| AssetsError::License {
         license: license.to_owned(),
@@ -258,16 +305,20 @@ pub fn add_asset(
     let mut lock = read_assets_lock(dir)?
         .map(|(lock, _)| lock)
         .unwrap_or_default();
-    if let Some(existing) = lock.get(&path) {
-        if *existing != entry {
-            return Err(AssetsError::Conflict {
-                path,
-                message:
-                    "already listed in assets.lock with other data; edit assets.lock to change it"
+    let replaced = match lock.get(&path) {
+        Some(existing) if *existing != entry => {
+            if mode == AddMode::Add {
+                return Err(AssetsError::Conflict {
+                    path,
+                    message: "already listed in assets.lock with other data; use --replace \
+                              (AddMode::Replace) to update it"
                         .into(),
-            });
+                });
+            }
+            true
         }
-    }
+        _ => false,
+    };
     let added = lock.get(&path).is_none();
 
     let assets = dir.join(ASSETS_DIR);
@@ -279,11 +330,18 @@ pub fn add_asset(
     }
     if added {
         lock.assets.push(entry.clone());
+    } else if replaced {
+        for slot in lock.assets.iter_mut().filter(|a| a.path == path) {
+            *slot = entry.clone();
+        }
+    }
+    if added || replaced {
         write_assets_lock(dir, &lock)?;
     }
     Ok(AddedAsset {
         entry,
         added,
+        replaced,
         unlisted_licenses,
     })
 }

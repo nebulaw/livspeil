@@ -19,5 +19,17 @@ Using AI tools is welcome. You remain responsible: you must understand and have 
 1. Open an issue or discussion for anything non-trivial.
 2. Branch from `main`; keep pull requests small and focused (one node, one feature).
 3. Run `cargo xtask check` locally.
-4. New nodes need a spec, an implementation and a golden test (see the kernel spec).
+4. New nodes need a spec file, an implementation and a golden test (see [Adding a node](#adding-a-node)).
 5. Golden file changes are reviewed by hand; never accept them blindly.
+
+## Adding a node
+
+A node is a spec file, a Rust implementation and tests. Keep it to one node per pull request. For a core node:
+
+1. **Implement** the node in `crates/livspeil-nodes-core/src/` (`NodeSpec` built in `new()`, a pure, deterministic `cook`; typed `NodeError`s, no panics) and **register** it in `register_all` in `src/lib.rs`.
+2. **Generate its spec file** with `cargo xtask node-specs`. This writes `crates/livspeil-nodes-core/specs/<id>.node.toml` from the Rust `NodeSpec` (id, version, summary, flags, ports, defaults) and refreshes `docs/nodes.md`.
+3. **Document and test it in the spec file**: add a `description` and `[[tests]]` cases (inputs, expected outputs or `expect_error`; see [docs/nodes.md](docs/nodes.md#spec-file-format) for the format). Cover the defaults, typical values and every error and edge case (`NaN`, infinities, empty tables). Run `cargo xtask node-specs` again so `docs/nodes.md` picks up the description.
+4. **Add golden cases** for the node in `crates/livspeil-nodes-core/tests/golden*.rs`, refresh them with `UPDATE_GOLDEN=1` and review the diff.
+5. Run `cargo xtask check`.
+
+`crates/livspeil-nodes-core/tests/node_specs.rs` fails when a registered node has no spec file (or a file has no node), when a spec file's generated part differs from the Rust `NodeSpec`, when a `[[tests]]` case fails or when `docs/nodes.md` is stale; its message says which file and how to fix it. Changing ports or behavior incompatibly means bumping the node's `version`.

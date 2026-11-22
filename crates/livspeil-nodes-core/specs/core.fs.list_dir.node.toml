@@ -1,0 +1,120 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.fs.list_dir"
+version = 1
+summary = "List the files of a folder as a table (name, path, is_dir, size, modified)"
+time_dependent = false
+reads_system = true
+description = '''
+Lists the folder `path` (relative to the host's file root; absolute paths
+and `..` above the root are invalid-input errors on `path`) into a table
+with the columns `name`, `path` (relative to the root, `/`-separated),
+`is_dir`, `size` (bytes, 0 for folders) and `modified` (Unix seconds).
+`pattern` is a glob (`*`, `?`; several separated by `;`, as in
+`*.pdf;*.epub`) that applies to folders too; names starting with `.` are
+left out unless `include_hidden`. `sort` is `name` (Unicode scalar values),
+`size` or `modified` (ties by name), always ascending.
+
+Reads the system: the result is a pure function of the inputs and the
+host's snapshot revision. Without a file system the node fails.
+'''
+
+[[inputs]]
+name = "path"
+type = "String"
+default = "."
+
+[[inputs]]
+name = "pattern"
+type = "String"
+default = "*"
+
+[[inputs]]
+name = "include_hidden"
+type = "Bool"
+default = false
+
+[[inputs]]
+name = "sort"
+type = "String"
+default = "name"
+
+[[outputs]]
+name = "entries"
+type = "Table"
+
+[[outputs]]
+name = "count"
+type = "Int"
+
+[[tests]]
+name = "defaults: the root"
+fs.dirs = [{ path = "books/series", modified = 1600000000 }]
+fs.files = [
+  { path = "books/Dune.epub", size = 2048, modified = 1700000300 },
+  { path = "books/emma.pdf", size = 4096, modified = 1700000100 },
+  { path = "books/Ubik.pdf", size = 1024, modified = 1700000200 },
+  { path = "books/.hidden.pdf", size = 1, modified = 1 },
+  { path = "readme.md", size = 5, modified = 3 },
+]
+expect = { count = 2, entries = { columns = [{ name = "name", type = "String", values = ["books", "readme.md"] }, { name = "path", type = "String", values = ["books", "readme.md"] }, { name = "is_dir", type = "Bool", values = [true, false] }, { name = "size", type = "Int", values = [0, 5] }, { name = "modified", type = "Int", values = [0, 3] }] } }
+
+[[tests]]
+name = "pattern"
+inputs = { path = "books", pattern = "*.pdf" }
+fs.dirs = [{ path = "books/series", modified = 1600000000 }]
+fs.files = [
+  { path = "books/Dune.epub", size = 2048, modified = 1700000300 },
+  { path = "books/emma.pdf", size = 4096, modified = 1700000100 },
+  { path = "books/Ubik.pdf", size = 1024, modified = 1700000200 },
+  { path = "books/.hidden.pdf", size = 1, modified = 1 },
+  { path = "readme.md", size = 5, modified = 3 },
+]
+expect = { count = 2, entries = { columns = [{ name = "name", type = "String", values = ["Ubik.pdf", "emma.pdf"] }, { name = "path", type = "String", values = ["books/Ubik.pdf", "books/emma.pdf"] }, { name = "is_dir", type = "Bool", values = [false, false] }, { name = "size", type = "Int", values = [1024, 4096] }, { name = "modified", type = "Int", values = [1700000200, 1700000100] }] } }
+
+[[tests]]
+name = "hidden files, sorted by modification time"
+inputs = { path = "books", include_hidden = true, sort = "modified" }
+fs.dirs = [{ path = "books/series", modified = 1600000000 }]
+fs.files = [
+  { path = "books/Dune.epub", size = 2048, modified = 1700000300 },
+  { path = "books/emma.pdf", size = 4096, modified = 1700000100 },
+  { path = "books/Ubik.pdf", size = 1024, modified = 1700000200 },
+  { path = "books/.hidden.pdf", size = 1, modified = 1 },
+  { path = "readme.md", size = 5, modified = 3 },
+]
+expect = { count = 5 }
+
+[[tests]]
+inputs = { path = "../secret" }
+fs.dirs = [{ path = "books/series", modified = 1600000000 }]
+fs.files = [
+  { path = "books/Dune.epub", size = 2048, modified = 1700000300 },
+  { path = "books/emma.pdf", size = 4096, modified = 1700000100 },
+  { path = "books/Ubik.pdf", size = 1024, modified = 1700000200 },
+  { path = "books/.hidden.pdf", size = 1, modified = 1 },
+  { path = "readme.md", size = 5, modified = 3 },
+]
+expect_error = { port = "path", message = "outside the allowed file root" }
+
+[[tests]]
+inputs = { sort = "date" }
+fs.dirs = [{ path = "books/series", modified = 1600000000 }]
+fs.files = [
+  { path = "books/Dune.epub", size = 2048, modified = 1700000300 },
+  { path = "books/emma.pdf", size = 4096, modified = 1700000100 },
+  { path = "books/Ubik.pdf", size = 1024, modified = 1700000200 },
+  { path = "books/.hidden.pdf", size = 1, modified = 1 },
+  { path = "readme.md", size = 5, modified = 3 },
+]
+expect_error = { port = "sort" }
+
+[[tests]]
+name = "no file system"
+expect_error = { message = "no file system is available" }

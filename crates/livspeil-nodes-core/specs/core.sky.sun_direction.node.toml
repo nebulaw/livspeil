@@ -1,0 +1,73 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.sky.sun_direction"
+version = 1
+summary = "Sun direction (y up, x east, z south), elevation and azimuth from day, solar time and latitude"
+time_dependent = false
+reads_system = false
+description = '''
+The sun's position (Cooper's declination formula, apparent solar time) for
+a `day_of_year` in `[1, 366]` (fractional days allowed), a local
+`solar_hour` and a `latitude` in `[-90, 90]` degrees (north positive);
+other days or latitudes are invalid-input errors. `direction` is a unit
+vector in the world frame (+y up, +x east, +z south), `elevation` is in
+degrees and `azimuth` in degrees clockwise from north.
+'''
+
+[[inputs]]
+name = "day_of_year"
+type = "Float"
+default = 172.0
+
+[[inputs]]
+name = "solar_hour"
+type = "Float"
+default = 12.0
+
+[[inputs]]
+name = "latitude"
+type = "Float"
+default = 41.7
+
+[[outputs]]
+name = "direction"
+type = "Vec3"
+
+[[outputs]]
+name = "elevation"
+type = "Float"
+
+[[outputs]]
+name = "azimuth"
+type = "Float"
+
+[[tests]]
+name = "defaults: June solstice noon at 41.7 N"
+expect = { direction = [0.0, 0.949698, 0.313167], elevation = 71.749783, azimuth = 180.0 }
+tolerance = 1e-6
+
+[[tests]]
+name = "morning"
+inputs = { solar_hour = 6.0 }
+expect = { direction = [0.917409, 0.264725, -0.297121], elevation = 15.350625, azimuth = 72.054432 }
+tolerance = 1e-6
+
+[[tests]]
+name = "southern hemisphere"
+inputs = { latitude = -33.9 }
+expect = { direction = [0.0, 0.539509, -0.84198], elevation = 32.650217, azimuth = 0.0 }
+tolerance = 1e-6
+
+[[tests]]
+inputs = { latitude = 91.0 }
+expect_error = { port = "latitude" }
+
+[[tests]]
+inputs = { day_of_year = 0.0 }
+expect_error = { port = "day_of_year", message = "within [1, 366]" }

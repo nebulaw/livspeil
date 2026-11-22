@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.vector.length3"
+version = 1
+summary = "Euclidean length of a Vec3"
+time_dependent = false
+reads_system = false
+description = '''
+Euclidean length, overflow- and underflow-safe (scaled hypot).
+'''
+
+[[inputs]]
+name = "v"
+type = "Vec3"
+default = [0.0, 0.0, 0.0]
+
+[[outputs]]
+name = "out"
+type = "Float"
+
+[[tests]]
+inputs = { v = [3.0, 4.0, 0.0] }
+expect = { out = 5.0 }
+
+[[tests]]
+inputs = { v = [2.0, -3.0, 6.0] }
+expect = { out = 7.0 }
+
+[[tests]]
+name = "no overflow"
+inputs = { v = [3e200, 4e200, 0.0] }
+expect = { out = 4.9999999999999995e200 }
+
+[[tests]]
+inputs = { v = [-inf, 1.0, 0.0] }
+expect = { out = inf }

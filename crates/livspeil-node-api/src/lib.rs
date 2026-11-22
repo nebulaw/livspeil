@@ -10,7 +10,8 @@
 //!
 //! Milestone M0.2 scope: concrete port types, [`Value`], [`NodeSpec`],
 //! [`NodeImpl`] and [`NodeRegistry`]. Polymorphic constraint classes
-//! (`Numeric`, `VectorLike`) and `*.node.toml` generation arrive later.
+//! (`Numeric`, `VectorLike`) arrive later. Node specs are mirrored as
+//! `*.node.toml` files in `livspeil-nodes-core/specs/`.
 //!
 //! Milestone M0.8 adds [`Value::Table`] ([`Table`], typed column-oriented
 //! tables; also lists), [`PortType::Curve`] and [`Value::Curve`]

@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.vector.normalize3"
+version = 1
+summary = "Scale a Vec3 to unit length (the zero vector stays zero)"
+time_dependent = false
+reads_system = false
+description = '''
+`v` scaled to unit length. The zero vector gives the zero vector (with
+positive zeros); an infinite component dominates, and a `NaN` component
+gives all `NaN`.
+'''
+
+[[inputs]]
+name = "v"
+type = "Vec3"
+default = [0.0, 0.0, 0.0]
+
+[[outputs]]
+name = "out"
+type = "Vec3"
+
+[[tests]]
+inputs = { v = [3.0, 0.0, 4.0] }
+expect = { out = [0.6, 0.0, 0.8] }
+
+[[tests]]
+name = "zero vector"
+inputs = { v = [-0.0, 0.0, -0.0] }
+expect = { out = [0.0, 0.0, 0.0] }
+
+[[tests]]
+inputs = { v = [inf, 5.0, 0.0] }
+expect = { out = [1.0, 0.0, 0.0] }
+
+[[tests]]
+inputs = { v = [nan, 1.0, 0.0] }
+expect = { out = [nan, nan, nan] }
