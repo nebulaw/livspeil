@@ -19,6 +19,13 @@
 //! nodes through [`NodeImpl::cook_with_system`]; see the [`system`] module
 //! for the design and caching semantics.
 //!
+//! Milestone M0.10 adds events: [`Event`] (a trigger with an optional
+//! payload), the placeholder [`Value::Event`] that `Event` ports carry in
+//! value cooking, and event nodes ([`NodeImpl::on_event`],
+//! [`NodeImpl::polls_events`], runtime state through
+//! [`NodeImpl::initial_state`] and [`NodeImpl::cook_with_state`]); see the
+//! [`event`] module for the model.
+//!
 //! Cargo feature `serde` (off by default) derives `Serialize` and
 //! `Deserialize` for [`PortType`] and [`Value`]. It adds derives only, so
 //! node authors who do not need it pay nothing. Values use serde's default
@@ -29,12 +36,14 @@ use std::fmt;
 use std::sync::Arc;
 
 pub mod curve;
+pub mod event;
 pub mod system;
 pub mod table;
 
 pub use curve::{
     Curve, CurveError, CurveExtrapolation, CurveInterpolation, CurveKey, CurveTangent,
 };
+pub use event::{Event, EventCall, EventTrigger};
 pub use system::{DirEntry, FileSystem, FsError, FsPath, SystemContext, SystemHost};
 pub use table::{Table, TableColumn, TableError};
 
@@ -154,6 +163,9 @@ pub enum Value {
     Table(Table),
     /// A float curve; cheap to clone.
     Curve(Arc<Curve>),
+    /// What an `Event` port carries in value cooking: nothing. Events
+    /// themselves travel through the events phase (see [`event`]).
+    Event,
 }
 
 impl Value {
@@ -171,12 +183,14 @@ impl Value {
             Value::String(_) => PortType::String,
             Value::Table(_) => PortType::Table,
             Value::Curve(_) => PortType::Curve,
+            Value::Event => PortType::Event,
         }
     }
 
     /// The zero value of a port type, if this version of the API can
     /// represent it. A `Table`'s zero is the empty table (no columns), a
-    /// `Curve`'s the constant curve 0.
+    /// `Curve`'s the constant curve 0, an `Event`'s the placeholder
+    /// [`Value::Event`].
     #[must_use]
     pub fn zero(ty: PortType) -> Option<Value> {
         Some(match ty {
@@ -190,6 +204,7 @@ impl Value {
             PortType::String => Value::String(String::new()),
             PortType::Table => Value::Table(Table::empty()),
             PortType::Curve => Value::Curve(Arc::new(Curve::constant(0.0))),
+            PortType::Event => Value::Event,
             _ => return None,
         })
     }
@@ -393,6 +408,51 @@ pub trait NodeImpl: Send + Sync + fmt::Debug {
         let _ = system;
         self.cook(ctx, inputs)
     }
+
+    /// Whether the node is called once per tick in the events phase (with
+    /// [`EventTrigger::Tick`]), for nodes that emit events without
+    /// receiving any, such as a timer or a change detector. Default:
+    /// `false`.
+    fn polls_events(&self) -> bool {
+        false
+    }
+
+    /// The runtime state an event node starts with (see the [`event`]
+    /// module). Default: `None`.
+    fn initial_state(&self) -> Option<Value> {
+        None
+    }
+
+    /// Handle an event delivered to one of the node's `Event` inputs, or
+    /// the once-per-tick poll ([`NodeImpl::polls_events`]): read the call,
+    /// update the state and emit events through `call`. Default: nothing.
+    ///
+    /// # Errors
+    /// Returns a [`NodeError`] when the event cannot be handled; the host
+    /// then keeps the previous state and drops the emitted events.
+    fn on_event(&self, call: &mut EventCall<'_>) -> Result<(), NodeError> {
+        let _ = call;
+        Ok(())
+    }
+
+    /// Compute the outputs given the node's runtime state (see the
+    /// [`event`] module). Cookers always call this method; the default
+    /// ignores `state` and calls [`NodeImpl::cook_with_system`]. A node
+    /// whose value outputs depend on its state overrides it; its `cook`
+    /// should then behave as with [`NodeImpl::initial_state`].
+    ///
+    /// # Errors
+    /// Returns a [`NodeError`] when the node cannot produce outputs.
+    fn cook_with_state(
+        &self,
+        ctx: &CookContext,
+        system: &SystemContext<'_>,
+        state: Option<&Value>,
+        inputs: &[Value],
+    ) -> Result<Vec<Value>, NodeError> {
+        let _ = state;
+        self.cook_with_system(ctx, system, inputs)
+    }
 }
 
 /// Why registering a node type failed.
@@ -524,6 +584,26 @@ mod tests {
         assert_eq!(t.coerce(PortType::Curve), None);
         assert!(Value::Int(1).as_table().is_none());
         assert!(Value::Int(1).as_curve().is_none());
+    }
+
+    #[test]
+    fn event_placeholder() {
+        assert_eq!(Value::zero(PortType::Event), Some(Value::Event));
+        assert_eq!(Value::Event.port_type(), PortType::Event);
+        assert_eq!(Value::Event.coerce(PortType::Event), Some(Value::Event));
+        assert_eq!(Value::Event.coerce(PortType::Float), None);
+        assert!(!PortType::Event.accepts(PortType::Float));
+        let node = Dummy(NodeSpec::new("t.e", 1, "e"));
+        let ctx = CookContext::default();
+        assert!(!node.polls_events());
+        assert_eq!(node.initial_state(), None);
+        let mut call = EventCall::new(&ctx, EventTrigger::Tick, &[], None);
+        assert!(node.on_event(&mut call).is_ok());
+        assert!(call.emitted().is_empty());
+        let out = node
+            .cook_with_state(&ctx, &SystemContext::none(), Some(&Value::Int(1)), &[])
+            .unwrap();
+        assert!(out.is_empty());
     }
 
     #[cfg(feature = "serde")]
