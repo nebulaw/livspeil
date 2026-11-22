@@ -1,13 +1,39 @@
 // SPDX-FileCopyrightText: 2026 Livspeil contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The first built-in nodes.
+//! The built-in core nodes (milestones M0.2 and M0.6).
 //!
-//! The core node set (milestones M0.2 and M0.6). Earliest nodes:
-//! `core.math.add`, `core.math.lerp` and `core.time.clock`. The rest of the
-//! set arrives in M0.6, one node per task (spec, implementation, golden
-//! test); see `specs/livspeil-kernel-spec-v0.md`, sections 8 and 9. The specs
-//! are written in Rust for now; `*.node.toml` generation is a later step.
+//! See `specs/livspeil-kernel-spec-v0.md`, sections 8 and 9. Every node is
+//! version 1, pure and deterministic; each has unit tests and golden cases
+//! under `tests/golden/`. The specs are written in Rust for now;
+//! `*.node.toml` generation is a later step.
+//!
+//! # Node set
+//!
+//! - **math** (`core.math.*`): `add`, `sub`, `mul`, `div`, `lerp`, `clamp`,
+//!   `remap`, `min`, `max`, `smoothstep`, `abs`, `pow`, `sin`, `cos`, `wrap`,
+//!   `round`.
+//! - **logic** (`core.logic.*`): `select`, `compare`, `and`, `or`, `not`.
+//! - **vector** (`core.vector.*`): `compose3`, `decompose3`, `length3`,
+//!   `normalize3`, `dot3`.
+//! - **time** (`core.time.*`): `clock` (the only time-dependent node),
+//!   `timeofday`.
+//! - **sky** (`core.sky.*`): `sun_direction`.
+//! - **color** (`core.color.*`): `mix`, `compose`, `gradient` (three fixed
+//!   stops).
+//! - **text** (`core.text.*`): `format`.
+//!
+//! # Deferred
+//!
+//! These need port types or value machinery the node API does not have yet
+//! and arrive with it:
+//!
+//! - event nodes (`Event` values and edge-triggered cooking);
+//! - `core.fs.list_dir` (host I/O capabilities and list values);
+//! - table nodes (`Table` values);
+//! - `core.curve.ramp` and variable-length color gradients (list
+//!   parameters);
+//! - subnet and output nodes (graph nesting).
 
 use std::sync::Arc;
 
@@ -15,16 +41,26 @@ mod logic;
 mod math;
 
 pub use logic::{And, Compare, Not, Or, Select};
-pub use math::{Clamp, Div, Max, Min, Mul, Remap, Smoothstep, Sub};
+pub use math::{
+    Abs, Clamp, Cos, Div, Max, Min, Mul, Pow, Remap, Round, Sin, Smoothstep, Sub, Wrap,
+};
 mod color;
 mod sky;
+mod text;
 mod time;
+mod vector;
 
-pub use color::{CHROMA_EPSILON, ColorMix, lab_to_lch, lch_to_lab, mix_oklch};
+pub use vector::{Compose3, Decompose3, Dot3, Length3, Normalize3, dot3, length3, normalize3};
+
+pub use color::{
+    CHROMA_EPSILON, ColorCompose, ColorGradient, ColorMix, gradient3, lab_to_lch, lch_to_lab,
+    mix_oklch,
+};
 pub use sky::{
     AZIMUTH_EPSILON, AZIMUTH_SEAM_EPSILON, SunDirection, SunPosition, declination_degrees,
     sun_position,
 };
+pub use text::{Format, MAX_PRECISION, format_number};
 pub use time::{SECONDS_PER_DAY, TimeOfDay, time_of_day};
 
 use livspeil_node_api::{
@@ -55,6 +91,20 @@ pub fn register_all(registry: &mut NodeRegistry) -> Result<(), RegistryError> {
     registry.register(Arc::new(TimeOfDay::new()))?;
     registry.register(Arc::new(SunDirection::new()))?;
     registry.register(Arc::new(ColorMix::new()))?;
+    registry.register(Arc::new(Abs::new()))?;
+    registry.register(Arc::new(Pow::new()))?;
+    registry.register(Arc::new(Sin::new()))?;
+    registry.register(Arc::new(Cos::new()))?;
+    registry.register(Arc::new(Wrap::new()))?;
+    registry.register(Arc::new(Round::new()))?;
+    registry.register(Arc::new(Compose3::new()))?;
+    registry.register(Arc::new(Decompose3::new()))?;
+    registry.register(Arc::new(Length3::new()))?;
+    registry.register(Arc::new(Normalize3::new()))?;
+    registry.register(Arc::new(Dot3::new()))?;
+    registry.register(Arc::new(ColorCompose::new()))?;
+    registry.register(Arc::new(ColorGradient::new()))?;
+    registry.register(Arc::new(Format::new()))?;
     Ok(())
 }
 
@@ -77,6 +127,16 @@ fn float(inputs: &[Value], index: usize, port: &'static str) -> Result<f64, Node
             port,
             reason: "expected a Float".to_owned(),
         })
+}
+
+fn string<'a>(inputs: &'a [Value], index: usize, port: &'static str) -> Result<&'a str, NodeError> {
+    match inputs.get(index) {
+        Some(Value::String(s)) => Ok(s),
+        _ => Err(NodeError::InvalidInput {
+            port,
+            reason: "expected a String".to_owned(),
+        }),
+    }
 }
 
 /// `core.math.add@1`: `out = a + b`.
@@ -229,6 +289,20 @@ mod tests {
             "core.time.timeofday@1",
             "core.sky.sun_direction@1",
             "core.color.mix@1",
+            "core.math.abs@1",
+            "core.math.pow@1",
+            "core.math.sin@1",
+            "core.math.cos@1",
+            "core.math.wrap@1",
+            "core.math.round@1",
+            "core.vector.compose3@1",
+            "core.vector.decompose3@1",
+            "core.vector.length3@1",
+            "core.vector.normalize3@1",
+            "core.vector.dot3@1",
+            "core.color.compose@1",
+            "core.color.gradient@1",
+            "core.text.format@1",
         ] {
             assert!(reg.get(id).is_some(), "{id} is not registered");
         }

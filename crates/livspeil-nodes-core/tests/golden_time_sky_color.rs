@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Livspeil contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Golden tests for the time, sky and color nodes (M0.6b).
+//! Golden tests for the time, sky and color nodes (M0.6b, M0.6c).
 //!
 //! Each test cooks a table of cases and prints one line per case:
 //! `node(inputs) => outputs`, with six decimals so platform float noise
@@ -170,5 +170,71 @@ fn color() {
     ] {
         cases.push(vec![Value::Color(a), Value::Color(b), Value::Float(t)]);
     }
-    assert_golden(&dir(), "color", &report("core.color.mix@1", &cases));
+    let mut text = report("core.color.mix@1", &cases);
+
+    // compose: in-range values pass through, the rest is normalized.
+    let cases: Vec<Vec<Value>> = [
+        [0.7, 0.1, 250.0, 1.0],
+        [0.0, 0.0, 0.0, 0.0],
+        [1.0, 0.37, 359.5, 0.25],
+        [1.5, -0.2, -30.0, 2.0],
+        [-0.5, 0.5, 720.0, -1.0],
+        [0.5, 0.1, 360.0, 1.0],
+        [0.5, 0.1, 725.5, 1.0],
+        [0.5, 0.0, 120.0, 1.0],
+        [-0.0, -0.0, -0.0, -0.0],
+        [f64::NAN, 0.1, 0.0, 1.0],
+        [0.5, f64::INFINITY, 0.0, 1.0],
+        [0.5, 0.1, f64::NEG_INFINITY, 1.0],
+        [0.5, 0.1, 0.0, f64::NAN],
+    ]
+    .iter()
+    .map(|c| floats(c))
+    .collect();
+    text.push_str(&report("core.color.compose@1", &cases));
+
+    // gradient: the default dusk stops, sampled across t, then moved stops.
+    let (g0, g1, g2) = (
+        [0.3, 0.1, 270.0, 1.0],
+        [0.7, 0.15, 45.0, 1.0],
+        [0.95, 0.05, 95.0, 1.0],
+    );
+    let grad = |t: f64, p1: f64| {
+        vec![
+            Value::Float(t),
+            Value::Color(g0),
+            Value::Color(g1),
+            Value::Color(g2),
+            Value::Float(p1),
+        ]
+    };
+    let mut cases = Vec::new();
+    for t in [-1.0, 0.0, 0.25, 0.5, 0.75, 1.0, 2.0] {
+        cases.push(grad(t, 0.5));
+    }
+    for (t, p1) in [
+        (0.1, 0.2),
+        (0.2, 0.2),
+        (0.6, 0.2),
+        (0.0, 0.0),
+        (0.5, 0.0),
+        (0.5, 1.0),
+        (1.0, 1.0),
+        (0.5, -3.0),
+        (0.5, 4.0),
+        (f64::NAN, 0.5),
+        (0.5, f64::INFINITY),
+    ] {
+        cases.push(grad(t, p1));
+    }
+    // A stop that is not a finite color.
+    cases.push(vec![
+        Value::Float(0.5),
+        Value::Color(g0),
+        Value::Color([0.5, f64::NAN, 0.0, 1.0]),
+        Value::Color(g2),
+        Value::Float(0.5),
+    ]);
+    text.push_str(&report("core.color.gradient@1", &cases));
+    assert_golden(&dir(), "color", &text);
 }
