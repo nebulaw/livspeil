@@ -107,7 +107,10 @@ mod network;
 mod snapshot;
 mod sources;
 
-pub use cook::{CookError, CookStats, Cooker};
+pub use cook::{
+    CookError, CookStats, Cooker, DEFAULT_EVENT_LIMIT, EventError, ExternalEvent, FiredEvent,
+    TickReport,
+};
 pub use graph::{Endpoint, Graph, GraphError, Link, NodeId, PortDirection};
 pub use network::{CharmMeta, INPUT_TYPE, INTERFACE_PORT, OUTPUT_TYPE, SUBNET_TYPE};
 pub use snapshot::{GraphSnapshot, NamedLink, NodeSnapshot};

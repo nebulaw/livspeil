@@ -593,6 +593,9 @@ impl Graph {
         for key in incoming {
             if let Some(src) = self.links.remove(&key) {
                 self.outgoing.remove(&(src.node, key.0, key.1));
+                if self.input_port_type(id, key.1) == Some(PortType::Event) {
+                    continue;
+                }
                 if let Some(&from) = self.index.get(&src.node) {
                     self.remove_dependent(from, slot);
                 }
@@ -609,6 +612,9 @@ impl Graph {
         for (from, to, port) in outgoing {
             self.outgoing.remove(&(from, to, port));
             self.links.remove(&(to, port));
+            if self.input_port_type(to, port) == Some(PortType::Event) {
+                continue;
+            }
             if let Some(n) = self.node_mut(to) {
                 n.link_in[port] = None;
             }
@@ -667,10 +673,17 @@ impl Graph {
     /// nodes to the network around it. An interface input's `value` input
     /// cannot be fed from inside its subnet.
     ///
+    /// Links between `Event` ports (M0.10) are stored and serialized like
+    /// any other link, but they are not value dependencies: they do not
+    /// feed values, do not invalidate anything, and may form cycles (event
+    /// loops are bounded per tick instead; see [`Cooker::tick`]).
+    ///
+    /// [`Cooker::tick`]: crate::Cooker::tick
+    ///
     /// # Errors
     /// Fails for unknown nodes or ports, incompatible types,
     /// [`GraphError::CrossNetwork`], an input that already has a link, or a
-    /// link that would create a cycle.
+    /// value link that would create a cycle.
     pub fn link(
         &mut self,
         from: NodeId,
@@ -704,7 +717,10 @@ impl Graph {
                 port: to_port.to_owned(),
             });
         }
-        if self.depends_on(from, to) {
+        // Event links are not value dependencies (see `events.rs`): they
+        // may form cycles and are routed by the cooker's events phase.
+        let event = out_ty == PortType::Event;
+        if !event && self.depends_on(from, to) {
             return Err(GraphError::WouldCycle);
         }
         self.links.insert(
@@ -715,6 +731,11 @@ impl Graph {
             },
         );
         self.outgoing.insert((from, to, in_index));
+        if event {
+            self.rev_counter += 1;
+            self.topo_rev += 1;
+            return Ok(());
+        }
         if let Some(n) = self.node_mut(to) {
             n.link_in[in_index] = Some((from_slot, out_index));
         }
@@ -730,11 +751,16 @@ impl Graph {
     /// # Errors
     /// Fails for an unknown node or port.
     pub fn unlink(&mut self, to: NodeId, to_port: &str) -> Result<bool, GraphError> {
-        let (index, _) = self.input_port(to, to_port)?;
+        let (index, ty) = self.input_port(to, to_port)?;
         let Some(src) = self.links.remove(&(to, index)) else {
             return Ok(false);
         };
         self.outgoing.remove(&(src.node, to, index));
+        if ty == PortType::Event {
+            self.rev_counter += 1;
+            self.topo_rev += 1;
+            return Ok(true);
+        }
         if let Some(n) = self.node_mut(to) {
             n.link_in[index] = None;
         }
@@ -1154,6 +1180,11 @@ impl Graph {
                 port: port.to_owned(),
                 direction: PortDirection::Input,
             })
+    }
+
+    /// The type of input `index` of `node`.
+    fn input_port_type(&self, node: NodeId, index: usize) -> Option<PortType> {
+        Some(self.node(node)?.imp.spec().inputs.get(index)?.ty)
     }
 
     fn output_port(&self, node: NodeId, port: &str) -> Result<(usize, PortType), GraphError> {

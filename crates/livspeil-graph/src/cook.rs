@@ -41,6 +41,14 @@
 //! keeps the evaluation orders of the last few targets, their upstream
 //! sizes and the `tainted` set. Node results are kept per dense slot.
 //!
+//! # Events
+//!
+//! Event delivery (M0.10) runs in [`Cooker::tick`] before the targets are
+//! cooked; see `cook/events.rs`. Events reach values only through the
+//! runtime state of event nodes: a state change gets a new version from the
+//! cooker's counter (a stale check like an upstream version) and makes the
+//! node and its downstream stale for this cooker.
+//!
 //! # Statistics
 //!
 //! [`CookStats`] counts as before: every node in the target's upstream
@@ -63,6 +71,12 @@ use crate::sources::Expression;
 // System bindings (M0.8): `Cooker::set_system` and the invalidation of
 // system-reading nodes; see `cook/system.rs`.
 mod system;
+
+// Events (M0.10): `Cooker::tick`, event routing and node state; see
+// `cook/events.rs`.
+mod events;
+
+pub use events::{DEFAULT_EVENT_LIMIT, EventError, ExternalEvent, FiredEvent, TickReport};
 
 /// Why a node has no fresh output.
 #[derive(Debug, Clone, PartialEq)]
@@ -204,6 +218,8 @@ pub struct Cooker {
     stats: CookStats,
     /// System bindings (M0.8), see `cook/system.rs`.
     system: system::SystemState,
+    /// Events (M0.10), see `cook/events.rs`.
+    events: events::EventState,
 }
 
 impl Cooker {
@@ -329,6 +345,7 @@ impl Cooker {
             self.topo_rev = None;
             self.entries.clear();
             self.failed.clear();
+            self.events.reset();
         }
         if self.topo_rev == Some(graph.topo_rev()) {
             return;
@@ -457,6 +474,7 @@ impl Cooker {
         );
         let clock = time_dependent.then(|| clock_key(&self.clock));
         let clock_gen = self.clock_gen;
+        let state_version = self.events.state_version(slot, node.id);
 
         let changed = match self.entries[slot].as_ref() {
             None => true,
@@ -469,6 +487,8 @@ impl Cooker {
                 };
                 e.rev != node.rev
                     || e.clock != clock
+                    || state_version > e.stamp
+
                     || node
                         .link_in
                         .iter()
@@ -504,10 +524,19 @@ impl Cooker {
                     .is_none_or(|e| e.inputs.as_deref() != Some(self.inputs_buf.as_slice()));
                 let inputs_version = inputs_changed.then(|| self.next_version());
                 self.stats.cooked += 1;
+                let initial;
+                let state = match self.events.state(slot, node.id) {
+                    Some(state) => state,
+                    None => {
+                        initial = node.imp.initial_state();
+                        initial.as_ref()
+                    }
+                };
                 let result = run_node(
                     node.imp.as_ref(),
                     &self.clock,
                     &self.system.context(),
+                    state,
                     &self.inputs_buf,
                 );
                 if let Some(v) = inputs_version {
@@ -659,10 +688,11 @@ fn run_node(
     imp: &dyn livspeil_node_api::NodeImpl,
     ctx: &CookContext,
     system: &SystemContext<'_>,
+    state: Option<&Value>,
     inputs: &[Value],
 ) -> Result<Vec<Value>, CookError> {
     let outputs = match catch_unwind(AssertUnwindSafe(|| {
-        imp.cook_with_system(ctx, system, inputs)
+        imp.cook_with_state(ctx, system, state, inputs)
     })) {
         Ok(Ok(outputs)) => outputs,
         Ok(Err(err)) => return Err(CookError::Node(err)),
