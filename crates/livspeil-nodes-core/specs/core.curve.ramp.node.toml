@@ -1,0 +1,58 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.curve.ramp"
+version = 1
+summary = "Sample a curve at a position"
+time_dependent = false
+reads_system = false
+description = '''
+Samples `curve` at `position`, exactly like a Float animation channel with
+the position as time: step, linear, bezier and spring segments,
+hold/loop/ping-pong outside the keys. A `NaN` position gives the first
+key's value, infinities the end keys' values.
+'''
+
+[[inputs]]
+name = "curve"
+type = "Curve"
+default = { keys = [{ position = 0.0, value = 0.0 }, { position = 1.0, value = 1.0 }] }
+
+[[inputs]]
+name = "position"
+type = "Float"
+default = 0.0
+
+[[outputs]]
+name = "out"
+type = "Float"
+
+[[tests]]
+name = "defaults: identity"
+inputs = { position = 0.25 }
+expect = { out = 0.25 }
+
+[[tests]]
+name = "hold after the last key"
+inputs = { position = 1.5 }
+expect = { out = 1.0 }
+
+[[tests]]
+inputs = { position = 0.75, curve = { keys = [{ position = 0.0, value = 0.0, interpolation = "step" }, { position = 0.5, value = 1.0, interpolation = "step" }, { position = 1.0, value = 0.25, interpolation = "step" }] } }
+expect = { out = 1.0 }
+
+[[tests]]
+name = "spring"
+inputs = { position = 0.25, curve = { keys = [{ position = 0.0, value = 0.0, interpolation = { spring = { frequency = 2.0, damping = 0.3 } } }, { position = 1.0, value = 1.0 }] } }
+expect = { out = 1.3679179901216232 }
+tolerance = 1e-12
+
+[[tests]]
+name = "loop before, ping-pong after"
+inputs = { position = 1.75, curve = { keys = [{ position = 0.0, value = 0.0 }, { position = 0.5, value = 1.0 }, { position = 1.0, value = 0.25 }], pre = "loop", post = "ping_pong" } }
+expect = { out = 0.5 }

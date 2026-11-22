@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.vector.dot3"
+version = 1
+summary = "Dot product of two Vec3s"
+time_dependent = false
+reads_system = false
+description = '''
+Dot product, summed in the order x, y, z. IEEE 754 throughout: `inf · 0` gives `NaN`.
+'''
+
+[[inputs]]
+name = "a"
+type = "Vec3"
+default = [0.0, 0.0, 0.0]
+
+[[inputs]]
+name = "b"
+type = "Vec3"
+default = [0.0, 0.0, 0.0]
+
+[[outputs]]
+name = "out"
+type = "Float"
+
+[[tests]]
+inputs = { a = [1.0, 2.0, 3.0], b = [4.0, -5.0, 6.0] }
+expect = { out = 12.0 }
+
+[[tests]]
+inputs = { a = [1.0, 0.0, 0.0], b = [0.0, 1.0, 0.0] }
+expect = { out = 0.0 }
+
+[[tests]]
+inputs = { a = [inf, 0.0, 0.0], b = [0.0, 1.0, 0.0] }
+expect = { out = nan }

@@ -15,6 +15,11 @@ TASKS:
     test     Run all tests
     bench    Run all benchmarks (release mode, criterion); extra arguments
              go to criterion, e.g. `cargo xtask bench -- --quick`
+    node-specs
+             Regenerate crates/livspeil-nodes-core/specs/*.node.toml from the
+             registered nodes (keeping `description` and [[tests]]), create
+             files for new nodes and refresh docs/nodes.md; then run their
+             [[tests]]
     deny     Run cargo-deny (license and advisory checks)
     reuse    Run reuse lint (SPDX compliance)
 ";
@@ -26,6 +31,11 @@ fn main() -> ExitCode {
         Some("fmt") => run("cargo", &["fmt", "--all"]),
         Some("test") => run("cargo", &["test", "--workspace"]),
         Some("bench") => bench(),
+        Some("node-specs") => run_with_env(
+            "cargo",
+            &["test", "-p", "livspeil-nodes-core", "--test", "node_specs"],
+            ("UPDATE_NODE_SPECS", "1"),
+        ),
         Some("deny") => run_required("cargo", &["deny", "check"], "cargo-deny"),
         Some("reuse") => run_required("reuse", &["lint"], "reuse"),
         None | Some("help" | "-h" | "--help") => {
@@ -82,6 +92,18 @@ fn bench() -> bool {
 fn run(program: &str, args: &[&str]) -> bool {
     eprintln!("$ {program} {}", args.join(" "));
     match Command::new(program).args(args).status() {
+        Ok(status) => status.success(),
+        Err(err) => {
+            eprintln!("failed to start {program}: {err}");
+            false
+        }
+    }
+}
+
+/// Like [`run`], with one extra environment variable.
+fn run_with_env(program: &str, args: &[&str], (key, value): (&str, &str)) -> bool {
+    eprintln!("$ {key}={value} {program} {}", args.join(" "));
+    match Command::new(program).args(args).env(key, value).status() {
         Ok(status) => status.success(),
         Err(err) => {
             eprintln!("failed to start {program}: {err}");

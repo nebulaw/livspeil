@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.math.sub"
+version = 1
+summary = "Subtract b from a"
+time_dependent = false
+reads_system = false
+description = '''
+`out = a - b` (IEEE 754).
+'''
+
+[[inputs]]
+name = "a"
+type = "Float"
+default = 0.0
+
+[[inputs]]
+name = "b"
+type = "Float"
+default = 0.0
+
+[[outputs]]
+name = "out"
+type = "Float"
+
+[[tests]]
+inputs = { a = 5.0, b = 3.5 }
+expect = { out = 1.5 }
+
+[[tests]]
+name = "no rounding of the binary result"
+inputs = { a = 0.3, b = 0.1 }
+expect = { out = 0.19999999999999998 }
+
+[[tests]]
+inputs = { a = inf, b = inf }
+expect = { out = nan }

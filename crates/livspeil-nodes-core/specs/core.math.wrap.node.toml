@@ -1,0 +1,63 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.math.wrap"
+version = 1
+summary = "Wrap x into [min, max) (bounds are swapped if reversed)"
+time_dependent = false
+reads_system = false
+description = '''
+`out = min + (x - min) mod (max - min)` with a Euclidean (never negative)
+remainder, so values below `min` wrap from the top: with the defaults
+`wrap(-0.25) == 0.75` and `wrap(1.0) == 0.0`. If `min > max` the bounds are
+swapped, as in `core.math.clamp`. Errors (invalid input): `min == max` (on
+`max`), a `NaN` or infinite bound (on that bound), and a range
+`max - min` too large to represent (on `max`). A `NaN` or infinite `x`
+gives `NaN`.
+'''
+
+[[inputs]]
+name = "x"
+type = "Float"
+default = 0.0
+
+[[inputs]]
+name = "min"
+type = "Float"
+default = 0.0
+
+[[inputs]]
+name = "max"
+type = "Float"
+default = 1.0
+
+[[outputs]]
+name = "out"
+type = "Float"
+
+[[tests]]
+inputs = { x = 1.25 }
+expect = { out = 0.25 }
+
+[[tests]]
+inputs = { x = -0.25 }
+expect = { out = 0.75 }
+
+[[tests]]
+name = "angles"
+inputs = { x = 180.0, min = -180.0, max = 180.0 }
+expect = { out = -180.0 }
+
+[[tests]]
+name = "empty range"
+inputs = { x = 0.5, min = 2.0, max = 2.0 }
+expect_error = { port = "max", message = "range is empty" }
+
+[[tests]]
+inputs = { min = nan }
+expect_error = { port = "min" }

@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.table.count"
+version = 1
+summary = "Number of rows and columns of a table"
+time_dependent = false
+reads_system = false
+description = '''
+Number of rows (`count`) and columns (`columns`) of `table`.
+'''
+
+[[inputs]]
+name = "table"
+type = "Table"
+default = { columns = [] }
+
+[[outputs]]
+name = "count"
+type = "Int"
+
+[[outputs]]
+name = "columns"
+type = "Int"
+
+[[tests]]
+name = "defaults: the empty table"
+expect = { count = 0, columns = 0 }
+
+[[tests]]
+expect = { count = 5, columns = 4 }
+
+[[tests.inputs.table.columns]]
+name = "name"
+type = "String"
+values = ["Dune", "Emma", "dracula", "Ubik", "Émile"]
+
+[[tests.inputs.table.columns]]
+name = "pages"
+type = "Int"
+values = [412, 474, 418, 202, 412]
+
+[[tests.inputs.table.columns]]
+name = "rating"
+type = "Float"
+values = [4.5, 3.75, -0.0, nan, 0.0]
+
+[[tests.inputs.table.columns]]
+name = "read"
+type = "Bool"
+values = [true, false, true, false, false]
+
+[[tests]]
+expect = { count = 4, columns = 1 }
+
+[[tests.inputs.table.columns]]
+name = "tag"
+type = "String"
+values = ["sci-fi", "classic", "Sci-Fi", ""]

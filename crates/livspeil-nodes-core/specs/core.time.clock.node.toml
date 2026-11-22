@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.time.clock"
+version = 1
+summary = "The frame clock"
+time_dependent = true
+reads_system = false
+description = '''
+Publishes the frame clock: `frame` counter, `time` in seconds since the clock started and `dt` since the previous frame. The only time-dependent core node.
+'''
+inputs = []
+
+[[outputs]]
+name = "frame"
+type = "Int"
+
+[[outputs]]
+name = "time"
+type = "Float"
+
+[[outputs]]
+name = "dt"
+type = "Float"
+
+[[tests]]
+context = { frame = 12, time = 0.2, dt = 0.016666666666666666 }
+expect = { frame = 12, time = 0.2, dt = 0.016666666666666666 }
+
+[[tests]]
+name = "default context"
+expect = { frame = 0, time = 0.0, dt = 0.0 }

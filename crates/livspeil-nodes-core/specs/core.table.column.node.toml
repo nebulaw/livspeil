@@ -1,0 +1,89 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.table.column"
+version = 1
+summary = "One column of a table, as a list"
+time_dependent = false
+reads_system = false
+description = '''
+The single-column table (a list) of column `name` of `table`. An unknown
+column is an invalid-input error on `name` that lists the columns there
+are; a table without columns (the default) gives the empty table.
+'''
+
+[[inputs]]
+name = "table"
+type = "Table"
+default = { columns = [] }
+
+[[inputs]]
+name = "name"
+type = "String"
+default = "name"
+
+[[outputs]]
+name = "out"
+type = "Table"
+
+[[tests]]
+name = "defaults"
+expect = { out = { columns = [] } }
+
+[[tests]]
+expect = { out = { columns = [{ name = "rating", type = "Float", values = [4.5, 3.75, -0.0, nan, 0.0] }] } }
+
+[tests.inputs]
+name = "rating"
+
+[[tests.inputs.table.columns]]
+name = "name"
+type = "String"
+values = ["Dune", "Emma", "dracula", "Ubik", "Émile"]
+
+[[tests.inputs.table.columns]]
+name = "pages"
+type = "Int"
+values = [412, 474, 418, 202, 412]
+
+[[tests.inputs.table.columns]]
+name = "rating"
+type = "Float"
+values = [4.5, 3.75, -0.0, nan, 0.0]
+
+[[tests.inputs.table.columns]]
+name = "read"
+type = "Bool"
+values = [true, false, true, false, false]
+
+[[tests]]
+name = "names are case-sensitive"
+expect_error = { port = "name", message = "no column \"Name\"" }
+
+[tests.inputs]
+name = "Name"
+
+[[tests.inputs.table.columns]]
+name = "name"
+type = "String"
+values = ["Dune", "Emma", "dracula", "Ubik", "Émile"]
+
+[[tests.inputs.table.columns]]
+name = "pages"
+type = "Int"
+values = [412, 474, 418, 202, 412]
+
+[[tests.inputs.table.columns]]
+name = "rating"
+type = "Float"
+values = [4.5, 3.75, -0.0, nan, 0.0]
+
+[[tests.inputs.table.columns]]
+name = "read"
+type = "Bool"
+values = [true, false, true, false, false]

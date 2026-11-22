@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.time.timeofday"
+version = 1
+summary = "Day phase (0 = midnight, 0.5 = noon) and hour from seconds since local midnight"
+time_dependent = false
+reads_system = false
+description = '''
+`seconds` since local midnight plus `offset` hours, wrapped to one day:
+`phase` in `[0, 1)` (0 = midnight, 0.5 = noon) and `hour` in `[0, 24)`. Any
+finite input wraps, including negative values and values beyond one day;
+`NaN` or infinite inputs are invalid-input errors.
+'''
+
+[[inputs]]
+name = "seconds"
+type = "Float"
+default = 43200.0
+
+[[inputs]]
+name = "offset"
+type = "Float"
+default = 0.0
+
+[[outputs]]
+name = "phase"
+type = "Float"
+
+[[outputs]]
+name = "hour"
+type = "Float"
+
+[[tests]]
+name = "defaults: noon"
+expect = { phase = 0.5, hour = 12.0 }
+
+[[tests]]
+inputs = { seconds = 21600.0 }
+expect = { phase = 0.25, hour = 6.0 }
+
+[[tests]]
+name = "negative seconds wrap"
+inputs = { seconds = -3600.0 }
+expect = { phase = 0.958333, hour = 23.0 }
+tolerance = 1e-6
+
+[[tests]]
+inputs = { seconds = 43200.0, offset = 2.0 }
+expect = { phase = 0.583333, hour = 14.0 }
+tolerance = 1e-6
+
+[[tests]]
+inputs = { seconds = nan }
+expect_error = { port = "seconds" }
