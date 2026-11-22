@@ -3,7 +3,7 @@
 
 //! The first built-in nodes.
 //!
-//! Milestone M0.2 ships three nodes to exercise the scheduler:
+//! The core node set (milestones M0.2 and M0.6). Earliest nodes:
 //! `core.math.add`, `core.math.lerp` and `core.time.clock`. The rest of the
 //! set arrives in M0.6, one node per task (spec, implementation, golden
 //! test); see `specs/livspeil-kernel-spec-v0.md`, sections 8 and 9. The specs
@@ -16,6 +16,16 @@ mod math;
 
 pub use logic::{And, Compare, Not, Or, Select};
 pub use math::{Clamp, Div, Max, Min, Mul, Remap, Smoothstep, Sub};
+mod color;
+mod sky;
+mod time;
+
+pub use color::{CHROMA_EPSILON, ColorMix, lab_to_lch, lch_to_lab, mix_oklch};
+pub use sky::{
+    AZIMUTH_EPSILON, AZIMUTH_SEAM_EPSILON, SunDirection, SunPosition, declination_degrees,
+    sun_position,
+};
+pub use time::{SECONDS_PER_DAY, TimeOfDay, time_of_day};
 
 use livspeil_node_api::{
     CookContext, NodeError, NodeImpl, NodeRegistry, NodeSpec, PortType, RegistryError, Value,
@@ -42,6 +52,9 @@ pub fn register_all(registry: &mut NodeRegistry) -> Result<(), RegistryError> {
     registry.register(Arc::new(And::new()))?;
     registry.register(Arc::new(Or::new()))?;
     registry.register(Arc::new(Not::new()))?;
+    registry.register(Arc::new(TimeOfDay::new()))?;
+    registry.register(Arc::new(SunDirection::new()))?;
+    registry.register(Arc::new(ColorMix::new()))?;
     Ok(())
 }
 
@@ -213,6 +226,9 @@ mod tests {
             "core.logic.and@1",
             "core.logic.or@1",
             "core.logic.not@1",
+            "core.time.timeofday@1",
+            "core.sky.sun_direction@1",
+            "core.color.mix@1",
         ] {
             assert!(reg.get(id).is_some(), "{id} is not registered");
         }
