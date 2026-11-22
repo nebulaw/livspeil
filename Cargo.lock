@@ -199,6 +199,7 @@ dependencies = [
  "livspeil-node-api",
  "livspeil-testkit",
  "proptest",
+ "serde",
 ]
 
 [[package]]
