@@ -15,7 +15,7 @@ Livspeil follows the free-software tradition begun by Richard Stallman and the G
 
 ## Where this differs from a strict GNU approach
 - Copyright assignment to a foundation (the traditional FSF model) is replaced by a license-grant CLA with an open-source lock, a lighter-weight, contributor-friendly variant. A fiduciary license agreement (FLA, as used by FSFE) is an option if a foundation is created.
-- DCO sign-offs record provenance per commit.
+- Provenance comes from the CLA, git history and `Co-Authored-By` trailers (no per-commit DCO sign-off, to keep contributing simple).
 - MPL-2.0 instead of the LGPL for libraries, because the LGPL's relinking model fits Rust poorly.
 
 This pledge is a statement of intent, not a legal contract. Binding terms are in the licenses and the CLA.
