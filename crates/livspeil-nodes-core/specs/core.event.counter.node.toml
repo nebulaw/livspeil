@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.event.counter"
+version = 1
+summary = "Count trigger events; reset to 0"
+time_dependent = false
+reads_system = false
+description = '''
+Counts events: each `trigger` adds one (wrapping at the Int maximum), `reset` sets the count back to 0. Payloads are ignored. State (runtime only, never saved): the count, starting at 0; `count` is cooked from it, so a change invalidates everything downstream.
+'''
+
+[[inputs]]
+name = "trigger"
+type = "Event"
+
+[[inputs]]
+name = "reset"
+type = "Event"
+
+[[outputs]]
+name = "count"
+type = "Int"
+
+[[tests]]
+name = "initial state"
+expect = { count = 0 }
+
+[[tests]]
+events = [{ input = "trigger" }, { input = "trigger", payload = 9.0 }, { input = "trigger" }]
+expect = { count = 3 }
+expect_events = []
+
+[[tests]]
+name = "reset"
+events = [{ input = "trigger" }, { input = "trigger" }, { input = "reset" }, { input = "trigger" }]
+expect = { count = 1 }

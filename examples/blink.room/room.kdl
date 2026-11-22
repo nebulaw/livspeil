@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: 2026 Livspeil contributors
+// SPDX-License-Identifier: CC0-1.0
+
+// Events (M0.10): a timer blinks a lamp and counts the blinks.
+//
+// blink.fired (every 0.5 s) -> lamp (toggle) -> brightness (1.0 or 0.2)
+//                           -> blinks (counter; reset it from outside with
+//                              `livspeil cook ... --event blinks.reset@FRAME`)
+// brightness -> flash (on_change) fires with the new brightness
+//
+// Event links are links like any other; event node state (the toggle, the
+// count) is runtime only and never saved here.
+
+room "Blink" format=1 min-tier="T0" {
+  network "/" {
+    node "blink" type="core.event.every@1" id="0194b1a0-0000-7000-8000-000000000001" {
+      input "period" 0.5
+    }
+    node "lamp" type="core.event.toggle@1" id="0194b1a0-0000-7000-8000-000000000002"
+    node "brightness" type="core.logic.select@1" id="0194b1a0-0000-7000-8000-000000000003" {
+      input "a" 1.0
+      input "b" 0.2
+    }
+    node "blinks" type="core.event.counter@1" id="0194b1a0-0000-7000-8000-000000000004"
+    node "flash" type="core.event.on_change@1" id="0194b1a0-0000-7000-8000-000000000005"
+    node "light" type="core.output@1" id="0194b1a0-0000-7000-8000-000000000006" port-type="Float"
+    node "count" type="core.output@1" id="0194b1a0-0000-7000-8000-000000000007" port-type="Int"
+    node "ticks" type="core.output@1" id="0194b1a0-0000-7000-8000-000000000008" port-type="Event"
+    node "changed" type="core.output@1" id="0194b1a0-0000-7000-8000-000000000009" port-type="Event"
+    link from="blink.fired" to="blinks.trigger"
+    link from="blink.fired" to="lamp.trigger"
+    link from="blink.fired" to="ticks.value"
+    link from="blinks.count" to="count.value"
+    link from="brightness.out" to="flash.value"
+    link from="brightness.out" to="light.value"
+    link from="flash.changed" to="changed.value"
+    link from="lamp.on" to="brightness.cond"
+  }
+}

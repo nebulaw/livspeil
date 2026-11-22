@@ -185,6 +185,33 @@ There is no spec target for the command bus. At about 0.3 µs per edit and
 0.65 µs per replayed entry, a 60 Hz slider drag or a journal of a whole
 editing session is far from being a bottleneck.
 
+## Results: events (M0.10)
+
+Measured 2026-11-23 on the same kind of VM (shared with other build jobs),
+`--warm-up-time 1 --measurement-time 2`. Group `events` in
+`crates/livspeil-graph/benches/cook.rs`:
+
+| Case (10,000 nodes) | Time |
+|---|---|
+| `timers_tick`: 1,000 timers poll, ~100 fire, 100 counters change state and invalidate their part of an 8,000-add chain | 0.34 ms |
+| `timers_tick_cook`: the same plus the cook of the chain's sink | 1.43 ms |
+| `loop`: a gate feeding itself, cut at the 10,000-item limit | 0.86 ms |
+
+The events phase costs about 0.1 to 0.3 us per queue item (each handler call checks
+that the handler's inputs are cooked, which is `O(1)` when they are
+fresh). A tick with no polling nodes and no injected events returns
+immediately, so value-only graphs pay nothing for it.
+
+**Value cooking with events in place.** The cooker now looks up a node's
+state version before re-cooking it and calls `cook_with_state`. The 10k
+value cases (`cold`, `warm`, `edit_head_cook_only`, `cutoff` for chain,
+tree and dag) were run twice back to back against `main` built from the
+same sources. The differences changed sign between rounds and stayed
+within the VM's noise (about 10 %): for example, chain `cold` 1.90 / 1.96
+ms on `main` against 2.24 / 1.94 ms, dag `cold` 3.15 / 2.67 against 2.89 /
+2.76 ms, and `warm` 41 to 109 ns on both. There is no measurable
+regression.
+
 ## Observations
 
 **Where the time goes (cook, before M0.2b).** The old scheduler's per-node

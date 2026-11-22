@@ -1,0 +1,54 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.event.latch"
+version = 1
+summary = "Hold the trigger's payload (or the value input) until the next trigger"
+time_dependent = false
+reads_system = false
+description = '''
+Sample and hold: on `trigger`, `out` becomes the event's payload if it is a Float or an Int, else the current `value` input. State (runtime only, never saved): the held value, starting at 0.
+'''
+
+[[inputs]]
+name = "trigger"
+type = "Event"
+
+[[inputs]]
+name = "value"
+type = "Float"
+default = 0.0
+
+[[outputs]]
+name = "out"
+type = "Float"
+
+[[tests]]
+name = "initial state ignores value"
+inputs = { value = 4.0 }
+expect = { out = 0.0 }
+
+[[tests]]
+name = "samples the value input"
+events = [{ input = "trigger", inputs = { value = 0.25 } }]
+inputs = { value = 9.0 }
+expect = { out = 0.25 }
+
+[[tests]]
+name = "numeric payloads win; others sample value"
+inputs = { value = -1.0 }
+events = [
+  { input = "trigger", payload = 3.5 },
+  { input = "trigger", payload = 7 },
+]
+expect = { out = 7.0 }
+
+[[tests]]
+inputs = { value = -1.0 }
+events = [{ input = "trigger", payload = 7 }, { input = "trigger", payload = true }]
+expect = { out = -1.0 }

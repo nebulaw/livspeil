@@ -13,7 +13,7 @@ Status: **Phase 0 (kernel)**. This repository currently holds the headless, cros
 | `crates/livspeil-params` | Parameters, animation, expressions (expression language done; parameters next, M0.5) |
 | `crates/livspeil-doc` | Document model, KDL v2 `room.kdl` format, canonical form, migrations (M0.4) |
 | `crates/livspeil-cmd` | Command bus, undo/redo, journal (M0.3) |
-| `crates/livspeil-nodes-core` | Core nodes: math, logic, vector, time, sky, color, text (M0.6), subnet and output nodes (M0.7; events, fs, tables and ramps deferred) |
+| `crates/livspeil-nodes-core` | Core nodes: math, logic, vector, time, sky, color, text (M0.6), subnet and output nodes (M0.7), tables, ramps and fs (M0.8), events (M0.10) |
 | `crates/livspeil-testkit` | Golden-file harness |
 | `crates/livspeil-cli` | `livspeil` headless command line (`validate`, `fmt`, `cook`, `diff`, `assets`) |
 | `xtask` | Project automation (`cargo xtask check`) |
@@ -58,6 +58,36 @@ Floats are printed with six decimals so the output (and its golden files in
 `--format jsonl` prints one JSON object per frame, `--stats` adds the
 scheduler's cooked/reused counts, and `livspeil --help` documents every
 option and exit code (0 ok, 1 load error, 2 usage error, 3 node error).
+
+### Events
+
+Values are pulled and cached; events are pushed, once per tick, in the
+phase order **input -> events -> cook -> publish** (M0.10). `Event` ports
+carry triggers with an optional payload; event links are written like any
+other link and may form loops (each tick is cut at an event limit, 10,000
+queue items by default, and the overflow is reported). Event nodes
+(`core.event.every`, `on_change`, `counter`, `toggle`, `latch`, `gate`,
+`select`) keep runtime state per cooker, never saved in `room.kdl`; a state
+change invalidates the node's value outputs and their downstream, so a
+counter's `count` or a latch's `out` can drive any parameter. Design:
+`crates/livspeil-graph/src/cook/events.rs`.
+
+[`examples/blink.room`](examples/blink.room/room.kdl) blinks a lamp every
+0.5 s and counts the blinks. `--event NODE.PORT@FRAME` injects an event
+(into an `Event` input, or out of an `Event` output) for testing, and
+`Event` outputs print what fired in the frame:
+
+```sh
+cargo run -p livspeil-cli -- cook examples/blink.room --frames 40 --fps 20 --every 10 \
+    --event blinks.reset@30
+```
+
+```text
+frame=10 time=0.500000 changed.value=event(0.200000)
+frame=10 time=0.500000 count.value=2
+frame=10 time=0.500000 light.value=0.200000
+frame=10 time=0.500000 ticks.value=event(1)
+```
 
 ### `diff`
 

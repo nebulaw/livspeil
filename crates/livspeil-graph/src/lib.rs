@@ -32,6 +32,14 @@
 //!   such as `core.fs.list_dir`; they are re-cooked when the host's
 //!   revision changes (see `cook/system.rs` for the caching rules).
 //!
+//! - Events (M0.10): links between `Event` ports are stored like other
+//!   links but are not value dependencies (they may form cycles).
+//!   [`Cooker::tick`] runs the input and events phases of a tick (external
+//!   events, polls, bounded FIFO delivery in a stable order); event nodes
+//!   keep runtime state per cooker, and a state change invalidates the
+//!   node's values and their downstream for that cooker. See
+//!   `cook/events.rs` for the design.
+//!
 //! - [`GraphSnapshot`] is a canonical, comparable copy of the editable state
 //!   (used by the command bus tests to prove undo and replay exact).
 //!
@@ -100,8 +108,8 @@
 //! `"/a/b/port"` absolute); see [`Graph::set_expression`].
 //!
 //! Not yet implemented (later milestones): Charm definitions shared by
-//! several instances (each instance is a copy today), event ports, and
-//! parallel evaluation.
+//! several instances (each instance is a copy today) and parallel
+//! evaluation.
 
 mod cook;
 mod graph;
@@ -109,7 +117,10 @@ mod network;
 mod snapshot;
 mod sources;
 
-pub use cook::{CookError, CookStats, Cooker};
+pub use cook::{
+    CookError, CookStats, Cooker, DEFAULT_EVENT_LIMIT, EventError, ExternalEvent, FiredEvent,
+    TickReport,
+};
 pub use graph::{Endpoint, Graph, GraphError, Link, NodeId, PortDirection};
 pub use livspeil_params::expr::RefKind;
 pub use network::{CharmMeta, INPUT_TYPE, INTERFACE_PORT, OUTPUT_TYPE, SUBNET_TYPE};

@@ -31,14 +31,23 @@
 //! downstream dirty (the spec's "mark the affected subgraph dirty"), and a
 //! cook visits only dirty nodes, so `warm` measures the `O(1)` fast path.
 //! See `docs/benchmarks.md` for how the spec's targets map onto these cases.
+//!
+//! Events (M0.10), group `events`: `timers` is a 10,000-node graph of
+//! 1,000 `core.event.every` timers (period 0.1 s, staggered offsets, so
+//! about 100 fire per 10 ms tick), each triggering a `core.event.counter`,
+//! and a chain of 8,000 adds whose `b` inputs read the counters (add `i`
+//! reads counter `i / 8`). `tick` is the events phase alone (polls,
+//! deliveries, state changes and their invalidation); `tick_cook` adds the
+//! cook of the chain's sink. `loop` is a gate feeding itself, cut at the
+//! default limit of 10,000 queue items per tick.
 
 use std::hint::black_box;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
-use livspeil_graph::{Cooker, Graph, NodeId};
-use livspeil_node_api::{NodeRegistry, Value};
+use livspeil_graph::{Cooker, ExternalEvent, Graph, NodeId};
+use livspeil_node_api::{CookContext, Event, NodeRegistry, Value};
 
 const ADD: &str = "core.math.add@1";
 const SIZES: [usize; 2] = [1_000, 10_000];
@@ -331,5 +340,98 @@ fn bench_cook(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, bench_cook);
+/// The `timers` graph: returns it and the chain's sink.
+fn timers(registry: &Arc<NodeRegistry>) -> (Graph, NodeId) {
+    const TIMERS: usize = 1_000;
+    const ADDS: usize = 8_000;
+    let mut graph = Graph::new(Arc::clone(registry));
+    let mut counters = Vec::with_capacity(TIMERS);
+    for i in 0..TIMERS {
+        let every = graph
+            .add_node("core.event.every@1", &format!("t{i}"))
+            .expect("add");
+        graph
+            .set_input(every, "period", Value::Float(0.1))
+            .expect("set");
+        #[allow(clippy::cast_precision_loss)]
+        let offset = (i % 10) as f64 * 0.01 + 0.005;
+        graph
+            .set_input(every, "offset", Value::Float(offset))
+            .expect("set");
+        let counter = graph
+            .add_node("core.event.counter@1", &format!("c{i}"))
+            .expect("add");
+        graph
+            .link(every, "fired", counter, "trigger")
+            .expect("link");
+        counters.push(counter);
+    }
+    let mut prev = None;
+    for i in 0..ADDS {
+        let add = graph.add_node(ADD, &format!("a{i}")).expect("add");
+        if let Some(p) = prev {
+            graph.link(p, "out", add, "a").expect("link");
+        }
+        graph
+            .link(counters[i / 8], "count", add, "b")
+            .expect("link");
+        prev = Some(add);
+    }
+    (graph, prev.expect("chain is not empty"))
+}
+
+fn clock(frame: u64) -> CookContext {
+    #[allow(clippy::cast_precision_loss)]
+    let time = frame as f64 * 0.01;
+    CookContext {
+        frame,
+        time,
+        dt: 0.01,
+    }
+}
+
+fn bench_events(c: &mut Criterion) {
+    let registry = registry();
+    let mut group = c.benchmark_group("events");
+    let (graph, sink) = timers(&registry);
+    assert_eq!(graph.node_count(), 10_000);
+
+    // Sanity: about a tenth of the timers fire per tick.
+    let mut cooker = Cooker::new();
+    cooker.cook(&graph, sink).expect("cook");
+    let report = cooker.tick(&graph, clock(1), &[]);
+    assert_eq!(report.fired.len(), 100, "100 timers fire per tick");
+    assert!(report.errors.is_empty() && !report.overflowed());
+
+    let mut frame = 1;
+    group.bench_function(BenchmarkId::new("timers_tick", 10_000), |b| {
+        b.iter(|| {
+            frame += 1;
+            black_box(cooker.tick(&graph, clock(frame), &[]));
+        });
+    });
+    group.bench_function(BenchmarkId::new("timers_tick_cook", 10_000), |b| {
+        b.iter(|| {
+            frame += 1;
+            black_box(cooker.tick(&graph, clock(frame), &[]));
+            black_box(cooker.cook(&graph, sink).expect("cook"));
+        });
+    });
+
+    let mut graph = Graph::new(Arc::clone(&registry));
+    let gate = graph.add_node("core.event.gate@1", "gate").expect("add");
+    graph.link(gate, "out", gate, "trigger").expect("link");
+    let start = [ExternalEvent::new(&graph, gate, "trigger", Event::bang()).expect("event")];
+    let mut cooker = Cooker::new();
+    assert!(cooker.tick(&graph, clock(0), &start).overflowed());
+    group.bench_function(BenchmarkId::new("loop", 10_000), |b| {
+        b.iter(|| {
+            frame += 1;
+            black_box(cooker.tick(&graph, clock(frame), &start));
+        });
+    });
+    group.finish();
+}
+
+criterion_group!(benches, bench_cook, bench_events);
 criterion_main!(benches);

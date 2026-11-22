@@ -70,6 +70,11 @@ COOK OPTIONS:
     --format text|jsonl     One line per frame and node (default), or one
                             JSON object per frame
     --stats                 Also print cooked/reused node counts per frame
+    --event NODE.PORT@FRAME Inject an event (no payload) in frame FRAME
+                            into the Event input PORT of NODE, or from its
+                            Event output PORT (repeatable); Event outputs
+                            print the events fired in the frame (none,
+                            event, event(<payload>))
     --fs-root DIR           File root of file-system nodes such as
                             core.fs.list_dir (default: the room package
                             directory); paths outside it are refused

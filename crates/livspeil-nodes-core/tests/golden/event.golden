@@ -1,0 +1,44 @@
+core.event.every t=0.0 dt=0.25 tick => fired!0 | -
+core.event.every t=0.25 dt=0.25 tick => - | -
+core.event.every t=0.5 dt=0.25 tick => - | -
+core.event.every t=0.75 dt=0.25 tick => - | -
+core.event.every t=1.0 dt=0.25 tick => fired!1 | -
+core.event.every t=1.25 dt=0.25 tick => - | -
+core.event.every t=1.5 dt=0.25 tick => - | -
+core.event.every t=1.75 dt=0.25 tick => - | -
+core.event.every t=2.0 dt=0.25 tick => fired!2 | -
+core.event.every t=2.25 dt=0.25 tick => - | -
+core.event.every t=2.5 dt=0.25 tick => - | -
+core.event.every t=0.5 dt=0.25 tick period=0.75 offset=0.5 => fired!0 | -
+core.event.every t=1.0 dt=0.5 tick period=0.75 offset=0.5 => - | -
+core.event.every t=2.75 dt=1.75 tick period=0.75 offset=0.5 => fired!1 fired!2 fired!3 | -
+core.event.every t=1.0 dt=0.0 tick period=0.75 offset=0.5 => - | -
+core.event.every t=1.0 dt=0.25 tick period=0.0 => error: invalid input 'period': must be positive, got 0
+core.event.every t=1.0 dt=0.25 tick offset=NaN => error: invalid input 'offset': expected a finite number, got NaN
+core.event.on_change t=0.0 dt=0.25 tick value=1.0 => - | -
+core.event.on_change t=0.25 dt=0.25 tick value=1.0 => - | -
+core.event.on_change t=0.5 dt=0.25 tick value=1.5 => changed!1.5 | -
+core.event.on_change t=0.75 dt=0.25 tick value=1.5 => - | -
+core.event.on_change t=1.0 dt=0.25 tick value=-2.0 => changed!-2.0 | -
+core.event.on_change t=1.25 dt=0.25 tick value=NaN => changed!NaN | -
+core.event.on_change t=1.5 dt=0.25 tick value=NaN => - | -
+core.event.on_change t=1.75 dt=0.25 tick value=0.0 => changed!0.0 | -
+core.event.counter t=0.0 dt=0.0 trigger! => - | count=1
+core.event.counter t=0.0 dt=0.0 trigger!9.0 => - | count=2
+core.event.counter t=0.0 dt=0.0 trigger! => - | count=3
+core.event.counter t=0.0 dt=0.0 reset! => - | count=0
+core.event.counter t=0.0 dt=0.0 trigger! => - | count=1
+core.event.toggle t=0.0 dt=0.0 trigger! => - | on=true
+core.event.toggle t=0.0 dt=0.0 trigger! => - | on=false
+core.event.toggle t=0.0 dt=0.0 trigger!false => - | on=true
+core.event.latch t=0.0 dt=0.0 trigger! value=0.25 => - | out=0.25
+core.event.latch t=0.0 dt=0.0 trigger!3.5 value=0.25 => - | out=3.5
+core.event.latch t=0.0 dt=0.0 trigger!7 => - | out=7.0
+core.event.latch t=0.0 dt=0.0 trigger!true value=-1.0 => - | out=-1.0
+core.event.gate t=0.0 dt=0.0 trigger! => out! | -
+core.event.gate t=0.0 dt=0.0 trigger!2.0 open=true => out!2.0 | -
+core.event.gate t=0.0 dt=0.0 trigger!2.0 open=false => - | -
+core.event.gate t=0.0 dt=0.0 tick => - | -
+core.event.select t=0.0 dt=0.0 trigger! => if_false! | -
+core.event.select t=0.0 dt=0.0 trigger!4 cond=true => if_true!4 | -
+core.event.select t=0.0 dt=0.0 trigger!5 cond=false => if_false!5 | -

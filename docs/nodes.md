@@ -64,7 +64,9 @@ text above `[[tests]]`, such as comments, is not kept.
 | `fs` | Optional in-memory file system for nodes that read the system: `{ dirs = [{ path = "a", modified = 0 }], files = [{ path = "a/b.txt", size = 10, modified = 3 }] }`. Without it the node gets no system access. |
 | `expect` | Output port name to expected value. Floats compare exactly (`-0.0` differs from `0.0`; `nan` matches `nan`) unless `tolerance` is set. |
 | `tolerance` | Optional absolute tolerance for every float compared (also inside vectors, colors and tables). |
-| `expect_error` | The cook must fail: `port` (an invalid-input error on that port) and/or `message` (a substring of the error text); `{}` accepts any error. |
+| `events` | Optional event steps for event nodes, run in order from the node's initial state, the state carried from step to step: `{ input = "trigger", payload = 2.0 }` delivers an event (payload optional) to an `Event` input, `{ tick = true }` is the once-per-tick poll. A step may override `inputs` and `context` for itself. `expect` then checks the outputs cooked from the final state (`cook_with_state`); without `events` that is the initial state. |
+| `expect_events` | The events emitted by all steps, in order: `[{ output = "fired", payload = 1 }, { output = "out" }]` (payload left out: none). A payload's TOML type picks its value type (integer `Int`, float `Float`, boolean `Bool`, string `String`). May replace `expect`. |
+| `expect_error` | The cook (or an event step) must fail: `port` (an invalid-input error on that port) and/or `message` (a substring of the error text); `{}` accepts any error. |
 
 ### Values
 
@@ -89,11 +91,13 @@ or `{ spring = { frequency = 2.0, damping = 0.3 } }`; `tangent` is
 Large values (tables) read better as TOML sub-tables, for example
 `[[tests.inputs.table.columns]]` with `name`, `type` and `values` keys.
 A default of a type the format cannot write yet is recorded as
-`default_debug` (its Rust `Debug` text) instead of `default`.
+`default_debug` (its Rust `Debug` text) instead of `default`. `Event`
+inputs list no default: in value cooking they carry the placeholder
+`Value::Event`, and events are tested with `events` and `expect_events`.
 
 ## Node index
 
-43 nodes. *time* marks nodes re-cooked every frame, *system* nodes that read the host system.
+50 nodes. *time* marks nodes re-cooked every frame, *system* nodes that read the host system.
 
 | Node | Summary | Inputs | Outputs | Tests |
 |---|---|---|---|---|
@@ -101,6 +105,13 @@ A default of a type the format cannot write yet is recorded as
 | [`core.color.gradient@1`](#corecolorgradient1) | Three-stop OKLCH gradient (c0 at 0, c1 at p1, c2 at 1) sampled at t, mixed in OKLab | `t: Float = 0.5`<br>`c0: Color = [0.3, 0.1, 270.0, 1.0]`<br>`c1: Color = [0.7, 0.15, 45.0, 1.0]`<br>`c2: Color = [0.95, 0.05, 95.0, 1.0]`<br>`p1: Float = 0.5` | `out: Color` | 4 |
 | [`core.color.mix@1`](#corecolormix1) | Mix two OKLCH colors in OKLab space (t clamped to [0, 1]) | `a: Color = [0.8, 0.12, 60.0, 1.0]`<br>`b: Color = [0.9, 0.08, 80.0, 1.0]`<br>`t: Float = 0.5` | `out: Color` | 4 |
 | [`core.curve.ramp@1`](#corecurveramp1) | Sample a curve at a position | `curve: Curve = { keys = [{ position = 0.0, value = 0.0 }, { position = 1.0, value = 1.0 }] }`<br>`position: Float = 0.0` | `out: Float` | 5 |
+| [`core.event.counter@1`](#coreeventcounter1) | Count trigger events; reset to 0 | `trigger: Event`<br>`reset: Event` | `count: Int` | 3 |
+| [`core.event.every@1`](#coreeventevery1) | Fire each time the clock crosses offset + k * period | `period: Float = 1.0`<br>`offset: Float = 0.0` | `fired: Event` | 4 |
+| [`core.event.gate@1`](#coreeventgate1) | Forward trigger events while open | `trigger: Event`<br>`open: Bool = true` | `out: Event` | 3 |
+| [`core.event.latch@1`](#coreeventlatch1) | Hold the trigger's payload (or the value input) until the next trigger | `trigger: Event`<br>`value: Float = 0.0` | `out: Float` | 4 |
+| [`core.event.on_change@1`](#coreeventon_change1) | Fire with the new value when the input changes between ticks | `value: Float = 0.0` | `changed: Event` | 2 |
+| [`core.event.select@1`](#coreeventselect1) | Route trigger events to if_true or if_false | `trigger: Event`<br>`cond: Bool = false` | `if_false: Event`<br>`if_true: Event` | 3 |
+| [`core.event.toggle@1`](#coreeventtoggle1) | Flip a flag on every trigger event | `trigger: Event` | `on: Bool` | 3 |
 | [`core.fs.list_dir@1`](#corefslist_dir1) | List the files of a folder as a table (name, path, is_dir, size, modified) *(system)* | `path: String = "."`<br>`pattern: String = "*"`<br>`include_hidden: Bool = false`<br>`sort: String = "name"` | `entries: Table`<br>`count: Int` | 6 |
 | [`core.logic.and@1`](#corelogicand1) | True when both a and b are true | `a: Bool = true`<br>`b: Bool = true` | `out: Bool` | 3 |
 | [`core.logic.compare@1`](#corelogiccompare1) | Compare a and b with op (<, <=, ==, !=, >=, >) | `a: Float = 0.0`<br>`b: Float = 0.0`<br>`op: String = "<"` | `out: Bool` | 5 |
@@ -185,6 +196,62 @@ hold/loop/ping-pong outside the keys. A `NaN` position gives the first
 key's value, infinities the end keys' values.
 
 Spec: [`core.curve.ramp.node.toml`](../crates/livspeil-nodes-core/specs/core.curve.ramp.node.toml)
+
+### core.event.counter@1
+
+Count trigger events; reset to 0
+
+Counts events: each `trigger` adds one (wrapping at the Int maximum), `reset` sets the count back to 0. Payloads are ignored. State (runtime only, never saved): the count, starting at 0; `count` is cooked from it, so a change invalidates everything downstream.
+
+Spec: [`core.event.counter.node.toml`](../crates/livspeil-nodes-core/specs/core.event.counter.node.toml)
+
+### core.event.every@1
+
+Fire each time the clock crosses offset + k * period
+
+Polls once per tick. In the tick at `time` with step `dt` it fires `fired` once for every integer `k` with `time - dt < offset + k * period <= time`, in increasing `k`, with payload `k` (Int); at most 1024 times per tick (the earliest crossings). Stateless: only the clock is used, so the result does not depend on earlier ticks. `period` must be positive and both inputs finite. Value cooking yields only the `Event` placeholder.
+
+Spec: [`core.event.every.node.toml`](../crates/livspeil-nodes-core/specs/core.event.every.node.toml)
+
+### core.event.gate@1
+
+Forward trigger events while open
+
+Forwards each `trigger` event, payload included, to `out` while `open` is true; drops it otherwise. Stateless. Value cooking yields only the `Event` placeholder.
+
+Spec: [`core.event.gate.node.toml`](../crates/livspeil-nodes-core/specs/core.event.gate.node.toml)
+
+### core.event.latch@1
+
+Hold the trigger's payload (or the value input) until the next trigger
+
+Sample and hold: on `trigger`, `out` becomes the event's payload if it is a Float or an Int, else the current `value` input. State (runtime only, never saved): the held value, starting at 0.
+
+Spec: [`core.event.latch.node.toml`](../crates/livspeil-nodes-core/specs/core.event.latch.node.toml)
+
+### core.event.on_change@1
+
+Fire with the new value when the input changes between ticks
+
+Polls once per tick and fires `changed` with the new value (Float payload) when `value` differs from its value at the previous tick. NaN counts as equal to NaN. The first tick only records the value. State (runtime only, never saved): the last value. Value cooking yields only the `Event` placeholder.
+
+Spec: [`core.event.on_change.node.toml`](../crates/livspeil-nodes-core/specs/core.event.on_change.node.toml)
+
+### core.event.select@1
+
+Route trigger events to if_true or if_false
+
+Routes each `trigger` event, payload included, to `if_true` when `cond` is true, else to `if_false`. Stateless. Value cooking yields only `Event` placeholders.
+
+Spec: [`core.event.select.node.toml`](../crates/livspeil-nodes-core/specs/core.event.select.node.toml)
+
+### core.event.toggle@1
+
+Flip a flag on every trigger event
+
+Flips `on` on every `trigger` event; the payload is ignored. State (runtime only, never saved): the flag, starting false.
+
+Spec: [`core.event.toggle.node.toml`](../crates/livspeil-nodes-core/specs/core.event.toggle.node.toml)
 
 ### core.fs.list_dir@1
 

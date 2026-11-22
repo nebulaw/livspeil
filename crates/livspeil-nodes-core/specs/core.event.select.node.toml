@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.event.select"
+version = 1
+summary = "Route trigger events to if_true or if_false"
+time_dependent = false
+reads_system = false
+description = '''
+Routes each `trigger` event, payload included, to `if_true` when `cond` is true, else to `if_false`. Stateless. Value cooking yields only `Event` placeholders.
+'''
+
+[[inputs]]
+name = "trigger"
+type = "Event"
+
+[[inputs]]
+name = "cond"
+type = "Bool"
+default = false
+
+[[outputs]]
+name = "if_false"
+type = "Event"
+
+[[outputs]]
+name = "if_true"
+type = "Event"
+
+[[tests]]
+events = [{ input = "trigger" }]
+expect_events = [{ output = "if_false" }]
+
+[[tests]]
+inputs = { cond = true }
+events = [{ input = "trigger", payload = 4 }]
+expect_events = [{ output = "if_true", payload = 4 }]
+
+[[tests]]
+name = "per-step condition"
+events = [
+  { input = "trigger", payload = 5, inputs = { cond = false } },
+  { input = "trigger", payload = 6, inputs = { cond = true } },
+]
+expect_events = [{ output = "if_false", payload = 5 }, { output = "if_true", payload = 6 }]

@@ -1,11 +1,12 @@
 // SPDX-FileCopyrightText: 2026 Livspeil contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The built-in core nodes (milestones M0.2 and M0.6).
+//! The built-in core nodes (milestones M0.2, M0.6 to M0.8 and M0.10).
 //!
 //! See `specs/livspeil-kernel-spec-v0.md`, sections 8 and 9. Every node is
-//! version 1, pure and deterministic; each has unit tests and golden cases
-//! under `tests/golden/`. Specs are built in Rust and mirrored by
+//! version 1 and deterministic (event nodes keep runtime state, held by
+//! the cooker); each has unit tests and golden cases under
+//! `tests/golden/`. Specs are built in Rust and mirrored by
 //! `specs/<id>.node.toml` files (checked by `tests/node_specs.rs`,
 //! refreshed with `cargo xtask node-specs`; see `docs/nodes.md`).
 //!
@@ -31,14 +32,17 @@
 //! - **fs** (`core.fs.*`, M0.8): `list_dir`, the only node that reads the
 //!   system (through the host's [`livspeil_node_api::SystemHost`]); with
 //!   the [`StdFs`] and [`MemFs`] providers.
+//! - **event** (`core.event.*`, M0.10): `every`, `on_change` (both poll
+//!   once per tick), `counter`, `toggle`, `latch` (runtime state behind
+//!   their value outputs), `gate`, `select`; see the `event` module and
+//!   `livspeil_node_api::event`.
 //!
 //! # Deferred
 //!
 //! These need port types or value machinery the node API does not have yet
 //! and arrive with it:
 //!
-//! - event nodes (`Event` values and edge-triggered cooking);
-//! - variable-length color gradients (color curves);
+//! - variable-length color gradients (color curves).
 
 use std::sync::Arc;
 
@@ -51,6 +55,7 @@ pub use math::{
 };
 mod color;
 mod curve;
+mod event;
 mod fs;
 mod sky;
 mod structure;
@@ -60,6 +65,9 @@ mod time;
 mod vector;
 
 pub use curve::Ramp;
+pub use event::{
+    Counter, EventSelect, Every, Gate, Latch, MAX_CROSSINGS_PER_TICK, OnChange, Toggle, crossings,
+};
 pub use fs::{ListDir, MemFs, StdFs, glob_match};
 pub use table::{TableColumnNode, TableCount, TableFilterText, TableGet, TableSort};
 
@@ -129,6 +137,13 @@ pub fn register_all(registry: &mut NodeRegistry) -> Result<(), RegistryError> {
     registry.register(Arc::new(TableSort::new()))?;
     registry.register(Arc::new(Ramp::new()))?;
     registry.register(Arc::new(ListDir::new()))?;
+    registry.register(Arc::new(Every::new()))?;
+    registry.register(Arc::new(OnChange::new()))?;
+    registry.register(Arc::new(Counter::new()))?;
+    registry.register(Arc::new(Toggle::new()))?;
+    registry.register(Arc::new(Latch::new()))?;
+    registry.register(Arc::new(Gate::new()))?;
+    registry.register(Arc::new(EventSelect::new()))?;
     Ok(())
 }
 
@@ -334,6 +349,13 @@ mod tests {
             "core.table.sort@1",
             "core.curve.ramp@1",
             "core.fs.list_dir@1",
+            "core.event.every@1",
+            "core.event.on_change@1",
+            "core.event.counter@1",
+            "core.event.toggle@1",
+            "core.event.latch@1",
+            "core.event.gate@1",
+            "core.event.select@1",
         ] {
             assert!(reg.get(id).is_some(), "{id} is not registered");
         }
