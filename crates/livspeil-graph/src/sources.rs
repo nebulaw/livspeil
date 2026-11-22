@@ -107,7 +107,7 @@ pub(crate) fn compile(graph: &Graph, source: &str) -> Result<Expression, GraphEr
         graph,
         targets: RefCell::new(Vec::new()),
     };
-    let program = expr::compile(source, &env).map_err(GraphError::Expression)?;
+    let program = expr::compile(source, &env).map_err(|e| GraphError::Expression(Box::new(e)))?;
     Ok(Expression {
         source: source.to_owned(),
         program,
@@ -377,10 +377,10 @@ impl Graph {
             };
             let compiled = compile(self, &source)?;
             if compiled.targets != e.targets {
-                return Err(GraphError::Expression(expr::ExprError::new(
+                return Err(GraphError::Expression(Box::new(expr::ExprError::new(
                     expr::ErrorKind::Internal("rename changed what an expression reads"),
                     expr::Span::default(),
-                )));
+                ))));
             }
             updates.push((dep, port, compiled));
         }

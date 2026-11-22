@@ -120,7 +120,7 @@ pub enum GraphError {
     WouldCycle,
     /// An expression failed to parse, resolve its `ch()` paths or type
     /// check.
-    Expression(ExprError),
+    Expression(Box<ExprError>),
     /// The node cannot be removed: input `port` of node `by` reads it
     /// through `ch()`.
     Referenced {
