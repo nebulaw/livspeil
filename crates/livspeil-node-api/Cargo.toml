@@ -12,5 +12,12 @@ repository.workspace = true
 authors.workspace = true
 publish.workspace = true
 
+[features]
+# Serde derives for `PortType` and `Value` (journals, documents).
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
+
 [lints]
 workspace = true

@@ -14,12 +14,25 @@
 //!   outputs as before (early cutoff). Failures never panic the host: a
 //!   failing node keeps its last good output and carries an error.
 //!
+//! - [`GraphSnapshot`] is a canonical, comparable copy of the editable state
+//!   (used by the command bus tests to prove undo and replay exact).
+//!
+//! Cargo feature `serde` (off by default) derives `Serialize` and
+//! `Deserialize` for [`NodeId`] (as a UUID string), [`Endpoint`], [`Link`]
+//! and the snapshot types, and turns on the same feature in
+//! `livspeil-node-api`. The command journal in `livspeil-cmd` enables it.
+//!
+//! Edits made through the command bus (`livspeil-cmd`, M0.3) get undo,
+//! change events and journaling; the methods here are the primitive edits.
+//!
 //! Not yet implemented (later milestones): subnets and Charms, parameters
-//! and expressions (M0.5), the command bus (M0.3), the document format
-//! (M0.4), event ports, and parallel evaluation.
+//! and expressions (M0.5), the document format (M0.4), event ports, and
+//! parallel evaluation.
 
 mod cook;
 mod graph;
+mod snapshot;
 
 pub use cook::{CookError, CookStats, Cooker};
 pub use graph::{Endpoint, Graph, GraphError, Link, NodeId, PortDirection};
+pub use snapshot::{GraphSnapshot, NamedLink, NodeSnapshot};
