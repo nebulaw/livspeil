@@ -11,7 +11,7 @@ Livspeil: an Arch-based OS whose desktop is a user-authored scene (Dream Mode ed
 - New dependencies must be license-compatible (see `deny.toml`). Do not add copyleft-incompatible or source-available code.
 - `unsafe` is forbidden by workspace lint. Panics must not cross node boundaries.
 - Nodes are deterministic pure functions of inputs, params, time (if flagged) and seeded RNG.
-- Never add `Signed-off-by` on behalf of the human; only they sign off. Keep `Co-Authored-By` trailers.
+- The project does not use DCO sign-offs. Do not add `Signed-off-by` trailers. Keep `Co-Authored-By` trailers.
 - Do not commit secrets or edit generated license texts in `LICENSES/`.
 
 ## Before you finish any task
