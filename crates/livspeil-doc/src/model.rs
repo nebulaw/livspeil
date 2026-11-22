@@ -9,6 +9,7 @@ use std::str::FromStr;
 
 use livspeil_graph::NodeId;
 use livspeil_node_api::Value;
+use livspeil_params::AnimChannel;
 
 use crate::error::Location;
 
@@ -120,14 +121,18 @@ pub struct DocNode {
     pub name: String,
     /// Qualified type id, for example `core.math.add@1`.
     pub type_id: String,
-    /// Explicitly set input values by port name. Inputs not listed use the
-    /// node type's default.
+    /// Explicitly set (static) input values by port name. Inputs not
+    /// listed use the node type's default.
     pub inputs: BTreeMap<String, Value>,
+    /// Expressions driving inputs, by port name.
+    pub expressions: BTreeMap<String, DocExpr>,
+    /// Animation channels driving inputs, by port name.
+    pub animations: BTreeMap<String, DocAnim>,
     pub at: SourceLoc,
 }
 
 impl DocNode {
-    /// A node with no explicitly set inputs.
+    /// A node with no explicitly set inputs, expressions or animations.
     #[must_use]
     pub fn new(id: NodeId, name: impl Into<String>, type_id: impl Into<String>) -> Self {
         DocNode {
@@ -135,6 +140,62 @@ impl DocNode {
             name: name.into(),
             type_id: type_id.into(),
             inputs: BTreeMap::new(),
+            expressions: BTreeMap::new(),
+            animations: BTreeMap::new(),
+            at: SourceLoc::default(),
+        }
+    }
+
+    /// Every port that has at least one source (static value, expression
+    /// or animation), sorted and without duplicates.
+    pub fn ports(&self) -> impl Iterator<Item = &str> {
+        let mut ports: Vec<&str> = self
+            .inputs
+            .keys()
+            .chain(self.expressions.keys())
+            .chain(self.animations.keys())
+            .map(String::as_str)
+            .collect();
+        ports.sort_unstable();
+        ports.dedup();
+        ports.into_iter()
+    }
+}
+
+/// An expression on an input, written `input "port" expr="..."`. The
+/// source is stored verbatim; it is compiled by [`Document::to_graph`],
+/// once every node exists, because `ch()` paths name other nodes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocExpr {
+    pub source: String,
+    /// Location of the `expr=` property.
+    pub at: SourceLoc,
+}
+
+impl DocExpr {
+    #[must_use]
+    pub fn new(source: impl Into<String>) -> Self {
+        DocExpr {
+            source: source.into(),
+            at: SourceLoc::default(),
+        }
+    }
+}
+
+/// An animation channel on an input, written as an `anim { key ... }`
+/// child of the `input` node.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocAnim {
+    pub channel: AnimChannel,
+    /// Location of the `anim` node.
+    pub at: SourceLoc,
+}
+
+impl DocAnim {
+    #[must_use]
+    pub fn new(channel: AnimChannel) -> Self {
+        DocAnim {
+            channel,
             at: SourceLoc::default(),
         }
     }
@@ -194,6 +255,12 @@ impl Ord for DocLink {
 }
 
 /// Editor-only data, written last so logic diffs stay clean.
+///
+/// Positions are keyed by node *name*, like links and `ch()` paths. A tool
+/// that renames a node must rename its meta entry too (the graph rewrites
+/// its own `ch()` paths on rename, but knows nothing about meta). Keying by
+/// id would survive renames but make hand-edited files much harder to
+/// read; this may change in a later format.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Meta {
     /// Node editor positions `[x, y]` by node name.

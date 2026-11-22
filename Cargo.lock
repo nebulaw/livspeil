@@ -333,6 +333,7 @@ dependencies = [
  "livspeil-graph",
  "livspeil-node-api",
  "livspeil-nodes-core",
+ "livspeil-params",
  "livspeil-testkit",
  "proptest",
  "uuid",

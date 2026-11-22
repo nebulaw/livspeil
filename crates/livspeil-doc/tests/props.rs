@@ -9,6 +9,8 @@ use common::{id, registry};
 use livspeil_doc::{Document, canonicalize, format, parse};
 use livspeil_graph::Graph;
 use livspeil_node_api::{PortType, Value};
+use livspeil_params::expr::quote as expr_quote;
+use livspeil_params::{AnimChannel, Extrapolation, Interpolation, Keyframe, Tangent};
 use proptest::prelude::*;
 
 fn finite() -> impl Strategy<Value = f64> {
@@ -45,6 +47,87 @@ struct Script {
     inputs: Vec<(usize, usize, Value)>,
     /// (from node, output index, to node, input index)
     links: Vec<(usize, usize, usize, usize)>,
+    /// (node index, input index, template, read node, read input index)
+    exprs: Vec<(usize, usize, usize, usize, usize)>,
+    /// (node index, channel); applied to the first input of the channel's
+    /// type, if the node has one.
+    anims: Vec<(usize, AnimChannel)>,
+}
+
+/// Expression templates; `{p}` is a quoted `ch()` path.
+const EXPRS: [&str; 6] = [
+    "ch({p})",
+    "ch({p}) * 0.5",
+    "sin($T) + 1.0",
+    "ch({p}) + ch({p}) * $F",
+    "\"tëxt \\\"q\\\" ✓\"",
+    "2",
+];
+
+fn interpolation() -> impl Strategy<Value = Interpolation> {
+    prop_oneof![
+        Just(Interpolation::Step),
+        Just(Interpolation::Linear),
+        Just(Interpolation::Bezier),
+        (1e-3..100.0f64, 0.0..3.0f64)
+            .prop_map(|(frequency, damping)| Interpolation::Spring { frequency, damping }),
+    ]
+}
+
+fn extrapolation() -> impl Strategy<Value = Extrapolation> {
+    prop_oneof![
+        Just(Extrapolation::Hold),
+        Just(Extrapolation::Loop),
+        Just(Extrapolation::PingPong),
+    ]
+}
+
+fn tangent(ty: PortType) -> BoxedStrategy<Tangent> {
+    prop_oneof![
+        Just(Tangent::Auto),
+        Just(Tangent::Flat),
+        (value(ty), value(ty))
+            .prop_map(|(incoming, outgoing)| Tangent::Explicit { incoming, outgoing }),
+    ]
+    .boxed()
+}
+
+fn channel() -> impl Strategy<Value = AnimChannel> {
+    let ty = prop::sample::select(vec![
+        PortType::Float,
+        PortType::Vec2,
+        PortType::Vec3,
+        PortType::Vec4,
+        PortType::Color,
+    ]);
+    ty.prop_flat_map(|ty| {
+        let key = (0.001..10.0f64, value(ty), interpolation(), tangent(ty));
+        (
+            prop::collection::vec(key, 1..5),
+            finite(),
+            extrapolation(),
+            extrapolation(),
+            finite(),
+        )
+    })
+    .prop_map(|(keys, start, pre, post, offset)| {
+        let mut time = start;
+        let keys = keys
+            .into_iter()
+            .map(|(step, value, interpolation, tangent)| {
+                time += step;
+                Keyframe {
+                    time,
+                    value,
+                    interpolation,
+                    tangent,
+                }
+            })
+            .collect();
+        AnimChannel::new(keys)
+            .and_then(|c| c.with_extrapolation(pre, post).with_offset(offset))
+            .unwrap_or_else(|_| AnimChannel::constant(0.0).unwrap())
+    })
 }
 
 const TYPES: [&str; 6] = [
@@ -73,10 +156,17 @@ fn script() -> impl Strategy<Value = Script> {
         0..12,
     );
     let links = prop::collection::vec((0..6usize, 0..8usize, 0..6usize, 0..8usize), 0..10);
-    (nodes, inputs, links).prop_map(|(nodes, inputs, links)| Script {
+    let exprs = prop::collection::vec(
+        (0..6usize, 0..8usize, 0..EXPRS.len(), 0..6usize, 0..8usize),
+        0..8,
+    );
+    let anims = prop::collection::vec((0..6usize, channel()), 0..4);
+    (nodes, inputs, links, exprs, anims).prop_map(|(nodes, inputs, links, exprs, anims)| Script {
         nodes,
         inputs,
         links,
+        exprs,
+        anims,
     })
 }
 
@@ -107,6 +197,23 @@ fn build(script: &Script) -> Graph {
         let out = from_spec.outputs[o % from_spec.outputs.len()].name;
         let inp = to_spec.inputs[i % to_spec.inputs.len()].name;
         let _ = graph.link(from, out, to, inp);
+    }
+    for (n, i, template, m, j) in &script.exprs {
+        let (node, read) = (ids[n % ids.len()], ids[m % ids.len()]);
+        let spec = graph.node_spec(node).unwrap().clone();
+        let port = spec.inputs[i % spec.inputs.len()].name;
+        let read_spec = graph.node_spec(read).unwrap().clone();
+        let read_port = read_spec.inputs[j % read_spec.inputs.len()].name;
+        let path = expr_quote(&format!("{}/{read_port}", graph.node_name(read).unwrap()));
+        let source = EXPRS[*template].replace("{p}", &path);
+        let _ = graph.set_expression(node, port, &source);
+    }
+    for (n, channel) in &script.anims {
+        let node = ids[n % ids.len()];
+        let spec = graph.node_spec(node).unwrap().clone();
+        if let Some(port) = spec.inputs.iter().find(|p| p.ty == channel.value_type()) {
+            let _ = graph.set_animation(node, port.name, channel.clone());
+        }
     }
     graph
 }

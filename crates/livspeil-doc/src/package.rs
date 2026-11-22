@@ -41,12 +41,12 @@ pub fn split_prolog(text: &str) -> (&str, &str) {
 
 /// The canonical form of a whole `room.kdl` file: the prolog comment lines
 /// (trailing whitespace and surrounding blank lines removed, then one blank
-/// line) followed by [`format`] of the parsed document. Comments anywhere
+/// line) followed by [`format()`] of the parsed document. Comments anywhere
 /// else are dropped. Idempotent: `canonicalize(canonicalize(t)) ==
 /// canonicalize(t)`.
 ///
 /// # Errors
-/// Any error of [`parse`] or [`format`].
+/// Any error of [`parse`] or [`format()`].
 pub fn canonicalize(text: &str) -> Result<String, DocError> {
     let (prolog, _) = split_prolog(text);
     let doc = parse(text)?;
