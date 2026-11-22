@@ -50,6 +50,7 @@ pub use math::{
 };
 mod color;
 mod curve;
+mod event;
 mod fs;
 mod sky;
 mod structure;
@@ -59,6 +60,9 @@ mod time;
 mod vector;
 
 pub use curve::Ramp;
+pub use event::{
+    Counter, EventSelect, Every, Gate, Latch, MAX_CROSSINGS_PER_TICK, OnChange, Toggle, crossings,
+};
 pub use fs::{ListDir, MemFs, StdFs, glob_match};
 pub use table::{TableColumnNode, TableCount, TableFilterText, TableGet, TableSort};
 
@@ -128,6 +132,13 @@ pub fn register_all(registry: &mut NodeRegistry) -> Result<(), RegistryError> {
     registry.register(Arc::new(TableSort::new()))?;
     registry.register(Arc::new(Ramp::new()))?;
     registry.register(Arc::new(ListDir::new()))?;
+    registry.register(Arc::new(Every::new()))?;
+    registry.register(Arc::new(OnChange::new()))?;
+    registry.register(Arc::new(Counter::new()))?;
+    registry.register(Arc::new(Toggle::new()))?;
+    registry.register(Arc::new(Latch::new()))?;
+    registry.register(Arc::new(Gate::new()))?;
+    registry.register(Arc::new(EventSelect::new()))?;
     Ok(())
 }
 
