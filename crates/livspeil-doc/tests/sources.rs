@@ -441,8 +441,8 @@ fn anim_errors_carry_locations() {
             loc(4, 42),
         ),
         (
-            "      input \"f\" { curve; }",
-            "unknown node `curve` in input 'f'",
+            "      input \"f\" { ramp; }",
+            "unknown node `ramp` in input 'f'",
             loc(4, 19),
         ),
         (

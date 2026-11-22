@@ -4,12 +4,16 @@
 //! Headless command line for Livspeil documents.
 //!
 //! Exit codes: 0 success, 1 the document is invalid (or not canonical for
-//! `fmt --check`) or could not be read or written, 2 usage error or a
-//! reserved command, 3 `cook` printed at least one node error.
+//! `fmt --check`) or could not be read or written, 2 usage error, 3 `cook`
+//! printed at least one node error. `diff` follows `git diff --exit-code`
+//! instead: 0 equal, 1 different, 2 usage error, 3 load error.
 //!
-//! See the `cook` module for the cook clock, sinks and output formats.
+//! See the `cook` module for the cook clock, sinks and output formats, the
+//! `diff` module for the JSONL schema and `assets` for `assets.lock`.
 
+mod assets;
 mod cook;
+mod diff;
 
 use std::fs;
 use std::path::Path;
@@ -28,13 +32,23 @@ USAGE:
     livspeil <COMMAND> [ARGS]
 
 COMMANDS:
-    validate <path>         Check a document against the core nodes
+    validate <path>         Check a document against the core nodes, and
+                            its assets.lock and assets/ when present
     fmt <path> [--check]    Rewrite a document in canonical form; with
                             --check, write nothing and fail if it is not
     cook <path> [OPTIONS]   Cook a document over a frame clock and print
                             the outputs of its sinks (nodes with no
                             outgoing links)
-    diff                    Semantic diff of two documents (reserved, later)
+    diff <a> <b> [OPTIONS]  Semantic diff of two documents (nodes matched
+                            by id)
+    assets add <room> <file> --license SPDX [--source URL] [--author NAME]
+                            Copy a file into <room>/assets/<sha256>.<ext>
+                            and record it in assets.lock (source defaults
+                            to \"original\")
+    assets check <room> [--strict]
+                            Verify assets.lock against assets/ (hashes,
+                            sizes, unlisted files, licenses); --strict
+                            also fails on warnings
 
 <path> is a room package directory (Name.room/) or its room.kdl file.
 
@@ -50,9 +64,27 @@ COOK OPTIONS:
     --format text|jsonl     One line per frame and node (default), or one
                             JSON object per frame
     --stats                 Also print cooked/reused node counts per frame
+    --fs-root DIR           File root of file-system nodes such as
+                            core.fs.list_dir (default: the room package
+                            directory); paths outside it are refused
 
     Floats are printed with 6 decimals. Example:
         livspeil cook examples/sun-and-lamp.room --frames 600 --every 50
+
+DIFF OPTIONS:
+    --format text|jsonl     One line per change (default) or one JSON
+                            object per change (schema in the README)
+    --meta                  Also report editor positions (meta), which are
+                            hidden by default
+
+    Text lines start with + (added), - (removed) or ~ (changed), e.g.
+        ~ node \"lamp\" input \"a\": 0.2 -> 0.3
+
+ASSET LICENSES:
+    license= is an SPDX expression. Allowed: CC0-1.0, CC-BY-4.0,
+    CC-BY-SA-4.0, OFL-1.1, MIT, Apache-2.0, MPL-2.0, GPL-3.0-or-later,
+    LGPL-3.0-or-later. Other valid ids are warnings; a malformed
+    expression, NONE or NOASSERTION is an error.
 
 OPTIONS:
     -h, --help       Print this help
@@ -60,9 +92,12 @@ OPTIONS:
 
 EXIT CODES:
     0 success
-    1 invalid or non-canonical document, or an I/O error
+    1 invalid or non-canonical document, asset errors, or an I/O error
     2 usage error (including an unknown --node name)
     3 cook: at least one printed value is a node error
+
+    diff (like git diff --exit-code): 0 no differences, 1 differences,
+    2 usage error, 3 a document cannot be read or parsed
 ";
 
 fn main() -> ExitCode {
@@ -102,10 +137,8 @@ fn run(args: Vec<String>) -> ExitCode {
             }
         }
         Some("cook") => cook::run(args),
-        Some("diff") => {
-            eprintln!("livspeil diff: not implemented yet");
-            ExitCode::from(2)
-        }
+        Some("diff") => diff::run(args),
+        Some("assets") => assets::run(args),
         Some(other) => usage(&format!("unknown command or option '{other}'")),
     }
 }
@@ -148,7 +181,11 @@ fn validate(path: &Path) -> ExitCode {
     match result {
         Ok((nodes, links)) => {
             println!("{}: ok ({nodes} nodes, {links} links)", file.display());
-            ExitCode::SUCCESS
+            if assets::validate(path) {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
         }
         Err(err) => {
             report(&file, &err);

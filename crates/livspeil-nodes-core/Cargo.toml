@@ -14,6 +14,8 @@ publish.workspace = true
 
 [dependencies]
 livspeil-node-api = { path = "../livspeil-node-api" }
+# Curve sampling shares the animation-channel implementation (M0.8).
+livspeil-params = { path = "../livspeil-params" }
 
 [dev-dependencies]
 livspeil-testkit = { path = "../livspeil-testkit" }

@@ -12,6 +12,13 @@
 //! [`NodeImpl`] and [`NodeRegistry`]. Polymorphic constraint classes
 //! (`Numeric`, `VectorLike`) and `*.node.toml` generation arrive later.
 //!
+//! Milestone M0.8 adds [`Value::Table`] ([`Table`], typed column-oriented
+//! tables; also lists), [`PortType::Curve`] and [`Value::Curve`]
+//! ([`Curve`], float ramps sampled by `livspeil-params`), and system
+//! bindings ([`SystemHost`], [`SystemContext`], [`FileSystem`]) passed to
+//! nodes through [`NodeImpl::cook_with_system`]; see the [`system`] module
+//! for the design and caching semantics.
+//!
 //! Cargo feature `serde` (off by default) derives `Serialize` and
 //! `Deserialize` for [`PortType`] and [`Value`]. It adds derives only, so
 //! node authors who do not need it pay nothing. Values use serde's default
@@ -20,6 +27,16 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
+
+pub mod curve;
+pub mod system;
+pub mod table;
+
+pub use curve::{
+    Curve, CurveError, CurveExtrapolation, CurveInterpolation, CurveKey, CurveTangent,
+};
+pub use system::{DirEntry, FileSystem, FsError, FsPath, SystemContext, SystemHost};
+pub use table::{Table, TableColumn, TableError};
 
 /// Value types that can flow through node ports (kernel spec, section 4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -46,11 +63,13 @@ pub enum PortType {
     Material,
     Scene,
     Window,
+    /// A float curve (ramp); see [`Curve`].
+    Curve,
 }
 
 impl PortType {
     /// Every port type known to this version of the API.
-    pub const ALL: [PortType; 18] = [
+    pub const ALL: [PortType; 19] = [
         PortType::Float,
         PortType::Int,
         PortType::Bool,
@@ -69,6 +88,7 @@ impl PortType {
         PortType::Material,
         PortType::Scene,
         PortType::Window,
+        PortType::Curve,
     ];
 
     /// Stable name used in documents and node specs.
@@ -93,6 +113,7 @@ impl PortType {
             PortType::Material => "Material",
             PortType::Scene => "Scene",
             PortType::Window => "Window",
+            PortType::Curve => "Curve",
         }
     }
 
@@ -129,6 +150,10 @@ pub enum Value {
     /// OKLCH plus alpha: `[lightness, chroma, hue_degrees, alpha]`.
     Color([f64; 4]),
     String(String),
+    /// A typed, column-oriented table; cheap to clone.
+    Table(Table),
+    /// A float curve; cheap to clone.
+    Curve(Arc<Curve>),
 }
 
 impl Value {
@@ -144,11 +169,14 @@ impl Value {
             Value::Vec4(_) => PortType::Vec4,
             Value::Color(_) => PortType::Color,
             Value::String(_) => PortType::String,
+            Value::Table(_) => PortType::Table,
+            Value::Curve(_) => PortType::Curve,
         }
     }
 
     /// The zero value of a port type, if this version of the API can
-    /// represent it.
+    /// represent it. A `Table`'s zero is the empty table (no columns), a
+    /// `Curve`'s the constant curve 0.
     #[must_use]
     pub fn zero(ty: PortType) -> Option<Value> {
         Some(match ty {
@@ -160,6 +188,8 @@ impl Value {
             PortType::Vec4 => Value::Vec4([0.0; 4]),
             PortType::Color => Value::Color([0.0; 4]),
             PortType::String => Value::String(String::new()),
+            PortType::Table => Value::Table(Table::empty()),
+            PortType::Curve => Value::Curve(Arc::new(Curve::constant(0.0))),
             _ => return None,
         })
     }
@@ -184,6 +214,24 @@ impl Value {
     pub fn as_float(&self) -> Option<f64> {
         match self {
             Value::Float(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// The contained table, if this is a `Table`.
+    #[must_use]
+    pub fn as_table(&self) -> Option<&Table> {
+        match self {
+            Value::Table(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    /// The contained curve, if this is a `Curve`.
+    #[must_use]
+    pub fn as_curve(&self) -> Option<&Curve> {
+        match self {
+            Value::Curve(c) => Some(c),
             _ => None,
         }
     }
@@ -320,6 +368,31 @@ pub trait NodeImpl: Send + Sync + fmt::Debug {
     /// # Errors
     /// Returns a [`NodeError`] when the node cannot produce outputs.
     fn cook(&self, ctx: &CookContext, inputs: &[Value]) -> Result<Vec<Value>, NodeError>;
+
+    /// Whether the node reads the system through
+    /// [`NodeImpl::cook_with_system`]. Cookers re-cook such nodes when the
+    /// host's [`SystemHost::revision`] changes. Default: `false`.
+    fn reads_system(&self) -> bool {
+        false
+    }
+
+    /// Compute the outputs with access to the host's system bindings (see
+    /// the [`system`] module). Cookers always call this method; the default
+    /// ignores `system` and calls [`NodeImpl::cook`], so only nodes that
+    /// read the system override it (and [`NodeImpl::reads_system`]). Such
+    /// a node's `cook` should behave as with [`SystemContext::none`].
+    ///
+    /// # Errors
+    /// Returns a [`NodeError`] when the node cannot produce outputs.
+    fn cook_with_system(
+        &self,
+        ctx: &CookContext,
+        system: &SystemContext<'_>,
+        inputs: &[Value],
+    ) -> Result<Vec<Value>, NodeError> {
+        let _ = system;
+        self.cook(ctx, inputs)
+    }
 }
 
 /// Why registering a node type failed.
@@ -438,6 +511,45 @@ mod tests {
                 assert_eq!(v.port_type(), ty);
             }
         }
+    }
+
+    #[test]
+    fn table_and_curve_values() {
+        let t = Value::zero(PortType::Table).unwrap();
+        assert_eq!(t.as_table().map(Table::column_count), Some(0));
+        let c = Value::zero(PortType::Curve).unwrap();
+        assert_eq!(c.as_curve().map(|c| c.keys().len()), Some(1));
+        assert_eq!(c.clone(), c);
+        assert_eq!(t.clone().coerce(PortType::Table), Some(t.clone()));
+        assert_eq!(t.coerce(PortType::Curve), None);
+        assert!(Value::Int(1).as_table().is_none());
+        assert!(Value::Int(1).as_curve().is_none());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn table_and_curve_serde_round_trip_and_validate() {
+        let table = Table::from_rows(
+            &[("name", PortType::String), ("size", PortType::Int)],
+            [vec![Value::String("a".into()), Value::Int(3)]],
+        )
+        .unwrap();
+        let curve = Curve::new(vec![
+            CurveKey::new(0.0, 1.0).with_interpolation(CurveInterpolation::Bezier),
+            CurveKey::new(1.0, 2.0).with_tangent(CurveTangent::Flat),
+        ])
+        .unwrap()
+        .with_extrapolation(CurveExtrapolation::Loop, CurveExtrapolation::Hold);
+        for value in [Value::Table(table), Value::Curve(Arc::new(curve))] {
+            let json = serde_json::to_string(&value).unwrap();
+            let back: Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, value, "{json}");
+        }
+        let bad_table =
+            r#"{"Table":{"columns":[{"name":"a","ty":"Int","values":[{"Float":1.0}]}]}}"#;
+        assert!(serde_json::from_str::<Value>(bad_table).is_err());
+        let bad_curve = r#"{"Curve":{"keys":[]}}"#;
+        assert!(serde_json::from_str::<Value>(bad_curve).is_err());
     }
 
     #[test]

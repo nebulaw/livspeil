@@ -1,0 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Livspeil contributors
+// SPDX-License-Identifier: CC0-1.0
+
+assets-lock format=1 {
+  asset "assets/3239c1cf2edf89c5f1da20d6556533ff73002121dbbb595da6815e75208aac00.png" sha256="3239c1cf2edf89c5f1da20d6556533ff73002121dbbb595da6815e75208aac00" size=78 license="CC0-1.0" source="original" author="Livspeil contributors"
+}

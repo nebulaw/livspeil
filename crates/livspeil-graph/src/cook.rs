@@ -53,12 +53,16 @@ use std::collections::HashMap;
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use livspeil_node_api::{CookContext, NodeError, Value};
+use livspeil_node_api::{CookContext, NodeError, SystemContext, Value};
 use livspeil_params::expr::{EvalContext, ExprError};
 use uuid::Uuid;
 
 use crate::graph::{Graph, Node, NodeId};
 use crate::sources::Expression;
+
+// System bindings (M0.8): `Cooker::set_system` and the invalidation of
+// system-reading nodes; see `cook/system.rs`.
+mod system;
 
 /// Why a node has no fresh output.
 #[derive(Debug, Clone, PartialEq)]
@@ -198,6 +202,8 @@ pub struct Cooker {
     slots_buf: Vec<Value>,
     version_counter: u64,
     stats: CookStats,
+    /// System bindings (M0.8), see `cook/system.rs`.
+    system: system::SystemState,
 }
 
 impl Cooker {
@@ -258,6 +264,7 @@ impl Cooker {
             return Err(CookError::UnknownNode(id));
         };
         self.sync(graph);
+        self.sync_system(graph);
         let epoch = graph.epoch();
         graph.observe(epoch);
 
@@ -497,7 +504,12 @@ impl Cooker {
                     .is_none_or(|e| e.inputs.as_deref() != Some(self.inputs_buf.as_slice()));
                 let inputs_version = inputs_changed.then(|| self.next_version());
                 self.stats.cooked += 1;
-                let result = run_node(node.imp.as_ref(), &self.clock, &self.inputs_buf);
+                let result = run_node(
+                    node.imp.as_ref(),
+                    &self.clock,
+                    &self.system.context(),
+                    &self.inputs_buf,
+                );
                 if let Some(v) = inputs_version {
                     let entry = self.entry_mut(slot, node.id);
                     entry.inputs_version = v;
@@ -646,9 +658,12 @@ fn eval_expression(
 fn run_node(
     imp: &dyn livspeil_node_api::NodeImpl,
     ctx: &CookContext,
+    system: &SystemContext<'_>,
     inputs: &[Value],
 ) -> Result<Vec<Value>, CookError> {
-    let outputs = match catch_unwind(AssertUnwindSafe(|| imp.cook(ctx, inputs))) {
+    let outputs = match catch_unwind(AssertUnwindSafe(|| {
+        imp.cook_with_system(ctx, system, inputs)
+    })) {
         Ok(Ok(outputs)) => outputs,
         Ok(Err(err)) => return Err(CookError::Node(err)),
         Err(payload) => return Err(CookError::Panicked(panic_message(payload.as_ref()))),

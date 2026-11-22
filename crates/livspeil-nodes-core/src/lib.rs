@@ -24,6 +24,12 @@
 //! - **text** (`core.text.*`): `format`.
 //! - **structure**: `core.subnet`, `core.subnet.input` and `core.output`
 //!   (subnets, Charm interfaces and explicit sinks; M0.7).
+//! - **table** (`core.table.*`, M0.8): `count`, `column`, `get`,
+//!   `filter_text`, `sort`.
+//! - **curve** (`core.curve.*`, M0.8): `ramp`.
+//! - **fs** (`core.fs.*`, M0.8): `list_dir`, the only node that reads the
+//!   system (through the host's [`livspeil_node_api::SystemHost`]); with
+//!   the [`StdFs`] and [`MemFs`] providers.
 //!
 //! # Deferred
 //!
@@ -31,10 +37,7 @@
 //! and arrive with it:
 //!
 //! - event nodes (`Event` values and edge-triggered cooking);
-//! - `core.fs.list_dir` (host I/O capabilities and list values);
-//! - table nodes (`Table` values);
-//! - `core.curve.ramp` and variable-length color gradients (list
-//!   parameters);
+//! - variable-length color gradients (color curves);
 
 use std::sync::Arc;
 
@@ -46,11 +49,18 @@ pub use math::{
     Abs, Clamp, Cos, Div, Max, Min, Mul, Pow, Remap, Round, Sin, Smoothstep, Sub, Wrap,
 };
 mod color;
+mod curve;
+mod fs;
 mod sky;
 mod structure;
+mod table;
 mod text;
 mod time;
 mod vector;
+
+pub use curve::Ramp;
+pub use fs::{ListDir, MemFs, StdFs, glob_match};
+pub use table::{TableColumnNode, TableCount, TableFilterText, TableGet, TableSort};
 
 pub use vector::{Compose3, Decompose3, Dot3, Length3, Normalize3, dot3, length3, normalize3};
 
@@ -111,6 +121,13 @@ pub fn register_all(registry: &mut NodeRegistry) -> Result<(), RegistryError> {
     registry.register(Arc::new(Subnet::new()))?;
     registry.register(Arc::new(SubnetInput::new()))?;
     registry.register(Arc::new(Output::new()))?;
+    registry.register(Arc::new(TableCount::new()))?;
+    registry.register(Arc::new(TableColumnNode::new()))?;
+    registry.register(Arc::new(TableGet::new()))?;
+    registry.register(Arc::new(TableFilterText::new()))?;
+    registry.register(Arc::new(TableSort::new()))?;
+    registry.register(Arc::new(Ramp::new()))?;
+    registry.register(Arc::new(ListDir::new()))?;
     Ok(())
 }
 
@@ -309,6 +326,13 @@ mod tests {
             "core.color.compose@1",
             "core.color.gradient@1",
             "core.text.format@1",
+            "core.table.count@1",
+            "core.table.column@1",
+            "core.table.get@1",
+            "core.table.filter_text@1",
+            "core.table.sort@1",
+            "core.curve.ramp@1",
+            "core.fs.list_dir@1",
         ] {
             assert!(reg.get(id).is_some(), "{id} is not registered");
         }
@@ -366,6 +390,9 @@ mod tests {
 
     #[test]
     fn specs_declare_matching_output_types() {
+        // `core.fs.list_dir` needs a file system; an empty one lists nothing.
+        let host = MemFs::new();
+        let system = livspeil_node_api::SystemContext::new(&host);
         let reg = core_registry();
         for id in reg.ids() {
             let node = reg.get(id).unwrap();
@@ -375,7 +402,7 @@ mod tests {
                 .iter()
                 .map(|p| p.default.clone().unwrap())
                 .collect();
-            let outputs = node.cook(&ctx(), &inputs).unwrap();
+            let outputs = node.cook_with_system(&ctx(), &system, &inputs).unwrap();
             assert_eq!(outputs.len(), spec.outputs.len(), "{id}");
             for (value, port) in outputs.iter().zip(&spec.outputs) {
                 assert_eq!(value.port_type(), port.ty, "{id}.{}", port.name);

@@ -22,6 +22,8 @@ fn env() -> BTreeMap<String, Channel> {
         ("col", 5, PortType::Color),
         ("img", 6, PortType::Image),
         ("node1/size", 7, PortType::Vec2),
+        ("rows", 8, PortType::Table),
+        ("ramp", 9, PortType::Curve),
     ] {
         env.insert(path.to_owned(), Channel { slot, ty });
     }
@@ -508,6 +510,23 @@ fn ch_errors() {
         compile("ch(\"a\")", &NoChannels).unwrap_err().kind,
         ErrorKind::UnknownChannel(_)
     ));
+    // Tables and curves are not expression types (M0.8): a clear
+    // compile-time error at the path.
+    for (path, ty) in [("rows", PortType::Table), ("ramp", PortType::Curve)] {
+        let e = cerr(&format!("ch(\"{path}\")"));
+        assert_eq!(
+            e.kind,
+            ErrorKind::UnsupportedChannelType {
+                path: path.to_owned(),
+                ty
+            }
+        );
+        assert_eq!(e.span, Span::new(3, 5 + path.len()));
+        assert_eq!(
+            e.kind.to_string(),
+            format!("parameter \"{path}\" has type {ty}, which expressions cannot use")
+        );
+    }
 }
 
 #[test]

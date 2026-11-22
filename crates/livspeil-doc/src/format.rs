@@ -6,12 +6,15 @@
 use std::fmt::Write as _;
 
 use livspeil_node_api::Value;
-use livspeil_params::{AnimChannel, Extrapolation, Interpolation, Tangent};
+use livspeil_params::{AnimChannel, Extrapolation, Interpolation, Keyframe, Tangent};
 
 use crate::anim::{extrapolation_name, interpolation_name};
 use crate::error::DocError;
 use crate::model::{DocNode, Document, Network, ROOT_NETWORK, Tier};
 use crate::value::{format_float, format_value, is_finite, quote};
+
+// Block values (`table`, `curve`) inside `input` (M0.8).
+mod blocks;
 
 const INDENT: &str = "  ";
 
@@ -152,18 +155,26 @@ fn write_network(out: &mut String, network: &Network, depth: usize) -> Result<()
 fn write_input(out: &mut String, node: &DocNode, port: &str, depth: usize) -> Result<(), DocError> {
     let indent = INDENT.repeat(depth);
     let _ = write!(out, "{indent}input {}", quote(port));
-    if let Some(value) = node.inputs.get(port) {
+    let value = node.inputs.get(port);
+    let block = value.filter(|v| blocks::is_block(v));
+    if let Some(value) = value.filter(|v| !blocks::is_block(v)) {
         let _ = write!(out, " {}", value_text(node, port, value)?);
     }
     if let Some(expr) = node.expressions.get(port) {
         let _ = write!(out, " expr={}", quote(&expr.source));
     }
-    let Some(anim) = node.animations.get(port) else {
+    let anim = node.animations.get(port);
+    if block.is_none() && anim.is_none() {
         out.push('\n');
         return Ok(());
-    };
+    }
     out.push_str(" {\n");
-    write_anim(out, node, port, &anim.channel, depth + 1)?;
+    if let Some(value) = block {
+        blocks::write_block(out, node, port, value, depth + 1)?;
+    }
+    if let Some(anim) = anim {
+        write_anim(out, node, port, &anim.channel, depth + 1)?;
+    }
     let _ = writeln!(out, "{indent}}}");
     Ok(())
 }
@@ -189,7 +200,20 @@ fn write_anim(
         let _ = write!(out, " offset={}", float_text(node, port, channel.offset())?);
     }
     out.push_str(" {\n");
-    for key in channel.keys() {
+    write_keys(out, node, port, channel.keys(), &pad)?;
+    let _ = writeln!(out, "{pad}}}");
+    Ok(())
+}
+
+/// The `key` lines of an `anim` or `curve` block whose header is at `pad`.
+fn write_keys(
+    out: &mut String,
+    node: &DocNode,
+    port: &str,
+    keys: &[Keyframe],
+    pad: &str,
+) -> Result<(), DocError> {
+    for key in keys {
         let _ = write!(
             out,
             "{pad}{INDENT}key {} {}",
@@ -225,7 +249,6 @@ fn write_anim(
         }
         out.push('\n');
     }
-    let _ = writeln!(out, "{pad}}}");
     Ok(())
 }
 
