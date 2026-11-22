@@ -39,6 +39,19 @@
 //! frame alone ([`livspeil_graph::CookStats`]; a node shared by several
 //! printed nodes is counted once per visit).
 //!
+//! Tables print as `table[<col>:<Type> ...][<cells of row 0>; <cells of
+//! row 1>; ...]` (cells space-separated, in the value format above) and
+//! curves as `curve(<position>:<value> ...)` (keys only).
+//!
+//! # File system
+//!
+//! Nodes that read files (`core.fs.list_dir`) see the room package
+//! directory (the folder holding `room.kdl`) as their file root, or the
+//! directory given with `--fs-root DIR`. They cannot reach outside it
+//! (see `livspeil_nodes_core::StdFs`). The listing is a snapshot taken
+//! when first needed; it is not refreshed during a run, so every frame
+//! sees the same files.
+//!
 //! # JSONL format
 //!
 //! One JSON object per printed frame, keys in this order:
@@ -49,7 +62,10 @@
 //!
 //! `<type>` is `float`, `int`, `bool`, `string` (scalars) or `vec2`, `vec3`,
 //! `vec4`, `color` (arrays; color is `[L, C, H, A]` in OKLCH, hue in
-//! degrees). A failed node is `{"error":"<message>"}` instead of its ports.
+//! degrees). A table is `{"table":{"columns":[{"name":..,"type":..}],
+//! "rows":[[<value>,..],..]}}` with types and untagged values as above; a
+//! curve is `{"curve":[[<position>,<value>],..]}` (keys only).
+//! A failed node is `{"error":"<message>"}` instead of its ports.
 //! Floats are rounded to six decimals, like the text format, and written in
 //! the shortest form that reads back as that value (`0.8`, `1.0`);
 //! non-finite floats are `null`. `stats` is present only with `--stats`.
@@ -63,7 +79,7 @@ use std::sync::Arc;
 use livspeil_doc::parse;
 use livspeil_graph::{CookError, Cooker, Graph, NodeId};
 use livspeil_node_api::{CookContext, Value};
-use livspeil_nodes_core::core_registry;
+use livspeil_nodes_core::{StdFs, core_registry};
 
 use crate::{read, report, usage};
 
@@ -88,6 +104,8 @@ struct Options {
     nodes: Vec<String>,
     format: Format,
     stats: bool,
+    /// `--fs-root`: file root of file-system nodes (default: the package).
+    fs_root: Option<String>,
 }
 
 /// What a `cook` argument list asked for.
@@ -120,6 +138,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
         nodes: Vec::new(),
         format: Format::Text,
         stats: false,
+        fs_root: None,
     };
     let mut args = args.peekable();
     while let Some(arg) = args.next() {
@@ -142,7 +161,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
                 options.stats = true;
                 continue;
             }
-            "--frames" | "--fps" | "--start" | "--every" | "--node" | "--format" => {}
+            "--frames" | "--fps" | "--start" | "--every" | "--node" | "--format" | "--fs-root" => {}
             _ => return Err(format!("unknown option '{flag}'")),
         }
         let value = match inline.or_else(|| args.next()) {
@@ -175,6 +194,12 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
                     return Err(bad());
                 }
                 options.nodes.push(value);
+            }
+            "--fs-root" => {
+                if value.is_empty() {
+                    return Err(bad());
+                }
+                options.fs_root = Some(value);
             }
             "--format" => {
                 options.format = match value.as_str() {
@@ -227,6 +252,26 @@ fn cook(options: &Options) -> ExitCode {
     let stdout = io::stdout();
     let mut out = BufWriter::new(stdout.lock());
     let mut cooker = Cooker::new();
+    // File root of `core.fs.*` nodes: --fs-root or the package directory.
+    let root = options.fs_root.as_ref().map_or_else(
+        || {
+            file.parent()
+                .map_or_else(|| Path::new(".").to_path_buf(), Path::to_path_buf)
+        },
+        |dir| Path::new(dir).to_path_buf(),
+    );
+    let root = if root.as_os_str().is_empty() {
+        Path::new(".").to_path_buf()
+    } else {
+        root
+    };
+    match StdFs::new(&root) {
+        Ok(fs) => cooker.set_system(Some(Arc::new(fs))),
+        Err(err) => {
+            eprintln!("livspeil cook: file root {}: {err}", root.display());
+            return ExitCode::FAILURE;
+        }
+    }
     let dt = 1.0 / options.fps;
     let mut node_error = false;
     for frame in 0..options.frames {
@@ -417,12 +462,37 @@ fn text_value(value: &Value) -> String {
         Value::Vec4(v) => format!("vec4({})", fixed_list(v)),
         Value::Color(c) => format!("oklch({})", fixed_list(c)),
         Value::String(s) => json_string(s),
+        Value::Table(t) => {
+            let columns: Vec<String> = t
+                .columns()
+                .iter()
+                .map(|c| format!("{}:{}", c.name(), c.ty()))
+                .collect();
+            let rows: Vec<String> = (0..t.row_count())
+                .map(|r| t.row(r).map(text_value).collect::<Vec<_>>().join(" "))
+                .collect();
+            format!("table[{}][{}]", columns.join(" "), rows.join("; "))
+        }
+        Value::Curve(c) => {
+            let keys: Vec<String> = c
+                .keys()
+                .iter()
+                .map(|k| format!("{}:{}", fixed(k.position), fixed(k.value)))
+                .collect();
+            format!("curve({})", keys.join(" "))
+        }
         other => format!("<unsupported {}>", other.port_type()),
     }
 }
 
 fn json_value(value: &Value) -> String {
-    let (tag, body) = match value {
+    let (tag, body) = json_parts(value);
+    format!("{{\"{tag}\":{body}}}")
+}
+
+/// The type tag and untagged JSON of a value.
+fn json_parts(value: &Value) -> (&'static str, String) {
+    match value {
         Value::Float(x) => ("float", json_float(*x)),
         Value::Int(i) => ("int", i.to_string()),
         Value::Bool(b) => ("bool", b.to_string()),
@@ -431,9 +501,40 @@ fn json_value(value: &Value) -> String {
         Value::Vec4(v) => ("vec4", json_list(v)),
         Value::Color(c) => ("color", json_list(c)),
         Value::String(s) => ("string", json_string(s)),
+        Value::Table(t) => {
+            let columns: Vec<String> = t
+                .columns()
+                .iter()
+                .map(|c| {
+                    let tag = Value::zero(c.ty()).map_or("unsupported", |z| json_parts(&z).0);
+                    format!("{{\"name\":{},\"type\":\"{tag}\"}}", json_string(c.name()))
+                })
+                .collect();
+            let rows: Vec<String> = (0..t.row_count())
+                .map(|r| {
+                    let cells: Vec<String> = t.row(r).map(|v| json_parts(v).1).collect();
+                    format!("[{}]", cells.join(","))
+                })
+                .collect();
+            (
+                "table",
+                format!(
+                    "{{\"columns\":[{}],\"rows\":[{}]}}",
+                    columns.join(","),
+                    rows.join(",")
+                ),
+            )
+        }
+        Value::Curve(c) => {
+            let keys: Vec<String> = c
+                .keys()
+                .iter()
+                .map(|k| json_list(&[k.position, k.value]))
+                .collect();
+            ("curve", format!("[{}]", keys.join(",")))
+        }
         other => ("unsupported", json_string(other.port_type().name())),
-    };
-    format!("{{\"{tag}\":{body}}}")
+    }
 }
 
 fn write_text(
@@ -649,5 +750,47 @@ mod tests {
         );
         assert_eq!(json_value(&Value::Int(-3)), "{\"int\":-3}");
         assert_eq!(json_value(&Value::Bool(true)), "{\"bool\":true}");
+        let table = livspeil_node_api::Table::from_rows(
+            &[
+                ("name", livspeil_node_api::PortType::String),
+                ("size", livspeil_node_api::PortType::Int),
+            ],
+            [
+                vec![Value::String("a".into()), Value::Int(1)],
+                vec![Value::String("b c".into()), Value::Int(2)],
+            ],
+        )
+        .unwrap();
+        let table = Value::Table(table);
+        assert_eq!(
+            text_value(&table),
+            "table[name:String size:Int][\"a\" 1; \"b c\" 2]"
+        );
+        assert_eq!(
+            json_value(&table),
+            "{\"table\":{\"columns\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"size\",\"type\":\"int\"}],\"rows\":[[\"a\",1],[\"b c\",2]]}}"
+        );
+        let empty = Value::Table(livspeil_node_api::Table::empty());
+        assert_eq!(text_value(&empty), "table[][]");
+        let curve = Value::Curve(Arc::new(livspeil_node_api::Curve::identity()));
+        assert_eq!(
+            text_value(&curve),
+            "curve(0.000000:0.000000 1.000000:1.000000)"
+        );
+        assert_eq!(json_value(&curve), "{\"curve\":[[0.0,0.0],[1.0,1.0]]}");
+    }
+
+    #[test]
+    fn fs_root_option() {
+        assert_eq!(opts(&["r"]).unwrap().fs_root, None);
+        assert_eq!(
+            opts(&["r", "--fs-root", "/tmp/x"])
+                .unwrap()
+                .fs_root
+                .as_deref(),
+            Some("/tmp/x")
+        );
+        assert!(opts(&["r", "--fs-root="]).is_err());
+        assert!(opts(&["r", "--fs-root"]).is_err());
     }
 }

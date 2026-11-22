@@ -25,6 +25,11 @@
 //!   paths that name it, and removing a node that is read is refused. See
 //!   [`Graph::set_expression`] for the details.
 //!
+//! - System bindings (M0.8): [`Cooker::set_system`] installs a read-only
+//!   host (`livspeil_node_api::SystemHost`) for nodes that read the system,
+//!   such as `core.fs.list_dir`; they are re-cooked when the host's
+//!   revision changes (see `cook/system.rs` for the caching rules).
+//!
 //! - [`GraphSnapshot`] is a canonical, comparable copy of the editable state
 //!   (used by the command bus tests to prove undo and replay exact).
 //!

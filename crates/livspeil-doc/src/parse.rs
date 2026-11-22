@@ -20,6 +20,9 @@ use crate::model::{
 };
 use crate::value::decode;
 
+// Block values (`table`, `curve`) inside `input` (M0.8).
+mod blocks;
+
 /// Parse the text of a `room.kdl` file.
 ///
 /// Documents in an older format are migrated to [`CURRENT_FORMAT`] first.
@@ -311,7 +314,7 @@ impl Reader<'_> {
         node: &mut DocNode,
         seen: &mut BTreeSet<String>,
     ) -> Result<(), DocError> {
-        const USAGE: &str = "expected `input \"port\" <value>`, optionally with `expr=\"...\"` and an `anim { ... }` block";
+        const USAGE: &str = "expected `input \"port\" <value>` (or a `table`/`curve` block), optionally with `expr=\"...\"` and an `anim { ... }` block";
         let entries = self.entries(child)?;
         self.allow_props(&entries, &["expr"])?;
         let (port, value) = match entries.args.as_slice() {
@@ -339,13 +342,26 @@ impl Reader<'_> {
             );
         }
         let mut anim = None;
+        let mut block = false;
         for sub in children(child) {
             self.no_annotation(sub)?;
+            if blocks::BLOCKS.contains(&sub.name().value()) {
+                if value.is_some() || block {
+                    return Err(self.err_node(
+                        sub,
+                        format!("input '{port}' has more than one static value"),
+                    ));
+                }
+                block = true;
+                let decoded = self.block_value(sub, &port)?;
+                node.inputs.insert(port.clone(), decoded);
+                continue;
+            }
             if sub.name().value() != "anim" {
                 return Err(self.err_node(
                     sub,
                     format!(
-                        "unknown node `{}` in input '{port}'; expected `anim`",
+                        "unknown node `{}` in input '{port}'; expected `table`, `curve` or `anim`",
                         sub.name().value()
                     ),
                 ));
@@ -362,7 +378,7 @@ impl Reader<'_> {
         if let Some(anim) = anim {
             node.animations.insert(port.clone(), anim);
         }
-        if value.is_none() && !entries.props.contains_key("expr") && !has_anim {
+        if value.is_none() && !block && !entries.props.contains_key("expr") && !has_anim {
             return Err(self.err_node(child, format!("input '{port}' sets nothing; {USAGE}")));
         }
         Ok(())

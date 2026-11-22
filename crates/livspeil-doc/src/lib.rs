@@ -41,7 +41,8 @@
 //! - **Values**: see the table in the `value` module docs: `1.0` is a
 //!   Float and `1` an Int, `#true`/`#false`, quoted strings, and annotated
 //!   strings for `(vec2)`, `(vec3)`, `(vec4)` and `(color)"oklch(L C H A)"`.
-//!   NaN and infinities are rejected.
+//!   NaN and infinities are rejected. Tables and curves are blocks (see
+//!   below).
 //!
 //! # Input sources: values, expressions, animation
 //!
@@ -89,6 +90,48 @@
 //!   [`parse`] and reported at the offending `key`. The writer leaves out
 //!   settings that are at their default and writes key properties in the
 //!   order `interp`, `frequency`, `damping`, `tangent`, `in`, `out`.
+//!
+//! # Table and curve values
+//!
+//! `Table` and `Curve` values (M0.8) are not single KDL values; they are
+//! the static value of an input written as a child block, before any
+//! `anim` block:
+//!
+//! ```kdl
+//! node "shelf" type="core.table.sort@1" id="01920000-0000-7000-8000-000000000003" {
+//!   input "table" {
+//!     table {
+//!       column "name" type="String"
+//!       column "pages" type="Int"
+//!       row "Dune" 412
+//!       row "Emma" 474
+//!     }
+//!   }
+//! }
+//! node "fade" type="core.curve.ramp@1" id="01920000-0000-7000-8000-000000000004" {
+//!   input "curve" {
+//!     curve post="loop" {
+//!       key 0.0 0.0
+//!       key 0.5 1.0 interp="bezier"
+//!       key 1.0 0.0
+//!     }
+//!   }
+//! }
+//! ```
+//!
+//! - `table`: no arguments or properties. First every
+//!   `column "<name>" type="<Type>"` (names unique and not empty; types
+//!   `Float`, `Int`, `Bool`, `Vec2`, `Vec3`, `Vec4`, `Color`, `String`),
+//!   then one `row <value>...` per row with exactly one value per column in
+//!   the usual value encoding (an integer is accepted in a `Float` column).
+//!   A table without columns is written `table` alone.
+//! - `curve [pre="<x>"] [post="<x>"]`: the keys of an `anim` block
+//!   (`key <position> <value>` with the same `interp=` and `tangent=`
+//!   settings) holding numbers only; positions strictly increase; no
+//!   `offset=`. Default settings are left out, as in `anim`.
+//! - An input has at most one static value: a positional value or one
+//!   block. Errors point at the offending `column`, `row` cell or `key`.
+//!   Canonical form: block value, then `anim`.
 //!
 //! **Format version**: these additions are still format 1. They are
 //! purely additive: every format 1 file written before them parses to the
