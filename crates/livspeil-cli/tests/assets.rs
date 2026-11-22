@@ -236,3 +236,116 @@ fn example_room_assets_check() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(stdout(&out).contains("ok (1 asset, 0 warnings)"));
 }
+
+#[test]
+fn add_replace_updates_a_listed_entry() {
+    let tmp = TempDir::new("assets-replace");
+    let room = tmp.room();
+    let file = tmp.0.join("hello.txt");
+    fs::write(&file, "hello world\n").unwrap();
+    let add = |extra: &[&str]| {
+        let mut args = vec!["assets", "add", s(&room), s(&file)];
+        args.extend_from_slice(extra);
+        livspeil(&args)
+    };
+    assert!(add(&["--license", "CC0-1.0"]).status.success());
+
+    // Other data without --replace: refused, lock untouched.
+    let lock = room.join("assets.lock");
+    let before = fs::read_to_string(&lock).unwrap();
+    let out = add(&["--license", "CC-BY-4.0", "--author", "Jane Doe"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains("--replace"), "{}", stderr(&out));
+    assert_eq!(fs::read_to_string(&lock).unwrap(), before);
+
+    // With --replace: the entry is rewritten canonically, comments kept.
+    fs::write(&lock, format!("// license header\n{before}")).unwrap();
+    let out = add(&[
+        "--replace",
+        "--license",
+        "CC-BY-4.0",
+        "--author",
+        "Jane Doe",
+        "--source",
+        "https://example.org/h",
+    ]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let asset = format!("assets/{HELLO_SHA}.txt");
+    assert!(stdout(&out).contains(&format!("replaced {asset}")));
+    assert_eq!(
+        fs::read_to_string(&lock).unwrap(),
+        format!(
+            "// license header\n\nassets-lock format=1 {{\n  asset \"{asset}\" sha256=\"{HELLO_SHA}\" size=12 license=\"CC-BY-4.0\" source=\"https://example.org/h\" author=\"Jane Doe\"\n}}\n"
+        )
+    );
+    // A stale hash or size is repaired too.
+    let text = fs::read_to_string(&lock)
+        .unwrap()
+        .replace("size=12", "size=13");
+    fs::write(&lock, text).unwrap();
+    assert_eq!(
+        livspeil(&["assets", "check", s(&room)]).status.code(),
+        Some(1)
+    );
+    let out = add(&[
+        "--license",
+        "CC-BY-4.0",
+        "--author",
+        "Jane Doe",
+        "--source",
+        "https://example.org/h",
+        "--replace",
+    ]);
+    assert!(stdout(&out).contains("replaced"), "{}", stderr(&out));
+    assert!(livspeil(&["assets", "check", s(&room)]).status.success());
+    // Identical data with --replace: unchanged.
+    let out = add(&[
+        "--replace",
+        "--license",
+        "CC-BY-4.0",
+        "--author",
+        "Jane Doe",
+        "--source",
+        "https://example.org/h",
+    ]);
+    assert!(stdout(&out).contains("unchanged"));
+}
+
+#[test]
+fn fmt_checks_and_rewrites_assets_lock() {
+    let tmp = TempDir::new("assets-fmt");
+    let room = tmp.room();
+    let lock = room.join("assets.lock");
+    let canonical = format!(
+        "assets-lock format=1 {{\n  asset \"assets/a.txt\" sha256=\"{HELLO_SHA}\" size=12 license=\"MIT\" source=\"original\"\n}}\n"
+    );
+    fs::write(&lock, &canonical).unwrap();
+    let out = livspeil(&["fmt", s(&room), "--check"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+
+    // Not canonical (spacing, property order): --check fails and names it.
+    let messy = format!(
+        "\n// header   \nassets-lock format=1 {{\n    asset \"assets/a.txt\" size=12 sha256=\"{HELLO_SHA}\" source=\"original\" license=\"MIT\"\n}}"
+    );
+    fs::write(&lock, &messy).unwrap();
+    let out = livspeil(&["fmt", s(&room.join("room.kdl")), "--check"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains("assets.lock: not in canonical form"));
+    assert_eq!(fs::read_to_string(&lock).unwrap(), messy);
+
+    // fmt rewrites it, keeping the header comment.
+    let out = livspeil(&["fmt", s(&room)]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stdout(&out).contains("assets.lock: formatted"));
+    assert_eq!(
+        fs::read_to_string(&lock).unwrap(),
+        format!("// header\n\n{canonical}")
+    );
+    assert!(livspeil(&["fmt", s(&room), "--check"]).status.success());
+
+    // A lock that does not parse is an error with its location.
+    fs::write(&lock, "assets-lock format=1 {\n  bogus\n}\n").unwrap();
+    let out = livspeil(&["fmt", s(&room), "--check"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains("assets.lock:2:"), "{}", stderr(&out));
+}

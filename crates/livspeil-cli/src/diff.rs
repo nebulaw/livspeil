@@ -7,26 +7,36 @@
 //! documents and renders the changes.
 //!
 //! Text: one line per change, `+` added, `-` removed, `~` changed, values
-//! in canonical KDL text (see [`livspeil_doc::Change`]'s `Display`).
+//! in canonical KDL text (see [`livspeil_doc::Change`]'s `Display`). Nodes
+//! are named by path (`lamp`, `desk_lamp/sunrise`); links inside a subnet
+//! end with `in "/desk_lamp"`.
 //!
-//! JSONL: one object per change, keys in this order, absent keys left out:
+//! JSONL: one object per change, keys in this order, absent keys left out.
+//! Values are strings except `cells` and `row`, which are numbers. New
+//! kinds and keys may be added; existing ones keep their meaning.
 //!
 //! | key       | when                          | value |
 //! |-----------|-------------------------------|-------|
 //! | `op`      | always                        | `"added"`, `"removed"`, `"changed"` |
-//! | `kind`    | always                        | `room-name`, `format`, `min-tier`, `node`, `node-name`, `node-type`, `input`, `expr`, `anim`, `anim-setting`, `anim-key`, `link`, `position` |
-//! | `node`    | node kinds, `position`        | node name (new name if renamed) |
+//! | `kind`    | always                        | `room-name`, `format`, `min-tier`, `node`, `node-name`, `node-type`, `node-move`, `port-type`, `charm`, `charm-field`, `charm-capability`, `input`, `expr`, `anim`, `anim-setting`, `anim-key`, `table`, `table-column`, `table-row`, `curve-setting`, `curve-key`, `link`, `position` |
+//! | `node`    | node kinds, `position`        | node name (new name if renamed); for `position` the meta key, which is the node's path |
 //! | `id`      | node kinds, `position`        | node UUID |
-//! | `port`    | `input`, `expr`, `anim*`      | input port |
-//! | `setting` | `anim-setting`                | `pre`, `post`, `offset` |
-//! | `time`    | `anim-key`                    | key time, canonical float text |
-//! | `from`, `to` | `link`                     | `node.port` |
-//! | `old`, `new` | unless added / removed     | canonical KDL text of the value (`"0.2"`, `"\"text\""`, `"(color)\"oklch(...)\""`), a summary for `anim` (`"3 keys 0.0..2.0"`), `"x y"` for `position`, the quoted type id for `node` |
+//! | `path`    | node kinds, node in a subnet  | node path from the root without the leading `/` (`desk_lamp/sunrise`) |
+//! | `port`    | `input`, `expr`, `anim*`, `table*`, `curve*` | input port |
+//! | `setting` | `anim-setting`, `curve-setting` | `pre`, `post`, `offset` |
+//! | `time`    | `anim-key`, `curve-key`       | key time (curve: position), canonical float text |
+//! | `field`   | `charm-field`                 | `name`, `version`, `icon`, `min-tier`, `capabilities` (reordered only) |
+//! | `cells`   | `table`                       | number of changed cells; rows and columns are listed only when at most 20 |
+//! | `column`  | `table-column`                | column name |
+//! | `row`     | `table-row`                   | row index from 0 |
+//! | `from`, `to` | `link`                     | `node.port`, names in the link's network |
+//! | `network` | `link` in a subnet            | network path (`/desk_lamp`) |
+//! | `old`, `new` | unless added / removed     | canonical KDL text of the value (`"0.2"`, `"\"text\""`, `"(color)\"oklch(...)\""`), a summary for `anim` (`"3 keys 0.0..2.0"`), `charm` (`"\"Daylight\" version=\"1.0\" capability=\"time\""`), `table` (`"2 cols x 3 rows"`) and Table/Curve `input` values (`"table 2 cols x 3 rows"`, `"curve 2 keys 0.0..1.0"`), the row's cells for `table-row` (`"\"b\" 2.5"`), the quoted network path for `node-move`, `"x y"` for `position`, the quoted type id for `node` |
 
 use std::path::Path;
 use std::process::ExitCode;
 
-use livspeil_doc::{Change, Document, Subject, diff, parse, room_file};
+use livspeil_doc::{Change, Document, ROOT_NETWORK, Subject, diff, parse, room_file};
 
 use crate::usage;
 
@@ -115,41 +125,56 @@ fn json_string(s: &str) -> String {
 
 /// One JSON object, keys in the documented order.
 fn json(change: &Change) -> String {
+    let text = |s: &str| json_string(s);
     let mut fields: Vec<(&str, String)> = vec![
-        ("op", change.op.name().to_owned()),
-        ("kind", change.subject.kind().to_owned()),
+        ("op", text(change.op.name())),
+        ("kind", text(change.subject.kind())),
     ];
     if let Some(node) = change.subject.node() {
-        fields.push(("node", node.name.clone()));
-        fields.push(("id", node.id.to_string()));
+        fields.push(("node", text(&node.name)));
+        fields.push(("id", text(&node.id.to_string())));
+        if node.is_nested() {
+            fields.push(("path", text(&node.path)));
+        }
     }
     if let Subject::Position { node, id } = &change.subject {
-        fields.push(("node", node.clone()));
+        fields.push(("node", text(node)));
         if let Some(id) = id {
-            fields.push(("id", id.to_string()));
+            fields.push(("id", text(&id.to_string())));
         }
     }
     if let Some(port) = change.subject.port() {
-        fields.push(("port", port.to_owned()));
+        fields.push(("port", text(port)));
     }
     match &change.subject {
-        Subject::AnimSetting { setting, .. } => fields.push(("setting", (*setting).to_owned())),
-        Subject::AnimKey { time, .. } => fields.push(("time", time.clone())),
-        Subject::Link { from, to } => {
-            fields.push(("from", from.clone()));
-            fields.push(("to", to.clone()));
+        Subject::AnimSetting { setting, .. } | Subject::CurveSetting { setting, .. } => {
+            fields.push(("setting", text(setting)));
+        }
+        Subject::AnimKey { time, .. } | Subject::CurveKey { time, .. } => {
+            fields.push(("time", text(time)));
+        }
+        Subject::CharmField { field, .. } => fields.push(("field", text(field))),
+        Subject::Table { cells, .. } => fields.push(("cells", cells.to_string())),
+        Subject::TableColumn { column, .. } => fields.push(("column", text(column))),
+        Subject::TableRow { row, .. } => fields.push(("row", row.to_string())),
+        Subject::Link { from, to, network } => {
+            fields.push(("from", text(from)));
+            fields.push(("to", text(to)));
+            if network != ROOT_NETWORK {
+                fields.push(("network", text(network)));
+            }
         }
         _ => {}
     }
     if let Some(old) = &change.old {
-        fields.push(("old", old.clone()));
+        fields.push(("old", text(old)));
     }
     if let Some(new) = &change.new {
-        fields.push(("new", new.clone()));
+        fields.push(("new", text(new)));
     }
     let body: Vec<String> = fields
         .iter()
-        .map(|(k, v)| format!("{}:{}", json_string(k), json_string(v)))
+        .map(|(k, v)| format!("{}:{v}", json_string(k)))
         .collect();
     format!("{{{}}}", body.join(","))
 }

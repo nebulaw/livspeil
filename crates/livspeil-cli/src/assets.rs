@@ -10,7 +10,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use livspeil_doc::assets::{ASSETS_LOCK_FILE, AssetIssue, Severity};
-use livspeil_doc::{AssetsError, ROOM_FILE, add_asset, check_assets, package_dir};
+use livspeil_doc::{AddMode, AssetsError, ROOM_FILE, add_asset_with, check_assets, package_dir};
 
 use crate::usage;
 
@@ -35,9 +35,14 @@ fn add(args: impl Iterator<Item = String>) -> ExitCode {
     let mut license = None;
     let mut source = None;
     let mut author = None;
+    let mut mode = AddMode::Add;
     let mut args = args.peekable();
     while let Some(arg) = args.next() {
         let slot = match arg.as_str() {
+            "--replace" => {
+                mode = AddMode::Replace;
+                continue;
+            }
             "--license" => &mut license,
             "--source" => &mut source,
             "--author" => &mut author,
@@ -65,12 +70,13 @@ fn add(args: impl Iterator<Item = String>) -> ExitCode {
         eprintln!("{}: not a room package (no {ROOM_FILE})", dir.display());
         return ExitCode::FAILURE;
     }
-    match add_asset(
+    match add_asset_with(
         &dir,
         Path::new(file),
         &license,
         source.as_deref().unwrap_or("original"),
         author.as_deref(),
+        mode,
     ) {
         Ok(added) => {
             if !added.unlisted_licenses.is_empty() {
@@ -79,7 +85,13 @@ fn add(args: impl Iterator<Item = String>) -> ExitCode {
                     added.unlisted_licenses.join(", ")
                 );
             }
-            let verb = if added.added { "added" } else { "unchanged" };
+            let verb = if added.added {
+                "added"
+            } else if added.replaced {
+                "replaced"
+            } else {
+                "unchanged"
+            };
             println!("{}: {verb} {}", dir.display(), added.entry.path);
             ExitCode::SUCCESS
         }
