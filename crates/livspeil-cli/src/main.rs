@@ -3,9 +3,17 @@
 
 //! Headless command line for Livspeil documents.
 //!
-//! Subcommands are reserved and report which milestone will implement them.
+//! Exit codes: 0 success, 1 the document is invalid (or not canonical for
+//! `fmt --check`) or could not be read or written, 2 usage error or a
+//! reserved command.
 
+use std::fs;
+use std::path::Path;
 use std::process::ExitCode;
+use std::sync::Arc;
+
+use livspeil_doc::{DocError, canonicalize, parse, room_file};
+use livspeil_nodes_core::core_registry;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -13,24 +21,31 @@ const HELP: &str = "\
 livspeil: headless tools for Livspeil documents
 
 USAGE:
-    livspeil <COMMAND>
+    livspeil <COMMAND> [ARGS]
 
-COMMANDS (reserved, not implemented yet):
-    cook        Cook a document and print sink outputs   (milestone M0.6)
-    validate    Check a document for errors              (milestone M0.4)
-    fmt         Rewrite a document in canonical form     (milestone M0.4)
-    diff        Semantic diff of two documents           (later)
+COMMANDS:
+    validate <path>         Check a document against the core nodes
+    fmt <path> [--check]    Rewrite a document in canonical form; with
+                            --check, write nothing and fail if it is not
+    cook                    Cook a document and print sink outputs   (reserved, milestone M0.6)
+    diff                    Semantic diff of two documents           (reserved, later)
+
+<path> is a room package directory (Name.room/) or its room.kdl file.
 
 OPTIONS:
     -h, --help       Print this help
     -V, --version    Print version
+
+EXIT CODES:
+    0 success, 1 invalid or non-canonical document or I/O error, 2 usage error
 ";
 
 fn main() -> ExitCode {
-    run(std::env::args().skip(1))
+    run(std::env::args().skip(1).collect())
 }
 
-fn run(mut args: impl Iterator<Item = String>) -> ExitCode {
+fn run(args: Vec<String>) -> ExitCode {
+    let mut args = args.into_iter();
     match args.next().as_deref() {
         None | Some("-h" | "--help") => {
             print!("{HELP}");
@@ -40,14 +55,112 @@ fn run(mut args: impl Iterator<Item = String>) -> ExitCode {
             println!("livspeil {VERSION}");
             ExitCode::SUCCESS
         }
-        Some(cmd @ ("cook" | "validate" | "fmt" | "diff")) => {
+        Some("validate") => match args.collect::<Vec<_>>().as_slice() {
+            [path] if !path.starts_with('-') => validate(Path::new(path)),
+            _ => usage("validate takes exactly one <path>"),
+        },
+        Some("fmt") => {
+            let mut check = false;
+            let mut paths = Vec::new();
+            for arg in args {
+                match arg.as_str() {
+                    "--check" => check = true,
+                    flag if flag.starts_with('-') => {
+                        return usage(&format!("fmt: unknown option '{flag}'"));
+                    }
+                    _ => paths.push(arg),
+                }
+            }
+            match paths.as_slice() {
+                [path] => fmt(Path::new(path), check),
+                _ => usage("fmt takes exactly one <path>"),
+            }
+        }
+        Some(cmd @ ("cook" | "diff")) => {
             eprintln!("livspeil {cmd}: not implemented yet");
             ExitCode::from(2)
         }
-        Some(other) => {
-            eprintln!("livspeil: unknown command or option '{other}'\n");
-            eprint!("{HELP}");
-            ExitCode::from(2)
+        Some(other) => usage(&format!("unknown command or option '{other}'")),
+    }
+}
+
+fn usage(message: &str) -> ExitCode {
+    eprintln!("livspeil: {message}\n");
+    eprint!("{HELP}");
+    ExitCode::from(2)
+}
+
+fn read(path: &Path) -> Result<(std::path::PathBuf, String), ExitCode> {
+    let file = room_file(path);
+    match fs::read_to_string(&file) {
+        Ok(text) => Ok((file, text)),
+        Err(err) => {
+            eprintln!("{}: cannot read: {err}", file.display());
+            Err(ExitCode::FAILURE)
+        }
+    }
+}
+
+/// `file:line:col: message` (the compiler convention) or `file: message`.
+fn report(file: &Path, err: &DocError) {
+    if err.location().is_some() {
+        eprintln!("{}:{err}", file.display());
+    } else {
+        eprintln!("{}: {err}", file.display());
+    }
+}
+
+fn validate(path: &Path) -> ExitCode {
+    let (file, text) = match read(path) {
+        Ok(v) => v,
+        Err(code) => return code,
+    };
+    let result = parse(&text).and_then(|doc| {
+        let graph = doc.to_graph(Arc::new(core_registry()))?;
+        Ok((graph.node_count(), graph.link_count()))
+    });
+    match result {
+        Ok((nodes, links)) => {
+            println!("{}: ok ({nodes} nodes, {links} links)", file.display());
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report(&file, &err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn fmt(path: &Path, check: bool) -> ExitCode {
+    let (file, text) = match read(path) {
+        Ok(v) => v,
+        Err(code) => return code,
+    };
+    let canonical = match canonicalize(&text) {
+        Ok(c) => c,
+        Err(err) => {
+            report(&file, &err);
+            return ExitCode::FAILURE;
+        }
+    };
+    if canonical == text {
+        return ExitCode::SUCCESS;
+    }
+    if check {
+        eprintln!(
+            "{}: not in canonical form (run `livspeil fmt` to fix)",
+            file.display()
+        );
+        return ExitCode::FAILURE;
+    }
+    match fs::write(&file, canonical) {
+        Ok(()) => {
+            println!("{}: formatted", file.display());
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("{}: cannot write: {err}", file.display());
+            ExitCode::FAILURE
         }
     }
 }

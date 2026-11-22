@@ -1,0 +1,16 @@
+room "Sun and Lamp" format=1 min-tier="T1" {
+  network "/" {
+    node "sun" type="core.time.timeofday@1" id="01920000-0000-7000-8000-000000000001" {
+      input "offset" 0.0
+    }
+    node "lamp" type="core.color.mix@1" id="01920000-0000-7000-8000-000000000002" {
+      input "a" (color)"oklch(0.8 0.12 60.0 1.0)"
+      input "b" (color)"oklch(0.35 0.08 260.0 1.0)"
+    }
+    link from="sun.phase" to="lamp.t"
+  }
+  meta {
+    node "lamp" x=360.0 y=40.0
+    node "sun" x=120.0 y=40.0
+  }
+}
