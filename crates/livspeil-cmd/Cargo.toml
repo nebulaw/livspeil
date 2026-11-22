@@ -21,8 +21,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 
 [dev-dependencies]
+criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
+livspeil-nodes-core = { path = "../livspeil-nodes-core" }
 proptest = "1"
 uuid = "1"
+
+[[bench]]
+name = "history"
+harness = false
 
 [lints]
 workspace = true
