@@ -12,5 +12,18 @@ repository.workspace = true
 authors.workspace = true
 publish.workspace = true
 
+[dependencies]
+# KDL v2 parser (Apache-2.0). 6.5 is the newest release whose MSRV (1.82)
+# fits ours (1.85); the MSRV-aware resolver keeps it there.
+kdl = "6.5"
+livspeil-graph = { path = "../livspeil-graph" }
+livspeil-node-api = { path = "../livspeil-node-api" }
+uuid = "1"
+
+[dev-dependencies]
+livspeil-nodes-core = { path = "../livspeil-nodes-core" }
+livspeil-testkit = { path = "../livspeil-testkit" }
+proptest = "1"
+
 [lints]
 workspace = true
