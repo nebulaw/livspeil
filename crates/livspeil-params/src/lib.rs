@@ -3,5 +3,8 @@
 
 //! Parameter model, animation channels and the expression language.
 //!
-//! Placeholder crate. Implemented in milestone M0.5; see
+//! Milestone M0.5a provides the expression language in [`expr`]; the
+//! parameter model and animation channels follow. See
 //! `specs/livspeil-kernel-spec-v0.md`, section 6.
+
+pub mod expr;
