@@ -16,5 +16,9 @@ publish.workspace = true
 name = "livspeil"
 path = "src/main.rs"
 
+[dependencies]
+livspeil-doc = { path = "../livspeil-doc" }
+livspeil-nodes-core = { path = "../livspeil-nodes-core" }
+
 [lints]
 workspace = true

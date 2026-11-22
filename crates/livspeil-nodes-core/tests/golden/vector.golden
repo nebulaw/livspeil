@@ -1,0 +1,32 @@
+core.vector.compose3(x=0.0, y=0.0, z=0.0) => out=[0.0, 0.0, 0.0]
+core.vector.compose3(x=1.5, y=-0.0, z=NaN) => out=[1.5, -0.0, NaN]
+core.vector.decompose3(v=[0.0, 0.0, 0.0]) => x=0.0, y=0.0, z=0.0
+core.vector.decompose3(v=[1.5, -2.0, inf]) => x=1.5, y=-2.0, z=inf
+core.vector.length3(v=[0.0, 0.0, 0.0]) => out=0.0
+core.vector.length3(v=[3.0, 4.0, 0.0]) => out=5.0
+core.vector.length3(v=[2.0, -3.0, 6.0]) => out=7.0
+core.vector.length3(v=[1.0, 1.0, 1.0]) => out=1.7320508075688772
+core.vector.length3(v=[-0.0, 0.0, -0.0]) => out=0.0
+core.vector.length3(v=[3e200, 4e200, 0.0]) => out=4.9999999999999995e200
+core.vector.length3(v=[3e-200, 4e-200, 0.0]) => out=5e-200
+core.vector.length3(v=[1.7976931348623157e308, 0.0, 0.0]) => out=1.7976931348623157e308
+core.vector.length3(v=[5e-324, 0.0, 0.0]) => out=5e-324
+core.vector.length3(v=[-inf, 1.0, 0.0]) => out=inf
+core.vector.length3(v=[inf, NaN, 0.0]) => out=NaN
+core.vector.normalize3(v=[0.0, 0.0, 0.0]) => out=[0.0, 0.0, 0.0]
+core.vector.normalize3(v=[-0.0, 0.0, -0.0]) => out=[0.0, 0.0, 0.0]
+core.vector.normalize3(v=[3.0, 0.0, 4.0]) => out=[0.6, 0.0, 0.8]
+core.vector.normalize3(v=[0.0, -7.0, 0.0]) => out=[0.0, -1.0, 0.0]
+core.vector.normalize3(v=[2.0, 3.0, 6.0]) => out=[0.2857142857142857, 0.42857142857142855, 0.8571428571428571]
+core.vector.normalize3(v=[1.0, 1.0, 1.0]) => out=[0.5773502691896258, 0.5773502691896258, 0.5773502691896258]
+core.vector.normalize3(v=[3e-200, 4e-200, 0.0]) => out=[0.6, 0.8, 0.0]
+core.vector.normalize3(v=[3e200, 4e200, 0.0]) => out=[0.6000000000000001, 0.8, 0.0]
+core.vector.normalize3(v=[inf, 5.0, 0.0]) => out=[1.0, 0.0, 0.0]
+core.vector.normalize3(v=[inf, -inf, 1.0]) => out=[0.7071067811865475, -0.7071067811865475, 0.0]
+core.vector.normalize3(v=[NaN, 1.0, 0.0]) => out=[NaN, NaN, NaN]
+core.vector.dot3(a=[0.0, 0.0, 0.0], b=[0.0, 0.0, 0.0]) => out=0.0
+core.vector.dot3(a=[1.0, 2.0, 3.0], b=[4.0, -5.0, 6.0]) => out=12.0
+core.vector.dot3(a=[1.0, 0.0, 0.0], b=[0.0, 1.0, 0.0]) => out=0.0
+core.vector.dot3(a=[0.6, 0.8, 0.0], b=[0.6, 0.8, 0.0]) => out=1.0
+core.vector.dot3(a=[inf, 0.0, 0.0], b=[0.0, 1.0, 0.0]) => out=NaN
+core.vector.dot3(a=[1e200, 0.0, 0.0], b=[1e200, 0.0, 0.0]) => out=inf

@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Livspeil contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Golden tests: cook a table of cases for every math and logic node.
+//! Golden tests: cook a table of cases for every math, logic, vector and
+//! text node.
 //!
 //! Each line reads `node(port=value, ...) => out=value, ...` or
 //! `=> error: ...`. Inputs not listed in a case take the spec default, and
@@ -29,6 +30,10 @@ fn b(v: bool) -> Value {
     Value::Bool(v)
 }
 
+fn v3(x: f64, y: f64, z: f64) -> Value {
+    Value::Vec3([x, y, z])
+}
+
 fn s(v: &str) -> Value {
     Value::String(v.to_owned())
 }
@@ -37,6 +42,8 @@ fn show(value: &Value) -> String {
     match value {
         Value::Float(v) => format!("{v:?}"),
         Value::Bool(v) => format!("{v}"),
+        Value::Int(v) => format!("{v}"),
+        Value::Vec3([x, y, z]) => format!("[{x:?}, {y:?}, {z:?}]"),
         Value::String(v) => format!("{v:?}"),
         other => format!("{other:?}"),
     }
@@ -230,6 +237,133 @@ fn math() {
         ),
         ("core.math.smoothstep", vec![("x", f(NAN))]),
         ("core.math.smoothstep", vec![("x", f(INF))]),
+        ("core.math.abs", vec![]),
+        ("core.math.abs", vec![("x", f(-2.5))]),
+        ("core.math.abs", vec![("x", f(3.0))]),
+        ("core.math.abs", vec![("x", f(-0.0))]),
+        ("core.math.abs", vec![("x", f(-INF))]),
+        ("core.math.abs", vec![("x", f(NAN))]),
+        ("core.math.pow", vec![]),
+        (
+            "core.math.pow",
+            vec![("base", f(2.0)), ("exponent", f(10.0))],
+        ),
+        (
+            "core.math.pow",
+            vec![("base", f(4.0)), ("exponent", f(0.5))],
+        ),
+        (
+            "core.math.pow",
+            vec![("base", f(2.0)), ("exponent", f(-2.0))],
+        ),
+        (
+            "core.math.pow",
+            vec![("base", f(-2.0)), ("exponent", f(3.0))],
+        ),
+        (
+            "core.math.pow",
+            vec![("base", f(-8.0)), ("exponent", f(0.5))],
+        ),
+        (
+            "core.math.pow",
+            vec![("base", f(NAN)), ("exponent", f(0.0))],
+        ),
+        (
+            "core.math.pow",
+            vec![("base", f(1.0)), ("exponent", f(NAN))],
+        ),
+        (
+            "core.math.pow",
+            vec![("base", f(NAN)), ("exponent", f(2.0))],
+        ),
+        (
+            "core.math.pow",
+            vec![("base", f(0.0)), ("exponent", f(-1.0))],
+        ),
+        (
+            "core.math.pow",
+            vec![("base", f(-0.0)), ("exponent", f(-1.0))],
+        ),
+        (
+            "core.math.pow",
+            vec![("base", f(0.5)), ("exponent", f(INF))],
+        ),
+        (
+            "core.math.pow",
+            vec![("base", f(INF)), ("exponent", f(-1.0))],
+        ),
+        ("core.math.sin", vec![]),
+        ("core.math.sin", vec![("x", f(-0.0))]),
+        ("core.math.sin", vec![("x", f(std::f64::consts::FRAC_PI_2))]),
+        (
+            "core.math.sin",
+            vec![("x", f(-std::f64::consts::FRAC_PI_2))],
+        ),
+        ("core.math.sin", vec![("x", f(INF))]),
+        ("core.math.sin", vec![("x", f(NAN))]),
+        ("core.math.cos", vec![]),
+        ("core.math.cos", vec![("x", f(-0.0))]),
+        ("core.math.cos", vec![("x", f(std::f64::consts::PI))]),
+        ("core.math.cos", vec![("x", f(-INF))]),
+        ("core.math.cos", vec![("x", f(NAN))]),
+        ("core.math.wrap", vec![]),
+        ("core.math.wrap", vec![("x", f(0.25))]),
+        ("core.math.wrap", vec![("x", f(1.25))]),
+        ("core.math.wrap", vec![("x", f(-0.25))]),
+        ("core.math.wrap", vec![("x", f(1.0))]),
+        ("core.math.wrap", vec![("x", f(-1.0))]),
+        ("core.math.wrap", vec![("x", f(-0.0))]),
+        ("core.math.wrap", vec![("x", f(-1e-300))]),
+        (
+            "core.math.wrap",
+            vec![("x", f(370.0)), ("min", f(0.0)), ("max", f(360.0))],
+        ),
+        (
+            "core.math.wrap",
+            vec![("x", f(-190.0)), ("min", f(-180.0)), ("max", f(180.0))],
+        ),
+        (
+            "core.math.wrap",
+            vec![("x", f(180.0)), ("min", f(-180.0)), ("max", f(180.0))],
+        ),
+        (
+            "core.math.wrap",
+            vec![("x", f(1.25)), ("min", f(1.0)), ("max", f(0.0))],
+        ),
+        (
+            "core.math.wrap",
+            vec![("x", f(0.5)), ("min", f(2.0)), ("max", f(2.0))],
+        ),
+        ("core.math.wrap", vec![("min", f(NAN))]),
+        ("core.math.wrap", vec![("max", f(INF))]),
+        (
+            "core.math.wrap",
+            vec![("min", f(-f64::MAX)), ("max", f(f64::MAX))],
+        ),
+        ("core.math.wrap", vec![("x", f(NAN))]),
+        ("core.math.wrap", vec![("x", f(INF))]),
+        ("core.math.round", vec![]),
+        ("core.math.round", vec![("x", f(2.4))]),
+        ("core.math.round", vec![("x", f(2.5))]),
+        ("core.math.round", vec![("x", f(-2.5))]),
+        ("core.math.round", vec![("x", f(-0.4))]),
+        ("core.math.round", vec![("x", f(7.5)), ("step", f(5.0))]),
+        ("core.math.round", vec![("x", f(7.5)), ("step", f(-5.0))]),
+        ("core.math.round", vec![("x", f(10.0)), ("step", f(3.0))]),
+        ("core.math.round", vec![("x", f(0.3)), ("step", f(0.1))]),
+        ("core.math.round", vec![("x", f(0.25)), ("step", f(0.1))]),
+        (
+            "core.math.round",
+            vec![("x", f(1.234567)), ("step", f(0.01))],
+        ),
+        ("core.math.round", vec![("x", f(0.375)), ("step", f(0.25))]),
+        ("core.math.round", vec![("x", f(1.0)), ("step", f(0.0))]),
+        ("core.math.round", vec![("x", f(1.0)), ("step", f(-0.0))]),
+        ("core.math.round", vec![("x", f(1.0)), ("step", f(NAN))]),
+        ("core.math.round", vec![("x", f(1.0)), ("step", f(INF))]),
+        ("core.math.round", vec![("x", f(NAN))]),
+        ("core.math.round", vec![("x", f(-INF)), ("step", f(0.1))]),
+        ("core.math.round", vec![("x", f(1e308)), ("step", f(0.01))]),
     ];
     assert_golden(&golden_dir(), "math", &report(&cases));
 }
@@ -292,4 +426,127 @@ fn logic() {
         cases.push(("core.logic.not", vec![("a", b(a))]));
     }
     assert_golden(&golden_dir(), "logic", &report(&cases));
+}
+
+#[test]
+fn vector() {
+    let cases: Vec<(&str, Vec<(&str, Value)>)> = vec![
+        ("core.vector.compose3", vec![]),
+        (
+            "core.vector.compose3",
+            vec![("x", f(1.5)), ("y", f(-0.0)), ("z", f(NAN))],
+        ),
+        ("core.vector.decompose3", vec![]),
+        ("core.vector.decompose3", vec![("v", v3(1.5, -2.0, INF))]),
+        ("core.vector.length3", vec![]),
+        ("core.vector.length3", vec![("v", v3(3.0, 4.0, 0.0))]),
+        ("core.vector.length3", vec![("v", v3(2.0, -3.0, 6.0))]),
+        ("core.vector.length3", vec![("v", v3(1.0, 1.0, 1.0))]),
+        ("core.vector.length3", vec![("v", v3(-0.0, 0.0, -0.0))]),
+        ("core.vector.length3", vec![("v", v3(3e200, 4e200, 0.0))]),
+        ("core.vector.length3", vec![("v", v3(3e-200, 4e-200, 0.0))]),
+        ("core.vector.length3", vec![("v", v3(f64::MAX, 0.0, 0.0))]),
+        ("core.vector.length3", vec![("v", v3(5e-324, 0.0, 0.0))]),
+        ("core.vector.length3", vec![("v", v3(-INF, 1.0, 0.0))]),
+        ("core.vector.length3", vec![("v", v3(INF, NAN, 0.0))]),
+        ("core.vector.normalize3", vec![]),
+        ("core.vector.normalize3", vec![("v", v3(-0.0, 0.0, -0.0))]),
+        ("core.vector.normalize3", vec![("v", v3(3.0, 0.0, 4.0))]),
+        ("core.vector.normalize3", vec![("v", v3(0.0, -7.0, 0.0))]),
+        ("core.vector.normalize3", vec![("v", v3(2.0, 3.0, 6.0))]),
+        ("core.vector.normalize3", vec![("v", v3(1.0, 1.0, 1.0))]),
+        (
+            "core.vector.normalize3",
+            vec![("v", v3(3e-200, 4e-200, 0.0))],
+        ),
+        ("core.vector.normalize3", vec![("v", v3(3e200, 4e200, 0.0))]),
+        ("core.vector.normalize3", vec![("v", v3(INF, 5.0, 0.0))]),
+        ("core.vector.normalize3", vec![("v", v3(INF, -INF, 1.0))]),
+        ("core.vector.normalize3", vec![("v", v3(NAN, 1.0, 0.0))]),
+        ("core.vector.dot3", vec![]),
+        (
+            "core.vector.dot3",
+            vec![("a", v3(1.0, 2.0, 3.0)), ("b", v3(4.0, -5.0, 6.0))],
+        ),
+        (
+            "core.vector.dot3",
+            vec![("a", v3(1.0, 0.0, 0.0)), ("b", v3(0.0, 1.0, 0.0))],
+        ),
+        (
+            "core.vector.dot3",
+            vec![("a", v3(0.6, 0.8, 0.0)), ("b", v3(0.6, 0.8, 0.0))],
+        ),
+        (
+            "core.vector.dot3",
+            vec![("a", v3(INF, 0.0, 0.0)), ("b", v3(0.0, 1.0, 0.0))],
+        ),
+        (
+            "core.vector.dot3",
+            vec![("a", v3(1e200, 0.0, 0.0)), ("b", v3(1e200, 0.0, 0.0))],
+        ),
+    ];
+    assert_golden(&golden_dir(), "vector", &report(&cases));
+}
+
+#[test]
+fn text() {
+    let t = "core.text.format";
+    let i = Value::Int;
+    let cases: Vec<(&str, Vec<(&str, Value)>)> = vec![
+        (t, vec![]),
+        (t, vec![("a", f(12.3456))]),
+        (
+            t,
+            vec![
+                ("template", s("{a} of {b}")),
+                ("a", f(3.0)),
+                ("b", f(10.0)),
+                ("precision", i(0)),
+            ],
+        ),
+        (
+            t,
+            vec![
+                ("template", s("{b}/{a}/{b}")),
+                ("a", f(1.0)),
+                ("b", f(2.0)),
+                ("precision", i(1)),
+            ],
+        ),
+        (
+            t,
+            vec![
+                ("template", s("Temp: {a} °C")),
+                ("a", f(21.456)),
+                ("precision", i(1)),
+            ],
+        ),
+        (t, vec![("template", s("plain text"))]),
+        (t, vec![("template", s(""))]),
+        (t, vec![("template", s("{{a}} = {a}")), ("a", f(1.0))]),
+        (t, vec![("template", s("{{{a}}}")), ("a", f(1.0))]),
+        (t, vec![("template", s("}}{{"))]),
+        (t, vec![("a", f(0.125))]),
+        (t, vec![("a", f(2.675))]),
+        (t, vec![("a", f(-0.0))]),
+        (t, vec![("a", f(-0.001))]),
+        (t, vec![("a", f(-0.006))]),
+        (t, vec![("a", f(2.5)), ("precision", i(0))]),
+        (t, vec![("a", f(3.5)), ("precision", i(0))]),
+        (t, vec![("a", f(1.0 / 3.0)), ("precision", i(12))]),
+        (t, vec![("a", f(1.0 / 3.0)), ("precision", i(99))]),
+        (t, vec![("a", f(1.0 / 3.0)), ("precision", i(-1))]),
+        (t, vec![("a", f(1e21)), ("precision", i(0))]),
+        (
+            t,
+            vec![("template", s("{a} {b}")), ("a", f(NAN)), ("b", f(-INF))],
+        ),
+        (t, vec![("template", s("{c}"))]),
+        (t, vec![("template", s("x{}"))]),
+        (t, vec![("template", s("{ a }"))]),
+        (t, vec![("template", s("ok {"))]),
+        (t, vec![("template", s("{a}}"))]),
+        (t, vec![("template", s("é}"))]),
+    ];
+    assert_golden(&golden_dir(), "text", &report(&cases));
 }

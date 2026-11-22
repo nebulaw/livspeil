@@ -1,0 +1,14 @@
+room "All values" format=1 min-tier="T0" {
+  network "/" {
+    node "all" type="test.all@1" id="01920000-0000-7000-8000-000000000007" {
+      input "b" #true
+      input "c" (color)"oklch(0.5 0.0 0.0 0.25)"
+      input "f" -1.5e-7
+      input "i" -42
+      input "s" "tab\there \"quoted\" \\ é\n"
+      input "v2" (vec2)"1.0 2.0"
+      input "v3" (vec3)"0.1 0.2 0.3"
+      input "v4" (vec4)"0.0 -0.0 1e21 4.0"
+    }
+  }
+}

@@ -70,3 +70,70 @@ core.math.smoothstep(edge0=0.5, edge1=0.5, x=0.5) => out=1.0
 core.math.smoothstep(edge0=0.5, edge1=0.5, x=0.6) => out=1.0
 core.math.smoothstep(edge0=0.0, edge1=1.0, x=NaN) => out=NaN
 core.math.smoothstep(edge0=0.0, edge1=1.0, x=inf) => out=1.0
+core.math.abs(x=0.0) => out=0.0
+core.math.abs(x=-2.5) => out=2.5
+core.math.abs(x=3.0) => out=3.0
+core.math.abs(x=-0.0) => out=0.0
+core.math.abs(x=-inf) => out=inf
+core.math.abs(x=NaN) => out=NaN
+core.math.pow(base=0.0, exponent=1.0) => out=0.0
+core.math.pow(base=2.0, exponent=10.0) => out=1024.0
+core.math.pow(base=4.0, exponent=0.5) => out=2.0
+core.math.pow(base=2.0, exponent=-2.0) => out=0.25
+core.math.pow(base=-2.0, exponent=3.0) => out=-8.0
+core.math.pow(base=-8.0, exponent=0.5) => out=NaN
+core.math.pow(base=NaN, exponent=0.0) => out=1.0
+core.math.pow(base=1.0, exponent=NaN) => out=1.0
+core.math.pow(base=NaN, exponent=2.0) => out=NaN
+core.math.pow(base=0.0, exponent=-1.0) => out=inf
+core.math.pow(base=-0.0, exponent=-1.0) => out=-inf
+core.math.pow(base=0.5, exponent=inf) => out=0.0
+core.math.pow(base=inf, exponent=-1.0) => out=0.0
+core.math.sin(x=0.0) => out=0.0
+core.math.sin(x=-0.0) => out=-0.0
+core.math.sin(x=1.5707963267948966) => out=1.0
+core.math.sin(x=-1.5707963267948966) => out=-1.0
+core.math.sin(x=inf) => out=NaN
+core.math.sin(x=NaN) => out=NaN
+core.math.cos(x=0.0) => out=1.0
+core.math.cos(x=-0.0) => out=1.0
+core.math.cos(x=3.141592653589793) => out=-1.0
+core.math.cos(x=-inf) => out=NaN
+core.math.cos(x=NaN) => out=NaN
+core.math.wrap(x=0.0, min=0.0, max=1.0) => out=0.0
+core.math.wrap(x=0.25, min=0.0, max=1.0) => out=0.25
+core.math.wrap(x=1.25, min=0.0, max=1.0) => out=0.25
+core.math.wrap(x=-0.25, min=0.0, max=1.0) => out=0.75
+core.math.wrap(x=1.0, min=0.0, max=1.0) => out=0.0
+core.math.wrap(x=-1.0, min=0.0, max=1.0) => out=0.0
+core.math.wrap(x=-0.0, min=0.0, max=1.0) => out=0.0
+core.math.wrap(x=-1e-300, min=0.0, max=1.0) => out=0.0
+core.math.wrap(x=370.0, min=0.0, max=360.0) => out=10.0
+core.math.wrap(x=-190.0, min=-180.0, max=180.0) => out=170.0
+core.math.wrap(x=180.0, min=-180.0, max=180.0) => out=-180.0
+core.math.wrap(x=1.25, min=1.0, max=0.0) => out=0.25
+core.math.wrap(x=0.5, min=2.0, max=2.0) => error: invalid input 'max': range is empty (min == max)
+core.math.wrap(x=0.0, min=NaN, max=1.0) => error: invalid input 'min': expected a finite number, got NaN
+core.math.wrap(x=0.0, min=0.0, max=inf) => error: invalid input 'max': expected a finite number, got inf
+core.math.wrap(x=0.0, min=-1.7976931348623157e308, max=1.7976931348623157e308) => error: invalid input 'max': range max - min is too large
+core.math.wrap(x=NaN, min=0.0, max=1.0) => out=NaN
+core.math.wrap(x=inf, min=0.0, max=1.0) => out=NaN
+core.math.round(x=0.0, step=1.0) => out=0.0
+core.math.round(x=2.4, step=1.0) => out=2.0
+core.math.round(x=2.5, step=1.0) => out=3.0
+core.math.round(x=-2.5, step=1.0) => out=-3.0
+core.math.round(x=-0.4, step=1.0) => out=-0.0
+core.math.round(x=7.5, step=5.0) => out=10.0
+core.math.round(x=7.5, step=-5.0) => out=10.0
+core.math.round(x=10.0, step=3.0) => out=9.0
+core.math.round(x=0.3, step=0.1) => out=0.3
+core.math.round(x=0.25, step=0.1) => out=0.3
+core.math.round(x=1.234567, step=0.01) => out=1.23
+core.math.round(x=0.375, step=0.25) => out=0.5
+core.math.round(x=1.0, step=0.0) => error: invalid input 'step': step must not be zero
+core.math.round(x=1.0, step=-0.0) => error: invalid input 'step': step must not be zero
+core.math.round(x=1.0, step=NaN) => error: invalid input 'step': expected a finite number, got NaN
+core.math.round(x=1.0, step=inf) => error: invalid input 'step': expected a finite number, got inf
+core.math.round(x=NaN, step=1.0) => out=NaN
+core.math.round(x=-inf, step=0.1) => out=-inf
+core.math.round(x=1e308, step=0.01) => out=1e308

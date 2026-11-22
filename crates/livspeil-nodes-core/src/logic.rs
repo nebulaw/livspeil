@@ -11,7 +11,7 @@
 
 use livspeil_node_api::{CookContext, NodeError, NodeImpl, NodeSpec, PortType, Value};
 
-use crate::float;
+use crate::{float, string};
 
 fn boolean(inputs: &[Value], index: usize, port: &'static str) -> Result<bool, NodeError> {
     match inputs.get(index) {
@@ -19,16 +19,6 @@ fn boolean(inputs: &[Value], index: usize, port: &'static str) -> Result<bool, N
         _ => Err(NodeError::InvalidInput {
             port,
             reason: "expected a Bool".to_owned(),
-        }),
-    }
-}
-
-fn string<'a>(inputs: &'a [Value], index: usize, port: &'static str) -> Result<&'a str, NodeError> {
-    match inputs.get(index) {
-        Some(Value::String(s)) => Ok(s),
-        _ => Err(NodeError::InvalidInput {
-            port,
-            reason: "expected a String".to_owned(),
         }),
     }
 }

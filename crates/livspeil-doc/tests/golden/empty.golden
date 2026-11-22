@@ -1,0 +1,3 @@
+room "" format=1 min-tier="T0" {
+  network "/"
+}

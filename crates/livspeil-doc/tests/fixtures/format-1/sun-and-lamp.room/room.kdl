@@ -1,0 +1,21 @@
+// SPDX-FileCopyrightText: 2026 Livspeil contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// Format 1 fixture. Never edit: documents from released formats load forever.
+room "Sun and Lamp" format=1 min-tier=T1 {
+    meta {
+        node sun x=120 y=40.5
+    }
+    network "/" {
+        link from="sun.phase" to="lamp.t"
+        /- node "disabled" type="core.math.add@1" id="0192f5a0-7c3e-7a10-8000-0000000000ff"
+        node lamp type="core.color.mix@1" id="0192f5a0-7c3e-7a10-8000-000000000002" {
+            input a (color)"oklch(0.8 0.12 60 1)" // alpha written explicitly
+            input b (color)"oklch(0.35 0.08 260)"
+        }
+        node sun type="core.time.timeofday@1" id="0192f5a0-7c3e-7a10-8000-000000000001" {
+            input offset 1   // an Int on a Float port is coerced on load
+            input seconds 64_800.0
+        }
+    }
+}

@@ -11,11 +11,11 @@ Status: **Phase 0 (kernel)**. This repository currently holds the headless, cros
 | `crates/livspeil-node-api` | Public node/Charm API surface (MPL-2.0) |
 | `crates/livspeil-graph` | Networks, type checking, cook scheduler (M0.2) |
 | `crates/livspeil-params` | Parameters, animation, expressions (expression language done; parameters next, M0.5) |
-| `crates/livspeil-doc` | Document model and KDL (placeholder, M0.4) |
+| `crates/livspeil-doc` | Document model, KDL v2 `room.kdl` format, canonical form, migrations (M0.4) |
 | `crates/livspeil-cmd` | Command bus, undo/redo, journal (M0.3) |
-| `crates/livspeil-nodes-core` | Core nodes: math, logic, time, sky, color (M0.6, in progress) |
+| `crates/livspeil-nodes-core` | Core nodes: math, logic, vector, time, sky, color, text (M0.6; events, fs, tables, ramps and subnets deferred) |
 | `crates/livspeil-testkit` | Golden-file harness |
-| `crates/livspeil-cli` | `livspeil` headless command line |
+| `crates/livspeil-cli` | `livspeil` headless command line (`validate`, `fmt`; `cook`, `diff` reserved) |
 | `xtask` | Project automation (`cargo xtask check`) |
 | `specs/` | Design specs |
 | `docs/` | Licensing and contribution documentation |

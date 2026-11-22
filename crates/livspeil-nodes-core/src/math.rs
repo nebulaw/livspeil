@@ -405,6 +405,285 @@ impl NodeImpl for Smoothstep {
     }
 }
 
+/// `core.math.abs@1`: `out = |x|`.
+///
+/// Clears the sign bit, so `abs(-0.0) == +0.0`, `abs(-inf) == inf` and a
+/// `NaN` stays `NaN`.
+#[derive(Debug)]
+pub struct Abs {
+    spec: NodeSpec,
+}
+
+impl Abs {
+    #[must_use]
+    pub fn new() -> Self {
+        let spec = NodeSpec::new("core.math.abs", 1, "Absolute value of x");
+        Abs {
+            spec: float_in(spec, "x", 0.0).output("out", PortType::Float),
+        }
+    }
+}
+node_boilerplate!(Abs);
+
+impl NodeImpl for Abs {
+    fn spec(&self) -> &NodeSpec {
+        &self.spec
+    }
+
+    fn cook(&self, _ctx: &CookContext, inputs: &[Value]) -> Result<Vec<Value>, NodeError> {
+        let x = float(inputs, 0, "x")?;
+        Ok(vec![Value::Float(x.abs())])
+    }
+}
+
+/// `core.math.pow@1`: `out = base ^ exponent`.
+///
+/// Follows IEEE 754 / C99 Annex F `pow` and never fails: `x ^ 0 == 1` for
+/// every `x` (even `NaN`), `1 ^ y == 1` for every `y` (even `NaN`), a
+/// negative base with a non-integer exponent gives `NaN`, `0 ^ -1 == inf`.
+/// `exponent` defaults to 1 so that linking only `base` passes it through.
+///
+/// Like `sin` and `cos`, `pow` comes from the platform math library: the
+/// special cases above are exact everywhere, ordinary results may differ in
+/// the last bit between platforms.
+#[derive(Debug)]
+pub struct Pow {
+    spec: NodeSpec,
+}
+
+impl Pow {
+    #[must_use]
+    pub fn new() -> Self {
+        let spec = NodeSpec::new("core.math.pow", 1, "base raised to the power exponent");
+        let spec = float_in(float_in(spec, "base", 0.0), "exponent", 1.0);
+        Pow {
+            spec: spec.output("out", PortType::Float),
+        }
+    }
+}
+node_boilerplate!(Pow);
+
+impl NodeImpl for Pow {
+    fn spec(&self) -> &NodeSpec {
+        &self.spec
+    }
+
+    fn cook(&self, _ctx: &CookContext, inputs: &[Value]) -> Result<Vec<Value>, NodeError> {
+        let base = float(inputs, 0, "base")?;
+        let exponent = float(inputs, 1, "exponent")?;
+        Ok(vec![Value::Float(base.powf(exponent))])
+    }
+}
+
+/// `core.math.sin@1`: `out = sin(x)`, `x` in radians.
+///
+/// `sin(±0) == ±0`; an infinite or `NaN` `x` gives `NaN`. Platform math
+/// library (see [`Pow`] on last-bit differences).
+#[derive(Debug)]
+pub struct Sin {
+    spec: NodeSpec,
+}
+
+impl Sin {
+    #[must_use]
+    pub fn new() -> Self {
+        let spec = NodeSpec::new("core.math.sin", 1, "Sine of x (radians)");
+        Sin {
+            spec: float_in(spec, "x", 0.0).output("out", PortType::Float),
+        }
+    }
+}
+node_boilerplate!(Sin);
+
+impl NodeImpl for Sin {
+    fn spec(&self) -> &NodeSpec {
+        &self.spec
+    }
+
+    fn cook(&self, _ctx: &CookContext, inputs: &[Value]) -> Result<Vec<Value>, NodeError> {
+        let x = float(inputs, 0, "x")?;
+        Ok(vec![Value::Float(x.sin())])
+    }
+}
+
+/// `core.math.cos@1`: `out = cos(x)`, `x` in radians.
+///
+/// `cos(±0) == 1`; an infinite or `NaN` `x` gives `NaN`. Platform math
+/// library (see [`Pow`] on last-bit differences).
+#[derive(Debug)]
+pub struct Cos {
+    spec: NodeSpec,
+}
+
+impl Cos {
+    #[must_use]
+    pub fn new() -> Self {
+        let spec = NodeSpec::new("core.math.cos", 1, "Cosine of x (radians)");
+        Cos {
+            spec: float_in(spec, "x", 0.0).output("out", PortType::Float),
+        }
+    }
+}
+node_boilerplate!(Cos);
+
+impl NodeImpl for Cos {
+    fn spec(&self) -> &NodeSpec {
+        &self.spec
+    }
+
+    fn cook(&self, _ctx: &CookContext, inputs: &[Value]) -> Result<Vec<Value>, NodeError> {
+        let x = float(inputs, 0, "x")?;
+        Ok(vec![Value::Float(x.cos())])
+    }
+}
+
+/// Reject a `NaN` or infinite bound on `port`.
+fn finite_bound(value: f64, port: &'static str) -> Result<f64, NodeError> {
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(NodeError::InvalidInput {
+            port,
+            reason: format!("expected a finite number, got {value}"),
+        })
+    }
+}
+
+/// `core.math.wrap@1`: `x` wrapped into the half-open range `[min, max)`.
+///
+/// `out = min + (x - min) mod (max - min)` with a Euclidean (never negative)
+/// remainder, so values below `min` wrap from the top: with the defaults
+/// `wrap(-0.25) == 0.75` and `wrap(1.0) == 0.0`. If `min > max` the bounds
+/// are swapped, as in `core.math.clamp`. Errors
+/// ([`NodeError::InvalidInput`]): `min == max` (on `max`), a `NaN` or
+/// infinite bound (on that bound), and a range `max - min` too large to
+/// represent (on `max`). A `NaN` or infinite `x` gives `NaN`, as does an `x`
+/// so far from `min` that `x - min` overflows.
+#[derive(Debug)]
+pub struct Wrap {
+    spec: NodeSpec,
+}
+
+impl Wrap {
+    #[must_use]
+    pub fn new() -> Self {
+        let spec = NodeSpec::new(
+            "core.math.wrap",
+            1,
+            "Wrap x into [min, max) (bounds are swapped if reversed)",
+        );
+        let spec = float_in(float_in(float_in(spec, "x", 0.0), "min", 0.0), "max", 1.0);
+        Wrap {
+            spec: spec.output("out", PortType::Float),
+        }
+    }
+}
+node_boilerplate!(Wrap);
+
+impl NodeImpl for Wrap {
+    fn spec(&self) -> &NodeSpec {
+        &self.spec
+    }
+
+    fn cook(&self, _ctx: &CookContext, inputs: &[Value]) -> Result<Vec<Value>, NodeError> {
+        let x = float(inputs, 0, "x")?;
+        let min = finite_bound(float(inputs, 1, "min")?, "min")?;
+        let max = finite_bound(float(inputs, 2, "max")?, "max")?;
+        if min == max {
+            return Err(NodeError::InvalidInput {
+                port: "max",
+                reason: "range is empty (min == max)".to_owned(),
+            });
+        }
+        let (lo, hi) = if min > max { (max, min) } else { (min, max) };
+        let range = hi - lo;
+        if !range.is_finite() {
+            return Err(NodeError::InvalidInput {
+                port: "max",
+                reason: "range max - min is too large".to_owned(),
+            });
+        }
+        // rem_euclid is never negative but may round up to exactly `range`
+        // for tiny negative offsets; fold that (and any rounding of the
+        // final addition onto `hi`) back to `lo`.
+        let out = lo + (x - lo).rem_euclid(range);
+        let out = if out >= hi { lo } else { out };
+        Ok(vec![Value::Float(out)])
+    }
+}
+
+/// Quotients at or above this magnitude are already integers in `f64`, so
+/// rounding them changes nothing (2^52).
+const ROUND_LIMIT: f64 = 4_503_599_627_370_496.0;
+
+/// `core.math.round@1`: `x` rounded to the nearest multiple of `step`, halves
+/// away from zero (`round(2.5) == 3`, `round(-2.5) == -3`).
+///
+/// The sign of `step` does not matter. `step == 0` or a `NaN` or infinite
+/// `step` is an [`NodeError::InvalidInput`] on `step`. A `NaN` or infinite
+/// `x` passes through, as does any `x` whose quotient `x / step` reaches
+/// 2^52 (it is already a whole number of steps as far as `f64` can tell).
+/// Small negative values round to `-0.0`, as IEEE 754 rounding does.
+///
+/// When `1 / step` is a whole number (steps such as 0.1, 0.25 or 1), the
+/// node computes `round(x * (1/step)) / (1/step)` instead of
+/// `round(x / step) * step`: that way `round(0.3, 0.1)` is `0.3` rather than
+/// `0.30000000000000004`, and `round(0.25, 0.1)` is `0.3` as on paper.
+#[derive(Debug)]
+pub struct Round {
+    spec: NodeSpec,
+}
+
+impl Round {
+    #[must_use]
+    pub fn new() -> Self {
+        let spec = NodeSpec::new(
+            "core.math.round",
+            1,
+            "Round x to the nearest multiple of step (halves away from zero)",
+        );
+        let spec = float_in(float_in(spec, "x", 0.0), "step", 1.0);
+        Round {
+            spec: spec.output("out", PortType::Float),
+        }
+    }
+}
+node_boilerplate!(Round);
+
+/// `x` rounded to a multiple of `step`; `step` must be finite and non-zero.
+fn round_to_step(x: f64, step: f64) -> f64 {
+    let step = step.abs();
+    let inv = 1.0 / step;
+    let use_inv = inv.is_finite() && inv.fract() == 0.0 && inv < ROUND_LIMIT;
+    let q = if use_inv { x * inv } else { x / step };
+    if !q.is_finite() || q.abs() >= ROUND_LIMIT {
+        return x;
+    }
+    if use_inv {
+        q.round() / inv
+    } else {
+        q.round() * step
+    }
+}
+
+impl NodeImpl for Round {
+    fn spec(&self) -> &NodeSpec {
+        &self.spec
+    }
+
+    fn cook(&self, _ctx: &CookContext, inputs: &[Value]) -> Result<Vec<Value>, NodeError> {
+        let x = float(inputs, 0, "x")?;
+        let step = finite_bound(float(inputs, 1, "step")?, "step")?;
+        if step == 0.0 {
+            return Err(NodeError::InvalidInput {
+                port: "step",
+                reason: "step must not be zero".to_owned(),
+            });
+        }
+        Ok(vec![Value::Float(round_to_step(x, step))])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -563,6 +842,134 @@ mod tests {
         assert_eq!(cook(&s, &[0.5, 0.5, 0.6]).unwrap(), 1.0);
         assert!(cook(&s, &[0.5, 0.5, f64::NAN]).unwrap().is_nan());
         assert!(cook(&s, &[0.0, 1.0, f64::NAN]).unwrap().is_nan());
+    }
+
+    #[test]
+    fn abs_clears_the_sign() {
+        let n = Abs::new();
+        assert_eq!(cook(&n, &[-2.5]).unwrap(), 2.5);
+        assert_eq!(cook(&n, &[3.0]).unwrap(), 3.0);
+        assert!(same(cook(&n, &[-0.0]).unwrap(), 0.0));
+        assert_eq!(cook(&n, &[f64::NEG_INFINITY]).unwrap(), f64::INFINITY);
+        assert!(cook(&n, &[f64::NAN]).unwrap().is_nan());
+    }
+
+    #[test]
+    fn pow_values_and_ieee_special_cases() {
+        let n = Pow::new();
+        assert_eq!(cook(&n, &[2.0, 10.0]).unwrap(), 1024.0);
+        assert_eq!(cook(&n, &[4.0, 0.5]).unwrap(), 2.0);
+        assert_eq!(cook(&n, &[2.0, -2.0]).unwrap(), 0.25);
+        assert_eq!(cook(&n, &[-2.0, 3.0]).unwrap(), -8.0);
+        assert_eq!(cook(&n, &[7.5, 1.0]).unwrap(), 7.5);
+        // x^0 == 1 and 1^y == 1, even for NaN.
+        assert_eq!(cook(&n, &[f64::NAN, 0.0]).unwrap(), 1.0);
+        assert_eq!(cook(&n, &[1.0, f64::NAN]).unwrap(), 1.0);
+        assert!(cook(&n, &[-8.0, 1.0 / 3.0]).unwrap().is_nan());
+        assert!(cook(&n, &[f64::NAN, 2.0]).unwrap().is_nan());
+        assert_eq!(cook(&n, &[0.0, -1.0]).unwrap(), f64::INFINITY);
+        assert_eq!(cook(&n, &[-0.0, -1.0]).unwrap(), f64::NEG_INFINITY);
+        assert_eq!(cook(&n, &[0.5, f64::INFINITY]).unwrap(), 0.0);
+        assert_eq!(cook(&n, &[2.0, f64::INFINITY]).unwrap(), f64::INFINITY);
+    }
+
+    #[test]
+    fn sin_cos_values() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        assert!(same(cook(&Sin::new(), &[0.0]).unwrap(), 0.0));
+        assert!(same(cook(&Sin::new(), &[-0.0]).unwrap(), -0.0));
+        assert_eq!(cook(&Sin::new(), &[FRAC_PI_2]).unwrap(), 1.0);
+        assert!(cook(&Sin::new(), &[PI]).unwrap().abs() < 1e-15);
+        assert_eq!(cook(&Cos::new(), &[0.0]).unwrap(), 1.0);
+        assert_eq!(cook(&Cos::new(), &[PI]).unwrap(), -1.0);
+        assert!(cook(&Cos::new(), &[FRAC_PI_2]).unwrap().abs() < 1e-15);
+        for x in [f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+            assert!(cook(&Sin::new(), &[x]).unwrap().is_nan());
+            assert!(cook(&Cos::new(), &[x]).unwrap().is_nan());
+        }
+    }
+
+    #[test]
+    fn wrap_into_half_open_range() {
+        let n = Wrap::new();
+        assert_eq!(cook(&n, &[0.25, 0.0, 1.0]).unwrap(), 0.25);
+        assert_eq!(cook(&n, &[1.25, 0.0, 1.0]).unwrap(), 0.25);
+        assert_eq!(cook(&n, &[-0.25, 0.0, 1.0]).unwrap(), 0.75);
+        assert_eq!(cook(&n, &[1.0, 0.0, 1.0]).unwrap(), 0.0);
+        assert_eq!(cook(&n, &[-1.0, 0.0, 1.0]).unwrap(), 0.0);
+        assert!(same(cook(&n, &[-0.0, 0.0, 1.0]).unwrap(), 0.0));
+        assert_eq!(cook(&n, &[370.0, 0.0, 360.0]).unwrap(), 10.0);
+        assert_eq!(cook(&n, &[-190.0, -180.0, 180.0]).unwrap(), 170.0);
+        assert_eq!(cook(&n, &[180.0, -180.0, 180.0]).unwrap(), -180.0);
+        // Reversed bounds are swapped.
+        assert_eq!(cook(&n, &[1.25, 1.0, 0.0]).unwrap(), 0.25);
+    }
+
+    #[test]
+    fn wrap_never_returns_max() {
+        let n = Wrap::new();
+        for x in [-1e-300, -f64::MIN_POSITIVE, -1e-17, -5e-324] {
+            let out = cook(&n, &[x, 0.0, 1.0]).unwrap();
+            assert!((0.0..1.0).contains(&out), "{x} -> {out}");
+        }
+        let out = cook(&n, &[-1e-17, 10.0, 11.0]).unwrap();
+        assert!((10.0..11.0).contains(&out), "{out}");
+    }
+
+    #[test]
+    fn wrap_errors_and_specials() {
+        let n = Wrap::new();
+        let err = cook(&n, &[0.5, 2.0, 2.0]).unwrap_err();
+        assert!(matches!(err, NodeError::InvalidInput { port: "max", .. }));
+        let err = cook(&n, &[0.5, f64::NAN, 1.0]).unwrap_err();
+        assert!(matches!(err, NodeError::InvalidInput { port: "min", .. }));
+        let err = cook(&n, &[0.5, 0.0, f64::INFINITY]).unwrap_err();
+        assert!(matches!(err, NodeError::InvalidInput { port: "max", .. }));
+        let err = cook(&n, &[0.5, -f64::MAX, f64::MAX]).unwrap_err();
+        assert!(matches!(err, NodeError::InvalidInput { port: "max", .. }));
+        assert!(cook(&n, &[f64::NAN, 0.0, 1.0]).unwrap().is_nan());
+        assert!(cook(&n, &[f64::INFINITY, 0.0, 1.0]).unwrap().is_nan());
+    }
+
+    #[test]
+    fn round_halves_away_from_zero() {
+        let n = Round::new();
+        assert_eq!(cook(&n, &[2.4, 1.0]).unwrap(), 2.0);
+        assert_eq!(cook(&n, &[2.5, 1.0]).unwrap(), 3.0);
+        assert_eq!(cook(&n, &[-2.5, 1.0]).unwrap(), -3.0);
+        assert_eq!(cook(&n, &[0.5, 1.0]).unwrap(), 1.0);
+        assert!(same(cook(&n, &[-0.4, 1.0]).unwrap(), -0.0));
+        assert_eq!(cook(&n, &[7.0, 5.0]).unwrap(), 5.0);
+        assert_eq!(cook(&n, &[7.5, 5.0]).unwrap(), 10.0);
+        assert_eq!(cook(&n, &[7.5, -5.0]).unwrap(), 10.0);
+        assert_eq!(cook(&n, &[10.0, 3.0]).unwrap(), 9.0);
+    }
+
+    #[test]
+    fn round_to_decimal_steps_is_clean() {
+        let n = Round::new();
+        assert_eq!(cook(&n, &[0.3, 0.1]).unwrap(), 0.3);
+        assert_eq!(cook(&n, &[0.25, 0.1]).unwrap(), 0.3);
+        assert_eq!(cook(&n, &[-0.25, 0.1]).unwrap(), -0.3);
+        assert_eq!(cook(&n, &[1.234_567, 0.01]).unwrap(), 1.23);
+        assert_eq!(cook(&n, &[0.374, 0.25]).unwrap(), 0.25);
+        assert_eq!(cook(&n, &[0.375, 0.25]).unwrap(), 0.5);
+    }
+
+    #[test]
+    fn round_errors_and_specials() {
+        let n = Round::new();
+        for step in [0.0, -0.0, f64::NAN, f64::INFINITY] {
+            let err = cook(&n, &[1.0, step]).unwrap_err();
+            assert!(matches!(err, NodeError::InvalidInput { port: "step", .. }));
+        }
+        assert!(cook(&n, &[f64::NAN, 1.0]).unwrap().is_nan());
+        assert_eq!(cook(&n, &[f64::INFINITY, 0.1]).unwrap(), f64::INFINITY);
+        // Huge quotients pass through instead of overflowing to inf.
+        assert_eq!(cook(&n, &[1e308, 0.01]).unwrap(), 1e308);
+        assert_eq!(cook(&n, &[1e20, 1.0]).unwrap(), 1e20);
+        // Subnormal step: 1/step overflows, x/step is huge, x is kept.
+        assert_eq!(cook(&n, &[1.5, 5e-324]).unwrap(), 1.5);
     }
 
     #[test]
