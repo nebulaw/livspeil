@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: LGPL-3.0-or-later
+
+[package]
+name = "livspeil-node-api"
+description = "Public node and Charm API surface (NodeSpec, port types)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "LGPL-3.0-or-later"
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

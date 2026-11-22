@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "livspeil-graph"
+description = "Networks, nodes, links, type checking and the cook scheduler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+livspeil-node-api = { path = "../livspeil-node-api" }
+
+[lints]
+workspace = true
