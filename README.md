@@ -10,7 +10,7 @@ Status: **Phase 0 (kernel)**. This repository currently holds the headless, cros
 |---|---|
 | `crates/livspeil-node-api` | Public node/Charm API surface (MPL-2.0) |
 | `crates/livspeil-graph` | Networks, type checking, cook scheduler (placeholder, M0.2) |
-| `crates/livspeil-params` | Parameters, animation, expressions (placeholder, M0.5) |
+| `crates/livspeil-params` | Parameters, animation, expressions (expression language done; parameters next, M0.5) |
 | `crates/livspeil-doc` | Document model and KDL (placeholder, M0.4) |
 | `crates/livspeil-cmd` | Command bus, undo/redo, journal (placeholder, M0.3) |
 | `crates/livspeil-nodes-core` | First built-in nodes (placeholder, M0.6) |
