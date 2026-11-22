@@ -1,0 +1,21 @@
+{"op":"changed","kind":"room-name","old":"\"Diff Before\"","new":"\"Diff After\""}
+{"op":"changed","kind":"min-tier","old":"\"T0\"","new":"\"T1\""}
+{"op":"changed","kind":"node-name","node":"lamp","id":"01920000-0000-7000-8000-000000000002","old":"\"light\"","new":"\"lamp\""}
+{"op":"changed","kind":"input","node":"lamp","id":"01920000-0000-7000-8000-000000000002","port":"a","old":"0.2","new":"0.3"}
+{"op":"removed","kind":"input","node":"lamp","id":"01920000-0000-7000-8000-000000000002","port":"b","old":"0.5"}
+{"op":"changed","kind":"expr","node":"lamp","id":"01920000-0000-7000-8000-000000000002","port":"b","old":"\"ch(\\\"sun/offset\\\") * 0.5\"","new":"\"ch(\\\"sun/offset\\\") * 0.25\""}
+{"op":"changed","kind":"anim-setting","node":"lamp","id":"01920000-0000-7000-8000-000000000002","port":"t","setting":"pre","old":"\"loop\"","new":"\"ping-pong\""}
+{"op":"changed","kind":"anim-setting","node":"lamp","id":"01920000-0000-7000-8000-000000000002","port":"t","setting":"offset","old":"0.0","new":"0.5"}
+{"op":"changed","kind":"anim-key","node":"lamp","id":"01920000-0000-7000-8000-000000000002","port":"t","time":"1.0","old":"0.8 interp=\"bezier\" tangent=\"flat\"","new":"0.9 interp=\"step\""}
+{"op":"removed","kind":"anim-key","node":"lamp","id":"01920000-0000-7000-8000-000000000002","port":"t","time":"2.0","old":"0.4"}
+{"op":"added","kind":"anim-key","node":"lamp","id":"01920000-0000-7000-8000-000000000002","port":"t","time":"3.0","new":"0.1"}
+{"op":"removed","kind":"node","node":"old_add","id":"01920000-0000-7000-8000-000000000003","old":"\"core.math.add@1\""}
+{"op":"changed","kind":"node-type","node":"scale","id":"01920000-0000-7000-8000-000000000004","old":"\"core.math.add@1\"","new":"\"core.math.mul@1\""}
+{"op":"added","kind":"node","node":"glow","id":"01920000-0000-7000-8000-000000000005","new":"\"core.math.add@1\""}
+{"op":"added","kind":"input","node":"glow","id":"01920000-0000-7000-8000-000000000005","port":"a","new":"(vec2)\"1.0 2.0\""}
+{"op":"added","kind":"expr","node":"glow","id":"01920000-0000-7000-8000-000000000005","port":"b","new":"\"ch(\\\"lamp/a\\\")\""}
+{"op":"added","kind":"anim","node":"glow","id":"01920000-0000-7000-8000-000000000005","port":"b","new":"2 keys 0.0..2.0"}
+{"op":"added","kind":"link","from":"lamp.out","to":"glow.a"}
+{"op":"removed","kind":"link","from":"light.out","to":"old_add.b"}
+{"op":"changed","kind":"position","node":"lamp","id":"01920000-0000-7000-8000-000000000002","old":"200.0 0.0","new":"240.0 0.0"}
+{"op":"added","kind":"position","node":"glow","id":"01920000-0000-7000-8000-000000000005","new":"400.0 0.0"}

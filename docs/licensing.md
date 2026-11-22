@@ -28,6 +28,9 @@ A Room package (`*.room`) can ship its own Charms, assets and scripts, and autho
 - Every asset in a Room declares source and license in `assets.lock`.
 - The official store accepts free licenses only (OSI/FSF-approved for code, CC BY / CC BY-SA / CC0 and similar for content). Recommended defaults: CC BY-SA 4.0 for Rooms, MIT or MPL-2.0 for Charms.
 
+## `assets.lock`
+Each Room package records its assets in `assets.lock` (KDL, next to `room.kdl`): per file the path (`assets/<sha256>.<ext>`), SHA-256, size, source (`"original"` or a URL), SPDX license expression and author/attribution. `livspeil assets add` writes entries and `livspeil validate` / `livspeil assets check` verify them: files must match their hashes and sizes, every file in `assets/` must be listed, and the license must be a well-formed SPDX expression. Licenses outside the allow-list (CC0-1.0, CC-BY-4.0, CC-BY-SA-4.0, OFL-1.1, MIT, Apache-2.0, MPL-2.0, GPL-3.0-or-later, LGPL-3.0-or-later) are warnings, since the official store will not accept them; a missing author for a license that requires attribution is a warning too. In this repository asset files are additionally annotated in `REUSE.toml`.
+
 ## Contributions
 - CLA with an open-source lock (required once the reviewed text exists; the CI check is off until then).
 - Details in [CONTRIBUTING.md](../CONTRIBUTING.md).

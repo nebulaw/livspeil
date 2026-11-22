@@ -19,6 +19,9 @@ kdl = "6.5"
 livspeil-graph = { path = "../livspeil-graph" }
 livspeil-node-api = { path = "../livspeil-node-api" }
 livspeil-params = { path = "../livspeil-params" }
+# SHA-256 of room assets (MIT OR Apache-2.0). 0.10 (MSRV 1.72) fits our
+# MSRV (1.85); default features (std) are not needed.
+sha2 = { version = "0.10", default-features = false }
 uuid = "1"
 
 [dev-dependencies]

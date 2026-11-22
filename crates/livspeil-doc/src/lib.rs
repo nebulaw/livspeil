@@ -4,8 +4,12 @@
 //! Document model, KDL serialization and migrations (milestone M0.4; see
 //! `specs/livspeil-kernel-spec-v0.md`, section 10).
 //!
-//! A document is a directory package `Name.room/` holding `room.kdl` (later
-//! also `assets/`, `assets.lock` and `thumbnails/`). `room.kdl` is KDL v2:
+//! A document is a directory package `Name.room/` holding `room.kdl`,
+//! optionally `assets/` with `assets.lock` (see the [`assets`] module:
+//! content-addressed files with recorded hash, size, source and license;
+//! [`check_assets`] verifies them) and later `thumbnails/`. [`diff()`]
+//! compares two documents semantically (nodes matched by id; see the
+//! [`diff`](mod@diff) module). `room.kdl` is KDL v2:
 //!
 //! ```kdl
 //! room "My Room" format=1 min-tier="T1" {
@@ -115,7 +119,9 @@
 //! registry (node types, ports, value types, links, expressions).
 
 mod anim;
+pub mod assets;
 mod convert;
+pub mod diff;
 mod error;
 mod format;
 pub mod migrate;
@@ -124,11 +130,16 @@ mod package;
 mod parse;
 mod value;
 
+pub use assets::{AssetEntry, AssetIssue, AssetsError, AssetsLock, IssueKind, Severity};
+pub use diff::{Change, DocDiff, Op, Subject, diff};
 pub use error::{DocError, Location};
 pub use format::format;
 pub use model::{
     CURRENT_FORMAT, DocAnim, DocExpr, DocLink, DocNode, Document, Meta, Network, ParseTierError,
     ROOT_NETWORK, SourceLoc, Tier,
 };
-pub use package::{ROOM_FILE, canonicalize, room_file, split_prolog};
+pub use package::{
+    AddedAsset, ROOM_FILE, add_asset, canonicalize, check_assets, package_dir, read_assets_lock,
+    room_file, scan_assets, sha256_file, split_prolog, write_assets_lock,
+};
 pub use parse::parse;
