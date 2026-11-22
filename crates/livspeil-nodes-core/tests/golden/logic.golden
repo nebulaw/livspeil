@@ -1,0 +1,49 @@
+core.logic.select(cond=false, a=1.0, b=0.0) => out=0.0
+core.logic.select(cond=true, a=1.0, b=0.0) => out=1.0
+core.logic.select(cond=true, a=2.0, b=-3.0) => out=2.0
+core.logic.select(cond=false, a=2.0, b=-3.0) => out=-3.0
+core.logic.select(cond=true, a=1.0, b=NaN) => out=1.0
+core.logic.compare(a=0.0, b=0.0, op="<") => out=false
+core.logic.compare(a=1.0, b=2.0, op="<") => out=true
+core.logic.compare(a=2.0, b=2.0, op="<") => out=false
+core.logic.compare(a=3.0, b=2.0, op="<") => out=false
+core.logic.compare(a=NaN, b=2.0, op="<") => out=false
+core.logic.compare(a=1.0, b=2.0, op="<=") => out=true
+core.logic.compare(a=2.0, b=2.0, op="<=") => out=true
+core.logic.compare(a=3.0, b=2.0, op="<=") => out=false
+core.logic.compare(a=NaN, b=2.0, op="<=") => out=false
+core.logic.compare(a=1.0, b=2.0, op="==") => out=false
+core.logic.compare(a=2.0, b=2.0, op="==") => out=true
+core.logic.compare(a=3.0, b=2.0, op="==") => out=false
+core.logic.compare(a=NaN, b=2.0, op="==") => out=false
+core.logic.compare(a=1.0, b=2.0, op="!=") => out=true
+core.logic.compare(a=2.0, b=2.0, op="!=") => out=false
+core.logic.compare(a=3.0, b=2.0, op="!=") => out=true
+core.logic.compare(a=NaN, b=2.0, op="!=") => out=true
+core.logic.compare(a=1.0, b=2.0, op=">=") => out=false
+core.logic.compare(a=2.0, b=2.0, op=">=") => out=true
+core.logic.compare(a=3.0, b=2.0, op=">=") => out=true
+core.logic.compare(a=NaN, b=2.0, op=">=") => out=false
+core.logic.compare(a=1.0, b=2.0, op=">") => out=false
+core.logic.compare(a=2.0, b=2.0, op=">") => out=false
+core.logic.compare(a=3.0, b=2.0, op=">") => out=true
+core.logic.compare(a=NaN, b=2.0, op=">") => out=false
+core.logic.compare(a=-0.0, b=0.0, op="==") => out=true
+core.logic.compare(a=inf, b=inf, op="==") => out=true
+core.logic.compare(a=0.30000000000000004, b=0.3, op="==") => out=false
+core.logic.compare(a=0.0, b=0.0, op="") => error: invalid input 'op': unknown operator ""; expected one of < <= == != >= >
+core.logic.compare(a=0.0, b=0.0, op="=>") => error: invalid input 'op': unknown operator "=>"; expected one of < <= == != >= >
+core.logic.compare(a=0.0, b=0.0, op=" <") => error: invalid input 'op': unknown operator " <"; expected one of < <= == != >= >
+core.logic.and(a=true, b=true) => out=true
+core.logic.or(a=false, b=false) => out=false
+core.logic.not(a=false) => out=true
+core.logic.and(a=false, b=false) => out=false
+core.logic.and(a=false, b=true) => out=false
+core.logic.and(a=true, b=false) => out=false
+core.logic.and(a=true, b=true) => out=true
+core.logic.or(a=false, b=false) => out=false
+core.logic.or(a=false, b=true) => out=true
+core.logic.or(a=true, b=false) => out=true
+core.logic.or(a=true, b=true) => out=true
+core.logic.not(a=false) => out=true
+core.logic.not(a=true) => out=false

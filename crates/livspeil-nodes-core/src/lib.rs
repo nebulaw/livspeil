@@ -11,6 +11,12 @@
 
 use std::sync::Arc;
 
+mod logic;
+mod math;
+
+pub use logic::{And, Compare, Not, Or, Select};
+pub use math::{Clamp, Div, Max, Min, Mul, Remap, Smoothstep, Sub};
+
 use livspeil_node_api::{
     CookContext, NodeError, NodeImpl, NodeRegistry, NodeSpec, PortType, RegistryError, Value,
 };
@@ -23,6 +29,19 @@ pub fn register_all(registry: &mut NodeRegistry) -> Result<(), RegistryError> {
     registry.register(Arc::new(Add::new()))?;
     registry.register(Arc::new(Lerp::new()))?;
     registry.register(Arc::new(Clock::new()))?;
+    registry.register(Arc::new(Sub::new()))?;
+    registry.register(Arc::new(Mul::new()))?;
+    registry.register(Arc::new(Div::new()))?;
+    registry.register(Arc::new(Clamp::new()))?;
+    registry.register(Arc::new(Remap::new()))?;
+    registry.register(Arc::new(Min::new()))?;
+    registry.register(Arc::new(Max::new()))?;
+    registry.register(Arc::new(Smoothstep::new()))?;
+    registry.register(Arc::new(Select::new()))?;
+    registry.register(Arc::new(Compare::new()))?;
+    registry.register(Arc::new(And::new()))?;
+    registry.register(Arc::new(Or::new()))?;
+    registry.register(Arc::new(Not::new()))?;
     Ok(())
 }
 
@@ -175,12 +194,28 @@ mod tests {
     }
 
     #[test]
-    fn registry_contains_the_three_nodes() {
+    fn registry_contains_the_core_nodes() {
         let reg = core_registry();
-        assert_eq!(
-            reg.ids().collect::<Vec<_>>(),
-            ["core.math.add@1", "core.math.lerp@1", "core.time.clock@1"]
-        );
+        for id in [
+            "core.math.add@1",
+            "core.math.lerp@1",
+            "core.time.clock@1",
+            "core.math.sub@1",
+            "core.math.mul@1",
+            "core.math.div@1",
+            "core.math.clamp@1",
+            "core.math.remap@1",
+            "core.math.min@1",
+            "core.math.max@1",
+            "core.math.smoothstep@1",
+            "core.logic.select@1",
+            "core.logic.compare@1",
+            "core.logic.and@1",
+            "core.logic.or@1",
+            "core.logic.not@1",
+        ] {
+            assert!(reg.get(id).is_some(), "{id} is not registered");
+        }
         assert!(register_all(&mut core_registry()).is_err());
     }
 
