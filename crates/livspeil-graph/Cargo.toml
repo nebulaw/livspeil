@@ -12,8 +12,13 @@ repository.workspace = true
 authors.workspace = true
 publish.workspace = true
 
+[features]
+# Serde derives for ids, links and snapshots (journals, documents).
+serde = ["dep:serde", "uuid/serde", "livspeil-node-api/serde"]
+
 [dependencies]
 livspeil-node-api = { path = "../livspeil-node-api" }
+serde = { version = "1", features = ["derive"], optional = true }
 uuid = { version = "1", features = ["v7"] }
 
 [dev-dependencies]

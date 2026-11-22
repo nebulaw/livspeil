@@ -11,6 +11,11 @@
 //! Milestone M0.2 scope: concrete port types, [`Value`], [`NodeSpec`],
 //! [`NodeImpl`] and [`NodeRegistry`]. Polymorphic constraint classes
 //! (`Numeric`, `VectorLike`) and `*.node.toml` generation arrive later.
+//!
+//! Cargo feature `serde` (off by default) derives `Serialize` and
+//! `Deserialize` for [`PortType`] and [`Value`]. It adds derives only, so
+//! node authors who do not need it pay nothing. Values use serde's default
+//! externally tagged form, for example `{"Float":1.5}`.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -18,6 +23,7 @@ use std::sync::Arc;
 
 /// Value types that can flow through node ports (kernel spec, section 4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum PortType {
     Float,
@@ -111,6 +117,7 @@ impl fmt::Display for PortType {
 /// introduce them. Equality is IEEE equality, so a `NaN` never equals itself
 /// (the scheduler then simply treats it as "changed", which is safe).
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum Value {
     Float(f64),
