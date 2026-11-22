@@ -14,6 +14,10 @@
 //! | `Vec4`    | `(vec4)"1.0 2.0 3.0 4.0"`             |
 //! | `Color`   | `(color)"oklch(0.8 0.12 60.0 1.0)"` (L C H alpha) |
 //!
+//! `Table` and `Curve` values are not single KDL values; they are written
+//! as `table { ... }` and `curve { ... }` blocks inside the `input` (see
+//! the crate documentation and `format/blocks.rs`, `parse/blocks.rs`).
+//!
 //! Floats are written in Rust's shortest round-trip form, so parsing gives
 //! back the bit-identical `f64`. `NaN` and infinities are rejected in both
 //! directions. Components inside vector and color strings are separated by
@@ -82,6 +86,8 @@ pub(crate) fn is_finite(value: &Value) -> bool {
         Value::Vec2(v) => v.iter().all(|c| c.is_finite()),
         Value::Vec3(v) => v.iter().all(|c| c.is_finite()),
         Value::Vec4(v) | Value::Color(v) => v.iter().all(|c| c.is_finite()),
+        Value::Table(t) => t.columns().iter().all(|c| c.values().iter().all(is_finite)),
+        // Curves are validated, so their numbers are finite.
         _ => true,
     }
 }
