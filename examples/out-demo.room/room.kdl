@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: 2026 Livspeil contributors
+// SPDX-License-Identifier: CC0-1.0
+
+// out() in expressions (M0.11, decision D48): an expression can read
+// another node's computed output, so a formula can replace a chain of
+// math nodes.
+//
+// Both halves compute a lamp intensity from the hour of the day: 1.0 at
+// night, fading to 0.3 in full daylight.
+//
+// * As a node chain: sunrise and sunset (smoothsteps), daylight (their
+//   difference) and level (a clamped remap), linked to chain_level.
+// * As one expression on expr_level that reads time_of_day's "hour"
+//   output with out("time_of_day/hour").
+//
+// expr_level depends on time_of_day exactly as if they were linked, so
+// it re-cooks only when the hour changes. The root core.output nodes are
+// what `livspeil cook` prints; the two columns agree.
+//
+// clock -> day_seconds -> time_of_day.hour -> (chain | out()) -> *_level
+
+room "out() Demo" format=1 min-tier="T0" {
+  network "/" {
+    node "clock" type="core.time.clock@1" id="0193b000-0000-7000-8000-000000000001"
+    node "day_seconds" type="core.math.mul@1" id="0193b000-0000-7000-8000-000000000002" {
+      input "b" 8640.0
+    }
+    node "time_of_day" type="core.time.timeofday@1" id="0193b000-0000-7000-8000-000000000003" {
+      input "offset" 6.0
+    }
+    node "sunrise" type="core.math.smoothstep@1" id="0193b000-0000-7000-8000-000000000010" {
+      input "edge0" 5.0
+      input "edge1" 8.0
+    }
+    node "sunset" type="core.math.smoothstep@1" id="0193b000-0000-7000-8000-000000000011" {
+      input "edge0" 17.0
+      input "edge1" 20.0
+    }
+    node "daylight" type="core.math.sub@1" id="0193b000-0000-7000-8000-000000000012"
+    node "level" type="core.math.remap@1" id="0193b000-0000-7000-8000-000000000013" {
+      input "clamp" #true
+      input "out_max" 0.3
+      input "out_min" 1.0
+    }
+    node "chain_level" type="core.output@1" id="0193b000-0000-7000-8000-000000000020" port-type="Float"
+    node "expr_level" type="core.output@1" id="0193b000-0000-7000-8000-000000000021" port-type="Float" {
+      input "value" expr="lerp(1.0, 0.3, clamp(smoothstep(5, 8, out(\"time_of_day/hour\")) - smoothstep(17, 20, out(\"time_of_day/hour\")), 0, 1))"
+    }
+    link from="clock.time" to="day_seconds.a"
+    link from="day_seconds.out" to="time_of_day.seconds"
+    link from="daylight.out" to="level.x"
+    link from="level.out" to="chain_level.value"
+    link from="sunrise.out" to="daylight.a"
+    link from="sunset.out" to="daylight.b"
+    link from="time_of_day.hour" to="sunrise.x"
+    link from="time_of_day.hour" to="sunset.x"
+  }
+}

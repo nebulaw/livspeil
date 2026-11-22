@@ -527,6 +527,9 @@ fn nested_graphs_cached_cooks_equal_fresh_cooks() {
         "ch(\"{p}\") * 0.5",
         "ch(\"{p}\") + ch(\"{q}\")",
         "3",
+        // out() (M0.11): outputs across networks, mixed with ch().
+        "out(\"{o}\") * 0.5",
+        "out(\"{o}\") + ch(\"{q}\")",
     ];
     for seed in 1..=200u64 {
         let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
@@ -578,6 +581,16 @@ fn nested_graphs_cached_cooks_equal_fresh_cooks() {
                     .map(|p| format!("{p}/{first}"))
                     .unwrap_or_default()
             };
+            let out_path = |rng: &mut Rng, g: &Graph| {
+                let read = ids[rng.below(ids.len())];
+                let first = g
+                    .node_spec(read)
+                    .and_then(|s| s.outputs.first().map(|p| p.name))
+                    .unwrap_or("out");
+                g.path(read)
+                    .map(|p| format!("{p}/{first}"))
+                    .unwrap_or_default()
+            };
             let _ = match rng.below(12) {
                 0 | 1 => g.set_input(target, port, float(rng.below(50) as f64 / 10.0)),
                 2 | 3 => {
@@ -595,7 +608,8 @@ fn nested_graphs_cached_cooks_equal_fresh_cooks() {
                 5 | 6 => {
                     let source = exprs[rng.below(exprs.len())]
                         .replace("{p}", &path(&mut rng, &g))
-                        .replace("{q}", &path(&mut rng, &g));
+                        .replace("{q}", &path(&mut rng, &g))
+                        .replace("{o}", &out_path(&mut rng, &g));
                     g.set_expression(target, port, &source)
                 }
                 7 => g.clear_expression(target, port),

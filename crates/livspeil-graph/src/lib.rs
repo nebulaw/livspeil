@@ -22,8 +22,10 @@
 //!   link, expression, animation, static value, default. `ch("node/port")`
 //!   in an expression reads another node's resolved input and counts as a
 //!   dependency edge for cycles and caching; renaming a node rewrites the
-//!   paths that name it, and removing a node that is read is refused. See
-//!   [`Graph::set_expression`] for the details.
+//!   paths that name it, and removing a node that is read is refused.
+//!   `out("node/port")` (M0.11) reads another node's output the same way.
+//!   See [`Graph::set_expression`] for the details and
+//!   [`Graph::expression_refs`] for listing the references.
 //!
 //! - System bindings (M0.8): [`Cooker::set_system`] installs a read-only
 //!   host (`livspeil_node_api::SystemHost`) for nodes that read the system,
@@ -109,5 +111,7 @@ mod sources;
 
 pub use cook::{CookError, CookStats, Cooker};
 pub use graph::{Endpoint, Graph, GraphError, Link, NodeId, PortDirection};
+pub use livspeil_params::expr::RefKind;
 pub use network::{CharmMeta, INPUT_TYPE, INTERFACE_PORT, OUTPUT_TYPE, SUBNET_TYPE};
 pub use snapshot::{GraphSnapshot, NamedLink, NodeSnapshot};
+pub use sources::ExprRef;
