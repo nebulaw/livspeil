@@ -15,7 +15,7 @@ Status: **Phase 0 (kernel)**. This repository currently holds the headless, cros
 | `crates/livspeil-cmd` | Command bus, undo/redo, journal (M0.3) |
 | `crates/livspeil-nodes-core` | Core nodes: math, logic, vector, time, sky, color, text (M0.6; events, fs, tables, ramps and subnets deferred) |
 | `crates/livspeil-testkit` | Golden-file harness |
-| `crates/livspeil-cli` | `livspeil` headless command line (`validate`, `fmt`, `cook`; `diff` reserved) |
+| `crates/livspeil-cli` | `livspeil` headless command line (`validate`, `fmt`, `cook`, `diff`, `assets`) |
 | `xtask` | Project automation (`cargo xtask check`) |
 | `specs/` | Design specs |
 | `docs/` | Licensing and contribution documentation |
@@ -53,6 +53,80 @@ Floats are printed with six decimals so the output (and its golden files in
 `--format jsonl` prints one JSON object per frame, `--stats` adds the
 scheduler's cooked/reused counts, and `livspeil --help` documents every
 option and exit code (0 ok, 1 load error, 2 usage error, 3 node error).
+
+### `diff`
+
+`livspeil diff <a> <b> [--format text|jsonl] [--meta]` compares two
+documents semantically: nodes are matched by id, so a rename is one change
+and does not show its links as changed. It reports header changes (name,
+min-tier), added and removed nodes, renames, type changes, input values,
+expressions, animations (settings and keys, matched by time), and links;
+editor positions (`meta`) only with `--meta`. Values are shown in their
+canonical `room.kdl` text. The order is deterministic: header, nodes by id
+(each node's ports by name), links, meta.
+
+```text
+~ room min-tier: "T0" -> "T1"
+~ node "lamp" renamed: "light" -> "lamp"
+~ node "lamp" input "a": 0.2 -> 0.3
+~ node "lamp" input "t" anim key 1.0: 0.8 interp="bezier" tangent="flat" -> 0.9 interp="step"
++ node "glow" type="core.math.add@1" id="01920000-0000-7000-8000-000000000005"
+- link "light.out" -> "old_add.b"
+```
+
+`--format jsonl` prints one object per change, keys in a fixed order and
+left out when they do not apply:
+
+```json
+{"op":"changed","kind":"input","node":"lamp","id":"01920000-0000-7000-8000-000000000002","port":"a","old":"0.2","new":"0.3"}
+```
+
+- `op`: `added`, `removed`, `changed`.
+- `kind`: `room-name`, `format`, `min-tier`, `node`, `node-name`,
+  `node-type`, `input`, `expr`, `anim` (a whole channel), `anim-setting`,
+  `anim-key`, `link`, `position`.
+- `node`, `id`: the node (its new name if renamed); `port`: the input;
+  `setting`: `pre`, `post` or `offset`; `time`: the key time; `from`, `to`:
+  link endpoints as `node.port`.
+- `old`, `new`: canonical KDL text of the value (`"0.2"`, `"\"text\""`,
+  `"(color)\"oklch(...)\""`), left out for additions and removals
+  respectively; for `node` the quoted type id, for `anim` a summary such as
+  `"3 keys 0.0..2.0 pre=\"loop\""`, for `position` `"x y"`.
+
+Exit codes follow `git diff --exit-code`: 0 no differences, 1 differences,
+2 usage error, 3 a document cannot be read or parsed. The diff is the
+library function `livspeil_doc::diff`, so Dream Mode shows the same changes.
+
+### `assets`
+
+A room package may ship files in `assets/`, named by content
+(`assets/<sha256>.<ext>`), each recorded in `assets.lock`:
+
+```kdl
+assets-lock format=1 {
+  asset "assets/3239c1cf...ac00.png" sha256="3239c1cf...ac00" size=78 license="CC0-1.0" source="original" author="Livspeil contributors"
+}
+```
+
+`sha256`, `size`, `license` (an SPDX expression) and `source` (`"original"`
+or a URL) are required, `author` is optional. The file is strict (unknown
+keys are errors, with line and column) and written canonically (entries
+sorted by path; leading `//` comment lines are kept).
+
+```sh
+livspeil assets add examples/sun-and-lamp.room picture.png --license CC-BY-4.0 \
+    --source https://example.org/picture.png --author "Jane Doe"
+livspeil assets check examples/sun-and-lamp.room [--strict]
+```
+
+`assets add` copies the file to `assets/<sha256>.<ext>` and updates
+`assets.lock`. `assets check` (and `validate`, whenever the package has an
+`assets.lock` or `assets/`) reports, as errors, hash or size mismatches,
+missing files, files in `assets/` that are not listed, and malformed license
+expressions (or `NONE`/`NOASSERTION`). Licenses outside the allow-list
+(CC0-1.0, CC-BY-4.0, CC-BY-SA-4.0, OFL-1.1, MIT, Apache-2.0, MPL-2.0,
+GPL-3.0-or-later, LGPL-3.0-or-later) and a missing `author` for licenses
+that require attribution are warnings; `--strict` fails on warnings too.
 
 ## Develop
 

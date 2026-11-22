@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: 2026 Livspeil contributors
+// SPDX-License-Identifier: CC0-1.0
+
+room "Diff After" format=1 min-tier="T1" {
+  network "/" {
+    node "sun" type="core.time.timeofday@1" id="01920000-0000-7000-8000-000000000001" {
+      input "offset" 6.0
+    }
+    node "lamp" type="core.math.lerp@1" id="01920000-0000-7000-8000-000000000002" {
+      input "a" 0.3
+      input "b" expr="ch(\"sun/offset\") * 0.25"
+      input "t" {
+        anim pre="ping-pong" offset=0.5 {
+          key 0.0 0.0
+          key 1.0 0.9 interp="step"
+          key 3.0 0.1
+        }
+      }
+    }
+    node "scale" type="core.math.mul@1" id="01920000-0000-7000-8000-000000000004" {
+      input "b" 2.0
+    }
+    node "glow" type="core.math.add@1" id="01920000-0000-7000-8000-000000000005" {
+      input "a" (vec2)"1.0 2.0"
+      input "b" expr="ch(\"lamp/a\")" {
+        anim {
+          key 0.0 1.0
+          key 2.0 3.0
+        }
+      }
+    }
+    link from="lamp.out" to="glow.a"
+    link from="sun.phase" to="scale.a"
+  }
+  meta {
+    node "lamp" x=240.0 y=0.0
+    node "sun" x=0.0 y=0.0
+    node "glow" x=400.0 y=0.0
+  }
+}

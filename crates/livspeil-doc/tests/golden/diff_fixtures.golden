@@ -1,0 +1,21 @@
+~ room name: "Diff Before" -> "Diff After"
+~ room min-tier: "T0" -> "T1"
+~ node "lamp" renamed: "light" -> "lamp"
+~ node "lamp" input "a": 0.2 -> 0.3
+- node "lamp" input "b": 0.5
+~ node "lamp" input "b" expr: "ch(\"sun/offset\") * 0.5" -> "ch(\"sun/offset\") * 0.25"
+~ node "lamp" input "t" anim pre: "loop" -> "ping-pong"
+~ node "lamp" input "t" anim offset: 0.0 -> 0.5
+~ node "lamp" input "t" anim key 1.0: 0.8 interp="bezier" tangent="flat" -> 0.9 interp="step"
+- node "lamp" input "t" anim key 2.0: 0.4
++ node "lamp" input "t" anim key 3.0: 0.1
+- node "old_add" type="core.math.add@1" id="01920000-0000-7000-8000-000000000003"
+~ node "scale" type: "core.math.add@1" -> "core.math.mul@1"
++ node "glow" type="core.math.add@1" id="01920000-0000-7000-8000-000000000005"
++ node "glow" input "a": (vec2)"1.0 2.0"
++ node "glow" input "b" expr: "ch(\"lamp/a\")"
++ node "glow" input "b" anim: 2 keys 0.0..2.0
++ link "lamp.out" -> "glow.a"
+- link "light.out" -> "old_add.b"
+~ meta node "lamp" position: 200.0 0.0 -> 240.0 0.0
++ meta node "glow" position: 400.0 0.0
