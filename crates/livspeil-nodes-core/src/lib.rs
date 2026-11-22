@@ -11,6 +11,17 @@
 
 use std::sync::Arc;
 
+mod color;
+mod sky;
+mod time;
+
+pub use color::{CHROMA_EPSILON, ColorMix, lab_to_lch, lch_to_lab, mix_oklch};
+pub use sky::{
+    AZIMUTH_EPSILON, AZIMUTH_SEAM_EPSILON, SunDirection, SunPosition, declination_degrees,
+    sun_position,
+};
+pub use time::{SECONDS_PER_DAY, TimeOfDay, time_of_day};
+
 use livspeil_node_api::{
     CookContext, NodeError, NodeImpl, NodeRegistry, NodeSpec, PortType, RegistryError, Value,
 };
@@ -23,6 +34,9 @@ pub fn register_all(registry: &mut NodeRegistry) -> Result<(), RegistryError> {
     registry.register(Arc::new(Add::new()))?;
     registry.register(Arc::new(Lerp::new()))?;
     registry.register(Arc::new(Clock::new()))?;
+    registry.register(Arc::new(TimeOfDay::new()))?;
+    registry.register(Arc::new(SunDirection::new()))?;
+    registry.register(Arc::new(ColorMix::new()))?;
     Ok(())
 }
 
@@ -175,12 +189,18 @@ mod tests {
     }
 
     #[test]
-    fn registry_contains_the_three_nodes() {
+    fn registry_contains_the_core_nodes() {
         let reg = core_registry();
-        assert_eq!(
-            reg.ids().collect::<Vec<_>>(),
-            ["core.math.add@1", "core.math.lerp@1", "core.time.clock@1"]
-        );
+        for id in [
+            "core.math.add@1",
+            "core.math.lerp@1",
+            "core.time.clock@1",
+            "core.time.timeofday@1",
+            "core.sky.sun_direction@1",
+            "core.color.mix@1",
+        ] {
+            assert!(reg.get(id).is_some(), "{id} is not registered");
+        }
         assert!(register_all(&mut core_registry()).is_err());
     }
 

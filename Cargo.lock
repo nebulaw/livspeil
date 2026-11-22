@@ -97,6 +97,7 @@ name = "livspeil-nodes-core"
 version = "0.0.0"
 dependencies = [
  "livspeil-node-api",
+ "livspeil-testkit",
 ]
 
 [[package]]
