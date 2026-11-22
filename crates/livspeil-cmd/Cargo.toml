@@ -15,6 +15,7 @@ publish.workspace = true
 [dependencies]
 livspeil-graph = { path = "../livspeil-graph", features = ["serde"] }
 livspeil-node-api = { path = "../livspeil-node-api", features = ["serde"] }
+livspeil-params = { path = "../livspeil-params", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 # float_roundtrip: parse floats back bit-exactly so a replayed journal
 # reproduces the original values.
