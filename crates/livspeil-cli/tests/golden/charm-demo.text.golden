@@ -1,0 +1,48 @@
+frame=0 time=0.000000 desk_color.value=oklch(0.628704 0.065007 51.483430 1.000000)
+frame=0 time=0.000000 desk_intensity.value=0.818519
+frame=0 time=0.000000 porch_color.value=oklch(0.576852 0.098789 23.376609 1.000000)
+frame=0 time=0.000000 porch_intensity.value=0.779630
+frame=50 time=0.833333 desk_color.value=oklch(0.950000 0.030000 95.000000 1.000000)
+frame=50 time=0.833333 desk_intensity.value=0.300000
+frame=50 time=0.833333 porch_color.value=oklch(0.950000 0.030000 95.000000 1.000000)
+frame=50 time=0.833333 porch_intensity.value=0.150000
+frame=100 time=1.666667 desk_color.value=oklch(0.950000 0.030000 95.000000 1.000000)
+frame=100 time=1.666667 desk_intensity.value=0.300000
+frame=100 time=1.666667 porch_color.value=oklch(0.950000 0.030000 95.000000 1.000000)
+frame=100 time=1.666667 porch_intensity.value=0.150000
+frame=150 time=2.500000 desk_color.value=oklch(0.950000 0.030000 95.000000 1.000000)
+frame=150 time=2.500000 desk_intensity.value=0.300000
+frame=150 time=2.500000 porch_color.value=oklch(0.950000 0.030000 95.000000 1.000000)
+frame=150 time=2.500000 porch_intensity.value=0.150000
+frame=200 time=3.333333 desk_color.value=oklch(0.950000 0.030000 95.000000 1.000000)
+frame=200 time=3.333333 desk_intensity.value=0.300000
+frame=200 time=3.333333 porch_color.value=oklch(0.950000 0.030000 95.000000 1.000000)
+frame=200 time=3.333333 porch_intensity.value=0.150000
+frame=250 time=4.166667 desk_color.value=oklch(0.950000 0.030000 95.000000 1.000000)
+frame=250 time=4.166667 desk_intensity.value=0.300000
+frame=250 time=4.166667 porch_color.value=oklch(0.950000 0.030000 95.000000 1.000000)
+frame=250 time=4.166667 porch_intensity.value=0.150000
+frame=300 time=5.000000 desk_color.value=oklch(0.876543 0.075088 67.477719 1.000000)
+frame=300 time=5.000000 desk_intensity.value=0.481481
+frame=300 time=5.000000 porch_color.value=oklch(0.841975 0.087549 44.702329 1.000000)
+frame=300 time=5.000000 porch_intensity.value=0.370370
+frame=350 time=5.833333 desk_color.value=oklch(0.350000 0.080000 260.000000 1.000000)
+frame=350 time=5.833333 desk_intensity.value=1.000000
+frame=350 time=5.833333 porch_color.value=oklch(0.350000 0.080000 260.000000 1.000000)
+frame=350 time=5.833333 porch_intensity.value=1.000000
+frame=400 time=6.666667 desk_color.value=oklch(0.350000 0.080000 260.000000 1.000000)
+frame=400 time=6.666667 desk_intensity.value=1.000000
+frame=400 time=6.666667 porch_color.value=oklch(0.350000 0.080000 260.000000 1.000000)
+frame=400 time=6.666667 porch_intensity.value=1.000000
+frame=450 time=7.500000 desk_color.value=oklch(0.350000 0.080000 260.000000 1.000000)
+frame=450 time=7.500000 desk_intensity.value=1.000000
+frame=450 time=7.500000 porch_color.value=oklch(0.350000 0.080000 260.000000 1.000000)
+frame=450 time=7.500000 porch_intensity.value=1.000000
+frame=500 time=8.333333 desk_color.value=oklch(0.350000 0.080000 260.000000 1.000000)
+frame=500 time=8.333333 desk_intensity.value=1.000000
+frame=500 time=8.333333 porch_color.value=oklch(0.350000 0.080000 260.000000 1.000000)
+frame=500 time=8.333333 porch_intensity.value=1.000000
+frame=550 time=9.166667 desk_color.value=oklch(0.350000 0.080000 260.000000 1.000000)
+frame=550 time=9.166667 desk_intensity.value=1.000000
+frame=550 time=9.166667 porch_color.value=oklch(0.350000 0.080000 260.000000 1.000000)
+frame=550 time=9.166667 porch_intensity.value=1.000000

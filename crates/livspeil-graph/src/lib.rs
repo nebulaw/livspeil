@@ -41,14 +41,73 @@
 //! Edits made through the command bus (`livspeil-cmd`, M0.3) get undo,
 //! change events and journaling; the methods here are the primitive edits.
 //!
-//! Not yet implemented (later milestones): subnets and Charms, the
-//! document format (M0.4), event ports, and parallel evaluation.
+//! # Networks, subnets and Charms (M0.7)
+//!
+//! Networks nest, but storage stays **flat**: one [`Graph`] holds every
+//! node of every network in the same slab, and every node records its
+//! *parent*, the subnet whose network holds it (`None` for the root
+//! network `/`). A **subnet** is a node of type [`SUBNET_TYPE`]
+//! (`core.subnet@1`, no ports of its own) that owns a child network.
+//! Names are unique per network; [`Graph::path`] and [`Graph::find_path`]
+//! address nodes as `/lamp/rig/bulb`. Names of subnets and of nodes inside
+//! them are single path segments (no `/`, not `.` or `..`); root nodes keep
+//! the pre-M0.7 freedom.
+//!
+//! A subnet's **interface** is made of boundary nodes inside it, one per
+//! port, named after the port: [`INPUT_TYPE`] (`core.subnet.input@1`) for
+//! each input and [`OUTPUT_TYPE`] (`core.output@1`) for each output. Both
+//! are pass-through nodes with one input and one output called
+//! [`INTERFACE_PORT`] (`value`), and both are *port-polymorphic*:
+//! [`Graph::add_node_in`] retypes their ports to the declared type, which
+//! [`Graph::port_type`] reports. Interface inputs exist only inside
+//! subnets; `core.output` nodes in the root network mark sinks.
+//!
+//! **Links** connect nodes of the same network, or cross exactly one
+//! subnet boundary through the interface (see [`Graph::link`]):
+//!
+//! * the input `value` of an interface input is fed from the network
+//!   *around* its subnet (never from inside); its output is read inside;
+//! * the output `value` of an interface output can be read inside its
+//!   subnet and in the network around it.
+//!
+//! So a link from `/hour.out` into `/lamp/hour.value` (where `/lamp/hour`
+//! is an interface input) and one from `/lamp/color.value` (an interface
+//! output) to `/mix.a` are valid; documents write them as `lamp.hour` and
+//! `lamp.color`, as if they were ports of the subnet.
+//!
+//! **Cooking** needs nothing new: boundary nodes are ordinary nodes and
+//! cross-boundary links are ordinary links in the one flat dependency
+//! graph, so the scheduler's push-based invalidation, caching, early
+//! cutoff, time dependence and error containment apply across subnet
+//! boundaries unchanged, with the same costs. Cooking a subnet node itself
+//! yields no outputs; cook its interface outputs (or what reads them).
+//!
+//! **Promotion**: [`Graph::promote`] exposes an inner input as an input of
+//! the subnet: it adds an interface input with the port's type and value
+//! and links it to the inner port, so the value set on (or linked into)
+//! the interface flows to the inner node. [`Graph::unpromote`] reverses it,
+//! keeping the promoted value on the inner node.
+//!
+//! A **Charm** is a subnet with metadata ([`CharmMeta`]: name, version,
+//! icon, required capabilities, minimum tier; [`Graph::set_charm`]) and its
+//! declared interface. Removing a subnet removes its whole subtree;
+//! [`Graph::move_node`] moves a node (or subnet) between networks.
+//!
+//! `ch()` paths are relative to the network of the node holding the
+//! expression (`"x/port"` sibling, `"../x/port"` parent network,
+//! `"/a/b/port"` absolute); see [`Graph::set_expression`].
+//!
+//! Not yet implemented (later milestones): Charm definitions shared by
+//! several instances (each instance is a copy today), event ports, and
+//! parallel evaluation.
 
 mod cook;
 mod graph;
+mod network;
 mod snapshot;
 mod sources;
 
 pub use cook::{CookError, CookStats, Cooker};
 pub use graph::{Endpoint, Graph, GraphError, Link, NodeId, PortDirection};
+pub use network::{CharmMeta, INPUT_TYPE, INTERFACE_PORT, OUTPUT_TYPE, SUBNET_TYPE};
 pub use snapshot::{GraphSnapshot, NamedLink, NodeSnapshot};

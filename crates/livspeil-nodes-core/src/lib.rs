@@ -22,6 +22,8 @@
 //! - **color** (`core.color.*`): `mix`, `compose`, `gradient` (three fixed
 //!   stops).
 //! - **text** (`core.text.*`): `format`.
+//! - **structure**: `core.subnet`, `core.subnet.input` and `core.output`
+//!   (subnets, Charm interfaces and explicit sinks; M0.7).
 //! - **table** (`core.table.*`, M0.8): `count`, `column`, `get`,
 //!   `filter_text`, `sort`.
 //! - **curve** (`core.curve.*`, M0.8): `ramp`.
@@ -36,7 +38,6 @@
 //!
 //! - event nodes (`Event` values and edge-triggered cooking);
 //! - variable-length color gradients (color curves);
-//! - subnet and output nodes (graph nesting).
 
 use std::sync::Arc;
 
@@ -51,6 +52,7 @@ mod color;
 mod curve;
 mod fs;
 mod sky;
+mod structure;
 mod table;
 mod text;
 mod time;
@@ -70,6 +72,7 @@ pub use sky::{
     AZIMUTH_EPSILON, AZIMUTH_SEAM_EPSILON, SunDirection, SunPosition, declination_degrees,
     sun_position,
 };
+pub use structure::{OUTPUT, Output, SUBNET, SUBNET_INPUT, Subnet, SubnetInput};
 pub use text::{Format, MAX_PRECISION, format_number};
 pub use time::{SECONDS_PER_DAY, TimeOfDay, time_of_day};
 
@@ -115,6 +118,9 @@ pub fn register_all(registry: &mut NodeRegistry) -> Result<(), RegistryError> {
     registry.register(Arc::new(ColorCompose::new()))?;
     registry.register(Arc::new(ColorGradient::new()))?;
     registry.register(Arc::new(Format::new()))?;
+    registry.register(Arc::new(Subnet::new()))?;
+    registry.register(Arc::new(SubnetInput::new()))?;
+    registry.register(Arc::new(Output::new()))?;
     registry.register(Arc::new(TableCount::new()))?;
     registry.register(Arc::new(TableColumnNode::new()))?;
     registry.register(Arc::new(TableGet::new()))?;

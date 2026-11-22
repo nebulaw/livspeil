@@ -3,10 +3,10 @@
 
 //! Canonical, comparable copies of a graph's editable state.
 
-use livspeil_node_api::Value;
+use livspeil_node_api::{PortType, Value};
 use livspeil_params::AnimChannel;
 
-use crate::NodeId;
+use crate::{CharmMeta, NodeId};
 
 /// A link described by port names rather than port indices.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -34,9 +34,19 @@ pub struct NodeSnapshot {
     /// Animation channels as `(port name, channel)`, in port order.
     #[cfg_attr(feature = "serde", serde(default))]
     pub animations: Vec<(String, AnimChannel)>,
+    /// The subnet holding the node; `None` in the root network.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub parent: Option<NodeId>,
+    /// Declared port type of a boundary node (`core.subnet.input@1`,
+    /// `core.output@1`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub port_type: Option<PortType>,
+    /// Charm metadata of a subnet.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub charm: Option<CharmMeta>,
 }
 
-/// The editable state of a graph: nodes in id order and links ordered by
+/// The editable state of a graph: nodes of every network in id order and links ordered by
 /// target node and input port. Produced by [`crate::Graph::snapshot`].
 ///
 /// Equality uses IEEE float equality, so a snapshot holding `NaN` never

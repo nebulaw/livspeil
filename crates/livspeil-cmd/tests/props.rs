@@ -7,6 +7,9 @@
 //! 2. undoing everything and redoing everything round-trips;
 //! 3. replaying the journal onto a fresh graph reproduces the state;
 //! 4. a failed command leaves the snapshot unchanged.
+//!
+//! The commands include subnets (ids 9 and 10), interface ports (ids 11
+//! to 14), moves between networks, promotion and Charm metadata.
 
 mod common;
 
@@ -14,8 +17,8 @@ use std::io::Cursor;
 
 use common::{FLAG, NUM, graph, id};
 use livspeil_cmd::{Command, GroupId, History, JournalWriter, Origin, replay};
-use livspeil_graph::{GraphSnapshot, NodeId};
-use livspeil_node_api::Value;
+use livspeil_graph::{CharmMeta, GraphSnapshot, NodeId, PortDirection};
+use livspeil_node_api::{PortType, Value};
 use livspeil_params::{AnimChannel, Extrapolation, Interpolation, Keyframe};
 use proptest::prelude::*;
 
@@ -25,8 +28,10 @@ use proptest::prelude::*;
 const NUM_IDS: [u128; 4] = [1, 2, 5, 6];
 const FLAG_IDS: [u128; 4] = [3, 4, 7, 8];
 const NAMES: [&str; 11] = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", ""];
-const INPUTS: [&str; 5] = ["a", "b", "flag", "count", "out"];
-const OUTPUTS: [&str; 4] = ["out", "flag", "n", "a"];
+const SUBNET_IDS: [u128; 2] = [9, 10];
+const PORT_IDS: [u128; 4] = [11, 12, 13, 14];
+const INPUTS: [&str; 6] = ["a", "b", "flag", "count", "out", "value"];
+const OUTPUTS: [&str; 5] = ["out", "flag", "n", "a", "value"];
 const ORIGINS: [Origin; 5] = [
     Origin::Ui,
     Origin::Script,
@@ -36,7 +41,71 @@ const ORIGINS: [Origin; 5] = [
 ];
 
 fn any_id() -> impl Strategy<Value = NodeId> {
-    (1..=8u128).prop_map(id)
+    (1..=14u128).prop_map(id)
+}
+
+fn subnet_id() -> impl Strategy<Value = NodeId> {
+    prop::sample::select(SUBNET_IDS.to_vec()).prop_map(id)
+}
+
+fn port_id() -> impl Strategy<Value = NodeId> {
+    prop::sample::select(PORT_IDS.to_vec()).prop_map(id)
+}
+
+/// A network: the root or one of the subnets.
+fn network() -> impl Strategy<Value = Option<NodeId>> {
+    prop::option::of(subnet_id())
+}
+
+fn direction() -> impl Strategy<Value = PortDirection> {
+    prop::sample::select(vec![PortDirection::Input, PortDirection::Output])
+}
+
+/// Commands on subnets, interfaces, promotion and moves.
+fn structure() -> impl Strategy<Value = Command> {
+    let port_type = prop::sample::select(vec![PortType::Float, PortType::Bool, PortType::Int]);
+    prop_oneof![
+        3 => (subnet_id(), network(), owned(&NAMES))
+            .prop_map(|(id, parent, name)| Command::CreateSubnet { id, parent, name }),
+        3 => (num_id(), network(), owned(&NAMES)).prop_map(|(id, parent, name)| {
+            Command::CreateNodeIn { id, parent, type_id: NUM.to_owned(), name, port_type: None }
+        }),
+        1 => (flag_id(), network(), owned(&NAMES)).prop_map(|(id, parent, name)| {
+            Command::CreateNodeIn { id, parent, type_id: FLAG.to_owned(), name, port_type: None }
+        }),
+        3 => (port_id(), subnet_id(), direction(), owned(&NAMES), port_type).prop_map(
+            |(id, subnet, direction, name, port_type)| Command::AddInterfacePort {
+                id, subnet, direction, name, port_type,
+            }
+        ),
+        1 => (subnet_id(), direction(), owned(&NAMES)).prop_map(|(subnet, direction, name)| {
+            Command::RemoveInterfacePort { subnet, direction, name }
+        }),
+        3 => (any_id(), network()).prop_map(|(node, parent)| Command::MoveNode { node, parent }),
+        2 => (any_id(), owned(&INPUTS), port_id(), owned(&NAMES)).prop_map(
+            |(node, port, interface, name)| Command::Promote { node, port, interface, name }
+        ),
+        3 => (num_id(), owned(&["a", "b"]), port_id(), owned(&NAMES)).prop_map(
+            |(node, port, interface, name)| Command::Promote { node, port, interface, name }
+        ),
+        1 => (any_id(), owned(&INPUTS)).prop_map(|(node, port)| Command::Unpromote { node, port }),
+        2 => (num_id(), owned(&["a", "b"]))
+            .prop_map(|(node, port)| Command::Unpromote { node, port }),
+        1 => (any_id(), prop::option::of((owned(&NAMES), 0u8..3))).prop_map(|(subnet, meta)| {
+            Command::SetCharm {
+                subnet,
+                charm: meta.map(|(name, tier)| {
+                    let mut charm = CharmMeta::new(name);
+                    charm.min_tier = tier;
+                    charm.capabilities = vec!["net".to_owned()];
+                    charm
+                }),
+            }
+        }),
+        3 => (any_id(), owned(&OUTPUTS), any_id(), owned(&INPUTS)).prop_map(
+            |(from, from_port, to, to_port)| Command::Link { from, from_port, to, to_port }
+        ),
+    ]
 }
 
 fn num_id() -> impl Strategy<Value = NodeId> {
@@ -119,6 +188,8 @@ fn source() -> impl Strategy<Value = String> {
         "ch(\"{n}/count\") * 2",
         "ch(\"{n}/flag\") ? 1 : 0",
         "ch(\"{n}/a\") + ch(\"{m}/b\")",
+        "ch(\"/{m}/{n}/{p}\") + 1",
+        "ch(\"{m}/{n}/a\") + ch(\"../../{n}/b\")",
         "true",
         "1 +",
     ]);
@@ -192,6 +263,7 @@ fn simple_command() -> impl Strategy<Value = Command> {
             .prop_map(|(node, port, channel)| Command::SetAnimation { node, port, channel }),
         1 => (any_id(), owned(&INPUTS))
             .prop_map(|(node, port)| Command::ClearAnimation { node, port }),
+        5 => structure(),
     ]
 }
 
@@ -307,7 +379,8 @@ proptest! {
 }
 
 /// Nodes 1, 2, 5 (`t.num`) and 3, 4, 7 (`t.flag`) with one link; ids 6
-/// and 8 stay free.
+/// and 8 stay free. Subnet 9 (`s`) holds subnet 10 (`t`), interface input
+/// 11 (`in`), interface output 12 (`out`), and node 5 (`e`).
 fn seed() -> Command {
     let create = |n: u128, type_id: &str, name: &str| Command::CreateNode {
         id: id(n),
@@ -321,6 +394,34 @@ fn seed() -> Command {
         create(3, FLAG, "c"),
         create(4, FLAG, "d"),
         create(7, FLAG, "f"),
+        Command::CreateSubnet {
+            id: id(9),
+            parent: None,
+            name: "s".to_owned(),
+        },
+        Command::CreateSubnet {
+            id: id(10),
+            parent: Some(id(9)),
+            name: "t".to_owned(),
+        },
+        Command::AddInterfacePort {
+            id: id(11),
+            subnet: id(9),
+            direction: PortDirection::Input,
+            name: "in".to_owned(),
+            port_type: PortType::Float,
+        },
+        Command::AddInterfacePort {
+            id: id(12),
+            subnet: id(9),
+            direction: PortDirection::Output,
+            name: "out".to_owned(),
+            port_type: PortType::Float,
+        },
+        Command::MoveNode {
+            node: id(5),
+            parent: Some(id(9)),
+        },
         Command::Link {
             from: id(1),
             from_port: "out".to_owned(),
@@ -342,19 +443,39 @@ fn check_replay(bytes: &[u8], expected: &GraphSnapshot, count: usize) -> Result<
 /// A transaction that builds `snapshot` from an empty graph.
 fn rebuild(snapshot: &GraphSnapshot) -> Command {
     let mut steps = Vec::new();
-    for node in &snapshot.nodes {
-        steps.push(Command::CreateNode {
-            id: node.id,
-            type_id: node.type_id.clone(),
-            name: node.name.clone(),
-        });
-        for (port, value) in &node.inputs {
-            steps.push(Command::SetInput {
-                node: node.id,
-                port: port.clone(),
-                value: value.clone(),
+    // Parents before children.
+    let mut pending: Vec<_> = snapshot.nodes.iter().collect();
+    let mut created = std::collections::BTreeSet::new();
+    while !pending.is_empty() {
+        let before = pending.len();
+        pending.retain(|node| {
+            if node.parent.is_some_and(|p| !created.contains(&p)) {
+                return true;
+            }
+            created.insert(node.id);
+            steps.push(Command::CreateNodeIn {
+                id: node.id,
+                parent: node.parent,
+                type_id: node.type_id.clone(),
+                name: node.name.clone(),
+                port_type: node.port_type,
             });
-        }
+            if node.charm.is_some() {
+                steps.push(Command::SetCharm {
+                    subnet: node.id,
+                    charm: node.charm.clone(),
+                });
+            }
+            for (port, value) in &node.inputs {
+                steps.push(Command::SetInput {
+                    node: node.id,
+                    port: port.clone(),
+                    value: value.clone(),
+                });
+            }
+            false
+        });
+        assert!(pending.len() < before, "snapshot parents form a tree");
     }
     for link in &snapshot.links {
         steps.push(Command::Link {

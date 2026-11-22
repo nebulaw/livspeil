@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Livspeil contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Property: graph -> document -> text -> document -> graph is lossless.
+//! Property: graph -> document -> text -> document -> graph is lossless,
+//! including nested subnets, interface ports and Charm metadata.
 
 mod common;
 
 use common::{id, registry};
 use livspeil_doc::{Document, canonicalize, format, parse};
-use livspeil_graph::Graph;
+use livspeil_graph::{CharmMeta, Graph, NodeId, SUBNET_TYPE};
 use livspeil_node_api::{PortType, Value};
 use livspeil_params::expr::quote as expr_quote;
 use livspeil_params::{AnimChannel, Extrapolation, Interpolation, Keyframe, Tangent};
@@ -42,7 +43,10 @@ fn value(ty: PortType) -> BoxedStrategy<Value> {
 /// A random edit script: node types, names, input settings, link attempts.
 #[derive(Debug, Clone)]
 struct Script {
-    nodes: Vec<(usize, String, u128)>,
+    /// Up to two subnets: (nested in the first, name, id, Charm name).
+    subnets: Vec<(bool, String, u128, Option<String>)>,
+    /// (type, name, id, network: 0 root, 1 and 2 the subnets, port type)
+    nodes: Vec<(usize, String, u128, usize, PortType)>,
     /// (node index, input index, value seed per type)
     inputs: Vec<(usize, usize, Value)>,
     /// (from node, output index, to node, input index)
@@ -130,13 +134,15 @@ fn channel() -> impl Strategy<Value = AnimChannel> {
     })
 }
 
-const TYPES: [&str; 6] = [
+const TYPES: [&str; 8] = [
     "test.all@1",
     "core.math.add@1",
     "core.time.timeofday@1",
     "core.color.mix@1",
     "core.logic.select@1",
     "core.math.lerp@1",
+    "core.subnet.input@1",
+    "core.output@1",
 ];
 
 fn script() -> impl Strategy<Value = Script> {
@@ -145,7 +151,25 @@ fn script() -> impl Strategy<Value = Script> {
         "[a-z]{1,3}\\.[a-z]{1,3}",
         any::<String>().prop_filter("non-empty", |s| !s.is_empty()),
     ];
-    let nodes = prop::collection::vec((0..TYPES.len(), name, any::<u128>()), 0..6);
+    let port_type = prop::sample::select(
+        common::ALL_TYPES
+            .iter()
+            .map(|(_, t)| *t)
+            .collect::<Vec<_>>(),
+    );
+    let nodes = prop::collection::vec(
+        (0..TYPES.len(), name, any::<u128>(), 0..3usize, port_type),
+        0..10,
+    );
+    let subnets = prop::collection::vec(
+        (
+            any::<bool>(),
+            "[a-z]{1,6}",
+            any::<u128>(),
+            prop::option::of("[A-Za-z ]{1,8}"),
+        ),
+        1..3,
+    );
     let inputs = prop::collection::vec(
         (
             0..6usize,
@@ -161,13 +185,16 @@ fn script() -> impl Strategy<Value = Script> {
         0..8,
     );
     let anims = prop::collection::vec((0..6usize, channel()), 0..4);
-    (nodes, inputs, links, exprs, anims).prop_map(|(nodes, inputs, links, exprs, anims)| Script {
-        nodes,
-        inputs,
-        links,
-        exprs,
-        anims,
-    })
+    (subnets, nodes, inputs, links, exprs, anims).prop_map(
+        |(subnets, nodes, inputs, links, exprs, anims)| Script {
+            subnets,
+            nodes,
+            inputs,
+            links,
+            exprs,
+            anims,
+        },
+    )
 }
 
 /// Apply a script, ignoring edits the graph rejects (wrong types, cycles,
@@ -176,8 +203,28 @@ fn build(script: &Script) -> Graph {
     let reg = registry();
     let mut graph = Graph::new(reg);
     let mut ids = Vec::new();
-    for (t, name, raw) in &script.nodes {
-        if let Ok(n) = graph.add_node_with_id(id(*raw >> 8), TYPES[*t], name) {
+    let mut nets: Vec<Option<NodeId>> = vec![None];
+    for (nested, name, raw, charm) in &script.subnets {
+        let parent = if *nested {
+            nets.get(1).copied().flatten()
+        } else {
+            None
+        };
+        if let Ok(s) = graph.add_node_in(parent, id(*raw >> 8), SUBNET_TYPE, name, None) {
+            if let Some(charm) = charm {
+                let mut meta = CharmMeta::new(charm.clone());
+                meta.version = Some("1.0".to_owned());
+                meta.min_tier = (raw % 3) as u8;
+                meta.capabilities = vec!["time".to_owned()];
+                graph.set_charm(s, Some(meta)).unwrap();
+            }
+            nets.push(Some(s));
+        }
+    }
+    for (t, name, raw, net, ty) in &script.nodes {
+        let parent = nets.get(*net).copied().flatten();
+        let port_type = (*t >= 6).then_some(*ty);
+        if let Ok(n) = graph.add_node_in(parent, id(*raw >> 8), TYPES[*t], name, port_type) {
             ids.push(n);
         }
     }
@@ -198,13 +245,45 @@ fn build(script: &Script) -> Graph {
         let inp = to_spec.inputs[i % to_spec.inputs.len()].name;
         let _ = graph.link(from, out, to, inp);
     }
+    // Wire the interface: try to feed every boundary node and read it on
+    // both sides of its subnet (the first node whose port fits).
+    let boundary: Vec<NodeId> = ids
+        .iter()
+        .copied()
+        .filter(|&b| graph.port_type(b).is_some())
+        .collect();
+    for b in boundary {
+        for &other in &ids {
+            if other == b {
+                continue;
+            }
+            let spec = graph.node_spec(other).unwrap().clone();
+            for out in &spec.outputs {
+                if graph.link(other, out.name, b, "value").is_ok() {
+                    break;
+                }
+            }
+            for inp in &spec.inputs {
+                if graph.link(b, "value", other, inp.name).is_ok() {
+                    break;
+                }
+            }
+        }
+    }
     for (n, i, template, m, j) in &script.exprs {
         let (node, read) = (ids[n % ids.len()], ids[m % ids.len()]);
         let spec = graph.node_spec(node).unwrap().clone();
         let port = spec.inputs[i % spec.inputs.len()].name;
         let read_spec = graph.node_spec(read).unwrap().clone();
         let read_port = read_spec.inputs[j % read_spec.inputs.len()].name;
-        let path = expr_quote(&format!("{}/{read_port}", graph.node_name(read).unwrap()));
+        // Root readers of root nodes use the plain name (the pre-subnet
+        // form); everything else the absolute path.
+        let path = if graph.parent(node).is_none() && graph.parent(read).is_none() {
+            format!("{}/{read_port}", graph.node_name(read).unwrap())
+        } else {
+            format!("{}/{read_port}", graph.path(read).unwrap())
+        };
+        let path = expr_quote(&path);
         let source = EXPRS[*template].replace("{p}", &path);
         let _ = graph.set_expression(node, port, &source);
     }

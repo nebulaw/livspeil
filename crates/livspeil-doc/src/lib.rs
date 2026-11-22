@@ -30,7 +30,8 @@
 //!
 //! - **Header**: `room "<name>" format=<int> min-tier="T<n>"`; the only
 //!   top-level node. `format` is required; `min-tier` defaults to `T0`.
-//! - **Network**: exactly one, `network "/"` (subnets come later). It holds
+//! - **Network**: exactly one in the room, `network "/"` (subnets nest
+//!   theirs, see below). It holds
 //!   `node "<name>" type="<id@version>" id="<uuid>"` entries, each with
 //!   optional `input "<port>" <value>` children (explicitly set inputs only;
 //!   unset inputs use the type's default; expressions and animation are
@@ -141,13 +142,67 @@
 //! instead of losing data (the reader is strict), which is the same
 //! outcome a format bump would give.
 //!
+//! # Subnets and Charms
+//!
+//! A subnet is a node of type `core.subnet@1` whose block holds, after its
+//! `input`s, an optional `charm` block and its `network` (no path; bare
+//! `network` when empty). Its interface is declared by boundary nodes
+//! inside, one per port, named after the port and typed with
+//! `port-type="<Type>"`: `core.subnet.input@1` for inputs, `core.output@1`
+//! for outputs. A promoted parameter is an interface input linked to the
+//! inner port; its `input "value"` holds the parameter's value (or
+//! expression, or animation) for this instance.
+//!
+//! ```kdl
+//! node "lamp" type="core.subnet@1" id="0193a6c0-1d2e-7b40-8000-000000000010" {
+//!   charm "Daylight" version="1.0.0" icon="sun" min-tier="T1" {
+//!     capability "time"
+//!   }
+//!   network {
+//!     node "hour" type="core.subnet.input@1" id="0193a6c0-1d2e-7b40-8000-000000000011" port-type="Float" {
+//!       input "value" 12.0
+//!     }
+//!     node "level" type="core.math.smoothstep@1" id="0193a6c0-1d2e-7b40-8000-000000000012"
+//!     node "intensity" type="core.output@1" id="0193a6c0-1d2e-7b40-8000-000000000013" port-type="Float"
+//!     link from="hour.value" to="level.x"
+//!     link from="level.out" to="intensity.value"
+//!   }
+//! }
+//! link from="clock.time" to="lamp.hour"
+//! link from="lamp.intensity" to="out.value"
+//! ```
+//!
+//! - Names are unique per network; ids are unique in the whole document.
+//!   Names of subnets and of nodes inside them cannot contain `/` and
+//!   cannot be `.` or `..`.
+//! - A link lives in the network where both of its ends are visible. In
+//!   the network around a subnet, `lamp.hour` names the subnet's interface
+//!   port `hour` (the `value` input of its `core.subnet.input@1` node, or
+//!   the `value` output of its `core.output@1` node).
+//! - `ch()` paths are relative to the network of the node holding the
+//!   expression: `"x/port"` sibling, `"../x/port"` parent network,
+//!   `"/a/x/port"` absolute (see `livspeil_graph::Graph::set_expression`).
+//! - `charm "<name>" [version=".."] [icon=".."] [min-tier="T<n>"]` with
+//!   `capability "<name>"` children (in order, no duplicates); `min-tier`
+//!   defaults to `T0` and is left out then.
+//! - Meta positions of nodes inside subnets are keyed by their path
+//!   without the leading `/` (`lamp/hour`).
+//! - `charm`, `network` in a non-subnet node and unknown port types are
+//!   errors with line and column.
+//!
+//! Each instance of a Charm is a full copy (its own ids); shared Charm
+//! definitions come later. Still **format 1**: subnets are purely
+//! additive, since a nested network, `charm` and `port-type=` were rejected
+//! before, so every older file reads and writes back identically.
+//!
 //! **Names are references**: links, `ch()` paths and meta positions name
 //! nodes by name. [`livspeil_graph::Graph::rename`] rewrites `ch()` paths
 //! itself; a tool editing the document directly must rename all three.
 //!
 //! # Canonical form
 //!
-//! [`format()`] writes two-space indent, nodes sorted by id (UUIDv7, so
+//! [`format()`] writes two-space indent, nodes sorted by id within each
+//! network (UUIDv7, so
 //! creation order; renames do not move nodes), inputs sorted by port name
 //! (sources ordered as above), links sorted by `(from, to)` text, meta
 //! sorted by node name,

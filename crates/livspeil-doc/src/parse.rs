@@ -6,8 +6,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use kdl::{KdlDocument, KdlEntry, KdlNode, KdlValue};
-use livspeil_graph::NodeId;
-use livspeil_node_api::Value;
+use livspeil_graph::{CharmMeta, NodeId};
+use livspeil_node_api::{PortType, Value};
 use livspeil_params::{AnimChannel, AnimError, Extrapolation, Interpolation, Keyframe, Tangent};
 use uuid::Uuid;
 
@@ -181,10 +181,10 @@ impl Reader<'_> {
                     if network.is_some() {
                         return Err(self.err_node(
                             child,
-                            "only one network is allowed (subnets are not supported yet)",
+                            "only one network is allowed in the room (subnets nest theirs inside their `node`)",
                         ));
                     }
-                    network = Some(self.network(child)?);
+                    network = Some(self.root_network(child)?);
                 }
                 "meta" => {
                     if meta.is_some() {
@@ -205,7 +205,8 @@ impl Reader<'_> {
         })?;
         let meta = meta.unwrap_or_default();
 
-        let names: BTreeSet<&str> = network.nodes.iter().map(|n| n.name.as_str()).collect();
+        let paths = network.walk();
+        let names: BTreeSet<&str> = paths.iter().map(|(p, _)| p.as_str()).collect();
         if let Some(unknown) = meta.positions.keys().find(|n| !names.contains(n.as_str())) {
             return Err(DocError::invalid(
                 children(room)
@@ -224,16 +225,36 @@ impl Reader<'_> {
         })
     }
 
-    fn network(&self, node: &KdlNode) -> Result<Network, DocError> {
+    /// `network "/" { ... }`.
+    fn root_network(&self, node: &KdlNode) -> Result<Network, DocError> {
         let entries = self.entries(node)?;
         self.allow_props(&entries, &[])?;
         let path = self.single_string_arg(node, &entries, "network path")?;
         if path != ROOT_NETWORK {
             return Err(self.err_node(
                 node,
-                format!("network '{path}': only the root network \"/\" is supported (subnets come later)"),
+                format!(
+                    "network '{path}': the room's network is \"/\"; subnets nest their `network` block inside their `node`"
+                ),
             ));
         }
+        self.network(node)
+    }
+
+    /// A subnet's `network { ... }`, without arguments.
+    fn subnet_network(&self, node: &KdlNode) -> Result<Network, DocError> {
+        let entries = self.entries(node)?;
+        self.allow_props(&entries, &[])?;
+        if let Some(arg) = entries.args.first() {
+            return Err(self.err_entry(
+                arg,
+                "a subnet's `network` takes no path; it is the network of the enclosing node",
+            ));
+        }
+        self.network(node)
+    }
+
+    fn network(&self, node: &KdlNode) -> Result<Network, DocError> {
         let mut network = Network::default();
         let mut names = BTreeSet::new();
         let mut ids = BTreeSet::new();
@@ -266,7 +287,7 @@ impl Reader<'_> {
 
     fn node(&self, node: &KdlNode) -> Result<DocNode, DocError> {
         let entries = self.entries(node)?;
-        self.allow_props(&entries, &["type", "id"])?;
+        self.allow_props(&entries, &["type", "id", "port-type"])?;
         let name = self.single_string_arg(node, &entries, "node name")?;
         if name.is_empty() {
             return Err(self.err_node(node, "node names must not be empty"));
@@ -289,22 +310,107 @@ impl Reader<'_> {
 
         let mut doc_node = DocNode::new(id, name, type_id);
         doc_node.at = SourceLoc(self.at_node(node));
+        if let Some(entry) = entries.props.get("port-type") {
+            let text = self.plain_string(entry, "port-type")?;
+            let ty = PortType::ALL
+                .into_iter()
+                .find(|t| t.name() == text)
+                .ok_or_else(|| {
+                    self.err_entry(
+                        entry,
+                        format!("unknown port type \"{text}\" (for example \"Float\", \"Color\")"),
+                    )
+                })?;
+            doc_node.port_type = Some(ty);
+        }
         let mut seen = BTreeSet::new();
         for child in children(node) {
             self.no_annotation(child)?;
-            if child.name().value() != "input" {
+            match child.name().value() {
+                "input" => self.input(child, &mut doc_node, &mut seen)?,
+                "charm" | "network" if !doc_node.is_subnet() => {
+                    return Err(self.err_node(
+                        child,
+                        format!(
+                            "`{}` is only allowed in a subnet (type=\"{}\"); node '{}' is a {}",
+                            child.name().value(),
+                            livspeil_graph::SUBNET_TYPE,
+                            doc_node.name,
+                            doc_node.type_id
+                        ),
+                    ));
+                }
+                "charm" => {
+                    if doc_node.charm.is_some() {
+                        return Err(self.err_node(child, "only one `charm` block is allowed"));
+                    }
+                    doc_node.charm = Some(self.charm(child)?);
+                }
+                "network" => {
+                    if doc_node.network.is_some() {
+                        return Err(self.err_node(child, "a subnet has only one `network`"));
+                    }
+                    doc_node.network = Some(self.subnet_network(child)?);
+                }
+                other => {
+                    return Err(self.err_node(
+                        child,
+                        format!(
+                            "unknown node `{other}` in node '{}'; expected `input`, `charm` or `network`",
+                            doc_node.name
+                        ),
+                    ));
+                }
+            }
+        }
+        Ok(doc_node)
+    }
+
+    /// `charm "Name" [version=".."] [icon=".."] [min-tier="T<n>"] {
+    /// capability ".." }`.
+    fn charm(&self, node: &KdlNode) -> Result<CharmMeta, DocError> {
+        let entries = self.entries(node)?;
+        self.allow_props(&entries, &["version", "icon", "min-tier"])?;
+        let name = self.single_string_arg(node, &entries, "Charm name")?;
+        let mut charm = CharmMeta::new(name);
+        if let Some(entry) = entries.props.get("version") {
+            charm.version = Some(self.plain_string(entry, "version")?);
+        }
+        if let Some(entry) = entries.props.get("icon") {
+            charm.icon = Some(self.plain_string(entry, "icon")?);
+        }
+        if let Some(entry) = entries.props.get("min-tier") {
+            let text = self.plain_string(entry, "min-tier")?;
+            let tier: Tier = text
+                .parse()
+                .map_err(|e: crate::model::ParseTierError| self.err_entry(entry, e.to_string()))?;
+            charm.min_tier = tier.0;
+        }
+        for child in children(node) {
+            self.no_annotation(child)?;
+            if child.name().value() != "capability" {
                 return Err(self.err_node(
                     child,
                     format!(
-                        "unknown node `{}` in node '{}'; expected `input`",
-                        child.name().value(),
-                        doc_node.name
+                        "unknown node `{}` in charm; expected `capability \"name\"`",
+                        child.name().value()
                     ),
                 ));
             }
-            self.input(child, &mut doc_node, &mut seen)?;
+            if child.children().is_some() {
+                return Err(self.err_node(child, "`capability` takes no children block"));
+            }
+            let entries = self.entries(child)?;
+            self.allow_props(&entries, &[])?;
+            let capability = self.single_string_arg(child, &entries, "capability name")?;
+            if charm.capabilities.contains(&capability) {
+                return Err(
+                    self.err_node(child, format!("capability '{capability}' is listed twice"))
+                );
+            }
+            charm.capabilities.push(capability);
         }
-        Ok(doc_node)
+        Ok(charm)
     }
 
     /// `input "port" [<value>] [expr="..."] [{ anim ... }]`.

@@ -23,6 +23,15 @@
 //! (M0.5b); every one has an exact inverse. Animation channels are
 //! validated finite, so they always journal. Ports are addressed by name, never by index, so commands
 //! stay valid when a node type gains ports.
+//!
+//! Subnets and Charms (M0.7): `CreateNodeIn` (a node in any network, with
+//! the port type of a boundary node), `CreateSubnet`, `DeleteNode` (a
+//! subnet is deleted with everything inside it), `AddInterfacePort` /
+//! `RemoveInterfacePort`, `MoveNode` (between networks; its inverse
+//! restores the exact text of re-rendered `ch()` paths), `Promote` /
+//! `Unpromote` and `SetCharm`. Composite commands (promotion, interface
+//! ports, subnet deletion) apply as transactions of primitive edits, so
+//! their inverses are exact by construction.
 
 mod command;
 mod entry;

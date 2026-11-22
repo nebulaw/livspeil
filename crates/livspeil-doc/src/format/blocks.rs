@@ -26,8 +26,9 @@ pub(super) fn write_block(
     node: &DocNode,
     port: &str,
     value: &Value,
+    depth: usize,
 ) -> Result<(), DocError> {
-    let pad = INDENT.repeat(4);
+    let pad = INDENT.repeat(depth);
     match value {
         Value::Table(table) => write_table(out, node, port, table, &pad),
         Value::Curve(curve) => write_curve(out, node, port, curve, &pad),
