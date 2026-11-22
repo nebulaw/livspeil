@@ -16,6 +16,7 @@ use common::{FLAG, NUM, graph, id};
 use livspeil_cmd::{Command, GroupId, History, JournalWriter, Origin, replay};
 use livspeil_graph::{GraphSnapshot, NodeId};
 use livspeil_node_api::Value;
+use livspeil_params::{AnimChannel, Extrapolation, Interpolation, Keyframe};
 use proptest::prelude::*;
 
 // Small pools so that random commands often hit existing nodes, names and
@@ -107,6 +108,72 @@ fn link() -> impl Strategy<Value = Command> {
     ]
 }
 
+/// Expression sources: valid ones reading `$T` or other nodes through
+/// `ch()` (which may be unknown, mistyped or cyclic), plus broken ones.
+fn source() -> impl Strategy<Value = String> {
+    let template = prop::sample::select(vec![
+        "$T * 2",
+        "1 + 2",
+        "ch(\"{n}/{p}\") + 1",
+        "lerp(0.2, 1.0, ch(\"../{n}/{p}\"))",
+        "ch(\"{n}/count\") * 2",
+        "ch(\"{n}/flag\") ? 1 : 0",
+        "ch(\"{n}/a\") + ch(\"{m}/b\")",
+        "true",
+        "1 +",
+    ]);
+    (
+        template,
+        owned(&NAMES[..10]),
+        owned(&NAMES[..10]),
+        owned(&INPUTS),
+    )
+        .prop_map(|(t, n, m, p)| t.replace("{n}", &n).replace("{m}", &m).replace("{p}", &p))
+}
+
+fn channel() -> impl Strategy<Value = AnimChannel> {
+    let interp = prop::sample::select(vec![
+        Interpolation::Step,
+        Interpolation::Linear,
+        Interpolation::Bezier,
+        Interpolation::Spring {
+            frequency: 1.5,
+            damping: 0.5,
+        },
+    ]);
+    let extra = prop::sample::select(vec![
+        Extrapolation::Hold,
+        Extrapolation::Loop,
+        Extrapolation::PingPong,
+    ]);
+    prop_oneof![
+        3 => (
+            prop::collection::vec((-1.0e3..1.0e3f64, interp), 1..4),
+            extra.clone(),
+            extra,
+            -10.0..10.0f64,
+        )
+            .prop_map(|(values, pre, post, offset)| {
+                let keys = values
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, (v, interp))| {
+                        Keyframe::float(i as f64 * 0.75, v).with_interpolation(interp)
+                    })
+                    .collect();
+                AnimChannel::new(keys)
+                    .expect("valid keys")
+                    .with_extrapolation(pre, post)
+                    .with_offset(offset)
+                    .expect("finite offset")
+            }),
+        1 => Just(
+            AnimChannel::new(vec![Keyframe::new(0.0, Value::Vec2([1.0, 2.0]))])
+                .expect("valid keys")
+        ),
+    ]
+}
+
 fn simple_command() -> impl Strategy<Value = Command> {
     prop_oneof![
         3 => create(),
@@ -117,6 +184,14 @@ fn simple_command() -> impl Strategy<Value = Command> {
         4 => link(),
         1 => (any_id(), owned(&INPUTS)).prop_map(|(to, to_port)| Command::Unlink { to, to_port }),
         1 => (any_id(), owned(&NAMES)).prop_map(|(node, name)| Command::Rename { node, name }),
+        3 => (any_id(), owned(&INPUTS), source())
+            .prop_map(|(node, port, source)| Command::SetExpression { node, port, source }),
+        1 => (any_id(), owned(&INPUTS))
+            .prop_map(|(node, port)| Command::ClearExpression { node, port }),
+        2 => (any_id(), owned(&INPUTS), channel())
+            .prop_map(|(node, port, channel)| Command::SetAnimation { node, port, channel }),
+        1 => (any_id(), owned(&INPUTS))
+            .prop_map(|(node, port)| Command::ClearAnimation { node, port }),
     ]
 }
 
@@ -288,6 +363,23 @@ fn rebuild(snapshot: &GraphSnapshot) -> Command {
             to: link.to,
             to_port: link.to_port.clone(),
         });
+    }
+    // Sources last: ch() may read any node.
+    for node in &snapshot.nodes {
+        for (port, source) in &node.expressions {
+            steps.push(Command::SetExpression {
+                node: node.id,
+                port: port.clone(),
+                source: source.clone(),
+            });
+        }
+        for (port, channel) in &node.animations {
+            steps.push(Command::SetAnimation {
+                node: node.id,
+                port: port.clone(),
+                channel: channel.clone(),
+            });
+        }
     }
     Command::Transaction(steps)
 }

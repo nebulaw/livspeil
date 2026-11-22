@@ -9,6 +9,7 @@ use common::{FLAG, NUM, graph, id};
 use livspeil_cmd::{Applied, CmdError, Command, DocChange};
 use livspeil_graph::{CookStats, Cooker, Graph, GraphError, NamedLink, NodeId};
 use livspeil_node_api::{PortType, Value};
+use livspeil_params::{AnimChannel, Extrapolation, Interpolation, Keyframe, Tangent};
 
 fn create(n: u128, type_id: &str, name: &str) -> Command {
     Command::CreateNode {
@@ -435,4 +436,246 @@ fn empty_transaction_is_a_noop() {
     let applied = round_trip(&mut g, &Command::noop());
     assert_eq!(applied.inverse, Command::noop());
     assert!(applied.changes.is_empty());
+}
+
+fn set_expr(node: NodeId, port: &str, source: &str) -> Command {
+    Command::SetExpression {
+        node,
+        port: port.to_owned(),
+        source: source.to_owned(),
+    }
+}
+
+fn channel() -> AnimChannel {
+    AnimChannel::new(vec![
+        Keyframe::float(0.0, 1.0).with_interpolation(Interpolation::Spring {
+            frequency: 2.0,
+            damping: 0.4,
+        }),
+        Keyframe::float(1.0, 2.0)
+            .with_interpolation(Interpolation::Bezier)
+            .with_tangent(Tangent::Explicit {
+                incoming: Value::Float(0.5),
+                outgoing: Value::Float(-0.25),
+            }),
+        Keyframe::float(2.5, 0.1),
+    ])
+    .unwrap()
+    .with_extrapolation(Extrapolation::Loop, Extrapolation::PingPong)
+    .with_offset(0.125)
+    .unwrap()
+}
+
+#[test]
+fn expressions_set_clear_and_invert() {
+    let mut g = graph();
+    run(&mut g, create(1, NUM, "a"));
+    run(&mut g, create(2, NUM, "b"));
+    let applied = round_trip(&mut g, &set_expr(id(2), "a", r#"ch("a/b") * 2"#));
+    assert_eq!(
+        applied.changes,
+        [DocChange::ExpressionChanged {
+            node: id(2),
+            port: "a".into()
+        }]
+    );
+    assert_eq!(
+        applied.inverse,
+        Command::ClearExpression {
+            node: id(2),
+            port: "a".into()
+        }
+    );
+    // Replacing restores the previous source.
+    let applied = round_trip(&mut g, &set_expr(id(2), "a", "$T"));
+    assert_eq!(applied.inverse, set_expr(id(2), "a", r#"ch("a/b") * 2"#));
+    let clear = Command::ClearExpression {
+        node: id(2),
+        port: "a".into(),
+    };
+    let applied = round_trip(&mut g, &clear);
+    assert_eq!(applied.inverse, set_expr(id(2), "a", "$T"));
+    // Clearing nothing is a no-op without changes.
+    run(&mut g, clear.clone());
+    let applied = clear.apply(&mut g).unwrap();
+    assert!(applied.changes.is_empty());
+    // Errors leave the graph unchanged.
+    let before = g.snapshot();
+    assert!(matches!(
+        set_expr(id(2), "a", "1 +").apply(&mut g),
+        Err(CmdError::Graph(GraphError::Expression(_)))
+    ));
+    assert_eq!(
+        set_expr(id(1), "a", r#"ch("a/b")"#).apply(&mut g),
+        Err(CmdError::Graph(GraphError::WouldCycle))
+    );
+    assert_eq!(g.snapshot(), before);
+}
+
+#[test]
+fn animations_set_clear_and_invert() {
+    let mut g = graph();
+    run(&mut g, create(1, NUM, "a"));
+    let set = Command::SetAnimation {
+        node: id(1),
+        port: "b".into(),
+        channel: channel(),
+    };
+    let applied = round_trip(&mut g, &set);
+    assert_eq!(
+        applied.changes,
+        [DocChange::AnimationChanged {
+            node: id(1),
+            port: "b".into()
+        }]
+    );
+    run(&mut g, set);
+    let replace = Command::SetAnimation {
+        node: id(1),
+        port: "b".into(),
+        channel: AnimChannel::constant(3.0).unwrap(),
+    };
+    let applied = round_trip(&mut g, &replace);
+    assert_eq!(
+        applied.inverse,
+        Command::SetAnimation {
+            node: id(1),
+            port: "b".into(),
+            channel: channel()
+        }
+    );
+    round_trip(
+        &mut g,
+        &Command::ClearAnimation {
+            node: id(1),
+            port: "b".into(),
+        },
+    );
+    run(&mut g, create(3, FLAG, "f"));
+    assert_eq!(
+        Command::SetAnimation {
+            node: id(3),
+            port: "count".into(),
+            channel: channel()
+        }
+        .apply(&mut g),
+        Err(CmdError::Graph(GraphError::TypeMismatch {
+            expected: PortType::Int,
+            found: PortType::Float
+        }))
+    );
+}
+
+#[test]
+fn delete_restores_sources_and_refuses_referenced_nodes() {
+    let mut g = graph();
+    run(&mut g, create(1, NUM, "sun"));
+    run(&mut g, create(2, NUM, "lamp"));
+    run(&mut g, set_expr(id(1), "a", "$T / 4"));
+    run(
+        &mut g,
+        Command::SetAnimation {
+            node: id(1),
+            port: "b".into(),
+            channel: channel(),
+        },
+    );
+    run(
+        &mut g,
+        set_expr(id(2), "a", r#"lerp(0.2, 1.0, ch("sun/a"))"#),
+    );
+    assert_eq!(
+        Command::DeleteNode { id: id(1) }.apply(&mut g),
+        Err(CmdError::Graph(GraphError::Referenced {
+            node: id(1),
+            by: id(2),
+            port: "a".into()
+        }))
+    );
+    run(
+        &mut g,
+        Command::ClearExpression {
+            node: id(2),
+            port: "a".into(),
+        },
+    );
+    round_trip(&mut g, &Command::DeleteNode { id: id(1) });
+}
+
+#[test]
+fn rename_rewrites_readers_and_inverts_exactly() {
+    let mut g = graph();
+    run(&mut g, create(1, NUM, "sun"));
+    run(&mut g, create(2, NUM, "lamp"));
+    run(
+        &mut g,
+        set_expr(id(2), "b", r#"ch("sun/a") + ch("../sun/b")"#),
+    );
+    let applied = round_trip(
+        &mut g,
+        &Command::Rename {
+            node: id(1),
+            name: "star".into(),
+        },
+    );
+    assert_eq!(
+        applied.changes,
+        [
+            DocChange::Renamed {
+                node: id(1),
+                old: "sun".into(),
+                new: "star".into()
+            },
+            DocChange::ExpressionChanged {
+                node: id(2),
+                port: "b".into()
+            }
+        ]
+    );
+    assert_eq!(
+        g.expression(id(2), "b").unwrap(),
+        Some(r#"ch("star/a") + ch("../star/b")"#)
+    );
+}
+
+#[test]
+fn source_commands_round_trip_through_json() {
+    let commands = [
+        set_expr(id(1), "a", r#"lerp(0.2, 1.0, ch("sun/phase")) + $T"#),
+        Command::ClearExpression {
+            node: id(1),
+            port: "a".into(),
+        },
+        Command::SetAnimation {
+            node: id(1),
+            port: "b".into(),
+            channel: channel(),
+        },
+        Command::ClearAnimation {
+            node: id(1),
+            port: "b".into(),
+        },
+    ];
+    for cmd in commands {
+        let json = serde_json::to_string(&cmd).unwrap();
+        let back: Command = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, cmd, "{json}");
+    }
+    let json = serde_json::to_string(&set_expr(id(1), "a", "1")).unwrap();
+    assert!(json.starts_with(r#"{"set_expression":{"node":"#), "{json}");
+
+    // Deserializing validates the channel.
+    let bad = format!(
+        r#"{{"set_animation":{{"node":"{}","port":"a","channel":{{"keys":[{{"time":1.0,"value":{{"Float":0.0}}}},{{"time":0.5,"value":{{"Float":1.0}}}}]}}}}}}"#,
+        id(1)
+    );
+    let err = serde_json::from_str::<Command>(&bad).unwrap_err();
+    assert!(err.to_string().contains("strictly increasing"), "{err}");
+    // Optional fields default.
+    let ok = bad.replace("0.5", "2.0");
+    let Command::SetAnimation { channel, .. } = serde_json::from_str(&ok).unwrap() else {
+        panic!("expected SetAnimation");
+    };
+    assert_eq!(channel.pre(), Extrapolation::Hold);
+    assert_eq!(channel.keys()[0].interpolation, Interpolation::Linear);
 }

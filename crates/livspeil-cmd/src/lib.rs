@@ -18,8 +18,10 @@
 //!   [`replay`] applies a journal to a graph; replaying onto the same
 //!   starting graph reproduces the same state.
 //!
-//! `SetInput`/`ClearInput` stand in for `SetParam` until the parameter model
-//! lands (M0.5). Ports are addressed by name, never by index, so commands
+//! Input values are edited with `SetInput`/`ClearInput` (static values),
+//! `SetExpression`/`ClearExpression` and `SetAnimation`/`ClearAnimation`
+//! (M0.5b); every one has an exact inverse. Animation channels are
+//! validated finite, so they always journal. Ports are addressed by name, never by index, so commands
 //! stay valid when a node type gains ports.
 
 mod command;

@@ -99,6 +99,33 @@ impl NodeImpl for Sink {
     }
 }
 
+/// A sun: `elevation = sin(phase * pi)` for a phase in `[0, 1]`.
+#[derive(Debug)]
+pub struct Sun {
+    spec: NodeSpec,
+}
+
+impl Sun {
+    pub fn new() -> Self {
+        Sun {
+            spec: NodeSpec::new("test.sun", 1, "Sun elevation from the day phase")
+                .input("phase", PortType::Float, Some(Value::Float(0.0)))
+                .output("elevation", PortType::Float),
+        }
+    }
+}
+
+impl NodeImpl for Sun {
+    fn spec(&self) -> &NodeSpec {
+        &self.spec
+    }
+
+    fn cook(&self, _: &CookContext, inputs: &[Value]) -> Result<Vec<Value>, NodeError> {
+        let phase = inputs[0].as_float().expect("coerced to Float");
+        Ok(vec![Value::Float((phase * std::f64::consts::PI).sin())])
+    }
+}
+
 /// Core nodes plus the test-only nodes above.
 pub fn registry() -> Arc<NodeRegistry> {
     let mut registry = NodeRegistry::new();
@@ -112,6 +139,9 @@ pub fn registry() -> Arc<NodeRegistry> {
     registry
         .register(Arc::new(Sink::new()))
         .expect("sink registers");
+    registry
+        .register(Arc::new(Sun::new()))
+        .expect("sun registers");
     Arc::new(registry)
 }
 

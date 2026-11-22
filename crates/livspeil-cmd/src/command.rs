@@ -5,6 +5,7 @@
 
 use livspeil_graph::{Graph, NamedLink, NodeId};
 use livspeil_node_api::Value;
+use livspeil_params::AnimChannel;
 use serde::{Deserialize, Serialize};
 
 use crate::CmdError;
@@ -26,8 +27,8 @@ pub enum Command {
     },
     /// Remove a node and every link attached to it.
     DeleteNode { id: NodeId },
-    /// Set an input's value (stand-in for `SetParam` until M0.5). `Int`
-    /// values are accepted for `Float` inputs and stored as `Float`.
+    /// Set an input's static value. `Int` values are accepted for `Float`
+    /// inputs and stored as `Float`.
     SetInput {
         node: NodeId,
         port: String,
@@ -45,8 +46,28 @@ pub enum Command {
     /// Remove the link feeding an input. Unlinking an unlinked input is a
     /// successful no-op.
     Unlink { to: NodeId, to_port: String },
-    /// Rename a node. Does not invalidate cooked results.
+    /// Rename a node. Does not invalidate cooked results. Rewrites the
+    /// `ch()` paths of expressions that read the node.
     Rename { node: NodeId, name: String },
+    /// Drive an input with an expression (replacing any previous one).
+    SetExpression {
+        node: NodeId,
+        port: String,
+        source: String,
+    },
+    /// Remove an input's expression. Clearing an input without one is a
+    /// successful no-op.
+    ClearExpression { node: NodeId, port: String },
+    /// Drive an input with an animation channel (replacing any previous
+    /// one).
+    SetAnimation {
+        node: NodeId,
+        port: String,
+        channel: AnimChannel,
+    },
+    /// Remove an input's animation channel. Clearing an input without one
+    /// is a successful no-op.
+    ClearAnimation { node: NodeId, port: String },
     /// Apply the commands in order, all or nothing. An empty transaction is
     /// a no-op.
     Transaction(Vec<Command>),
@@ -71,10 +92,22 @@ pub enum DocChange {
     },
     Linked(NamedLink),
     Unlinked(NamedLink),
+    /// Reported first; followed by `ExpressionChanged` for every
+    /// expression whose `ch()` paths were rewritten.
     Renamed {
         node: NodeId,
         old: String,
         new: String,
+    },
+    /// An input's expression was set, cleared or rewritten by a rename.
+    ExpressionChanged {
+        node: NodeId,
+        port: String,
+    },
+    /// An input's animation channel was set or cleared.
+    AnimationChanged {
+        node: NodeId,
+        port: String,
     },
 }
 
@@ -164,6 +197,22 @@ impl Command {
                             value: value.clone(),
                         }),
                 );
+                restore.extend(graph.expressions(id).map(|(port, source)| {
+                    Command::SetExpression {
+                        node: id,
+                        port: port.to_owned(),
+                        source: source.to_owned(),
+                    }
+                }));
+                restore.extend(
+                    graph
+                        .animations(id)
+                        .map(|(port, channel)| Command::SetAnimation {
+                            node: id,
+                            port: port.to_owned(),
+                            channel: channel.clone(),
+                        }),
+                );
                 let mut links = graph.incoming_links(id);
                 links.extend(graph.outgoing_links(id));
                 restore.extend(links.iter().map(link_command));
@@ -229,6 +278,7 @@ impl Command {
                 Ok(inverse)
             }
             Command::Rename { node, name } => {
+                let readers = graph.referenced_by(*node);
                 let old = graph.rename(*node, name)?;
                 if old != *name {
                     changes.push(DocChange::Renamed {
@@ -236,11 +286,60 @@ impl Command {
                         old: old.clone(),
                         new: name.clone(),
                     });
+                    changes.extend(
+                        readers
+                            .into_iter()
+                            .map(|(node, port)| DocChange::ExpressionChanged { node, port }),
+                    );
                 }
                 Ok(Command::Rename {
                     node: *node,
                     name: old,
                 })
+            }
+            Command::SetExpression { node, port, source } => {
+                let previous = graph.expression(*node, port)?.map(str::to_owned);
+                graph.set_expression(*node, port, source)?;
+                changes.push(DocChange::ExpressionChanged {
+                    node: *node,
+                    port: port.clone(),
+                });
+                Ok(restore_expression(*node, port, previous))
+            }
+            Command::ClearExpression { node, port } => {
+                let previous = graph.expression(*node, port)?.map(str::to_owned);
+                graph.clear_expression(*node, port)?;
+                if previous.is_some() {
+                    changes.push(DocChange::ExpressionChanged {
+                        node: *node,
+                        port: port.clone(),
+                    });
+                }
+                Ok(restore_expression(*node, port, previous))
+            }
+            Command::SetAnimation {
+                node,
+                port,
+                channel,
+            } => {
+                let previous = graph.animation(*node, port)?.cloned();
+                graph.set_animation(*node, port, channel.clone())?;
+                changes.push(DocChange::AnimationChanged {
+                    node: *node,
+                    port: port.clone(),
+                });
+                Ok(restore_animation(*node, port, previous))
+            }
+            Command::ClearAnimation { node, port } => {
+                let previous = graph.animation(*node, port)?.cloned();
+                graph.clear_animation(*node, port)?;
+                if previous.is_some() {
+                    changes.push(DocChange::AnimationChanged {
+                        node: *node,
+                        port: port.clone(),
+                    });
+                }
+                Ok(restore_animation(*node, port, previous))
             }
             Command::Transaction(steps) => {
                 let mark = changes.len();
@@ -280,6 +379,34 @@ fn restore_input(node: NodeId, port: &str, previous: Option<Value>) -> Command {
             value,
         },
         None => Command::ClearInput {
+            node,
+            port: port.to_owned(),
+        },
+    }
+}
+
+fn restore_expression(node: NodeId, port: &str, previous: Option<String>) -> Command {
+    match previous {
+        Some(source) => Command::SetExpression {
+            node,
+            port: port.to_owned(),
+            source,
+        },
+        None => Command::ClearExpression {
+            node,
+            port: port.to_owned(),
+        },
+    }
+}
+
+fn restore_animation(node: NodeId, port: &str, previous: Option<AnimChannel>) -> Command {
+    match previous {
+        Some(channel) => Command::SetAnimation {
+            node,
+            port: port.to_owned(),
+            channel,
+        },
+        None => Command::ClearAnimation {
             node,
             port: port.to_owned(),
         },

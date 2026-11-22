@@ -313,6 +313,7 @@ dependencies = [
  "criterion",
  "livspeil-graph",
  "livspeil-node-api",
+ "livspeil-params",
  "livspeil-nodes-core",
  "proptest",
  "serde",
@@ -340,6 +341,7 @@ dependencies = [
  "criterion",
  "livspeil-node-api",
  "livspeil-nodes-core",
+ "livspeil-params",
  "livspeil-testkit",
  "serde",
  "uuid",
@@ -369,6 +371,7 @@ dependencies = [
  "livspeil-node-api",
  "livspeil-testkit",
  "proptest",
+ "serde",
 ]
 
 [[package]]

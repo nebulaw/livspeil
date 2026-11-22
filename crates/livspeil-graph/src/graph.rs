@@ -8,9 +8,12 @@ use std::fmt;
 use std::sync::Arc;
 
 use livspeil_node_api::{NodeImpl, NodeRegistry, NodeSpec, PortType, Value};
+use livspeil_params::AnimChannel;
+use livspeil_params::expr::ExprError;
 use uuid::Uuid;
 
 use crate::snapshot::{GraphSnapshot, NamedLink, NodeSnapshot};
+use crate::sources::{Expression, InputRef};
 
 /// Stable identifier of a node (UUIDv7, so ids sort by creation time).
 ///
@@ -24,6 +27,9 @@ use crate::snapshot::{GraphSnapshot, NamedLink, NodeSnapshot};
 pub struct NodeId(Uuid);
 
 impl NodeId {
+    /// The smallest id (the nil UUID); handy for range queries.
+    pub(crate) const MIN: NodeId = NodeId(Uuid::nil());
+
     /// A fresh, time-ordered id.
     #[must_use]
     pub fn new() -> Self {
@@ -110,8 +116,18 @@ pub enum GraphError {
     TypeMismatch { expected: PortType, found: PortType },
     /// The input port already has a link; unlink it first.
     InputOccupied { node: NodeId, port: String },
-    /// The link would make a node depend on itself.
+    /// The link or `ch()` reference would make a node depend on itself.
     WouldCycle,
+    /// An expression failed to parse, resolve its `ch()` paths or type
+    /// check.
+    Expression(Box<ExprError>),
+    /// The node cannot be removed: input `port` of node `by` reads it
+    /// through `ch()`.
+    Referenced {
+        node: NodeId,
+        by: NodeId,
+        port: String,
+    },
 }
 
 impl fmt::Display for GraphError {
@@ -134,6 +150,11 @@ impl fmt::Display for GraphError {
                 write!(f, "input '{port}' of node {node} is already linked")
             }
             GraphError::WouldCycle => write!(f, "the link would create a cycle"),
+            GraphError::Expression(err) => write!(f, "expression error: {err}"),
+            GraphError::Referenced { node, by, port } => write!(
+                f,
+                "node {node} is read by ch() in input '{port}' of node {by}"
+            ),
         }
     }
 }
@@ -147,6 +168,10 @@ pub(crate) struct Node {
     /// Explicitly set input values, by input port index. `None` means "use
     /// the spec default".
     pub(crate) values: Vec<Option<Value>>,
+    /// Expressions, by input port index.
+    pub(crate) exprs: Vec<Option<Expression>>,
+    /// Animation channels, by input port index.
+    pub(crate) anims: Vec<Option<AnimChannel>>,
     /// Bumped whenever this node's inputs or links change.
     pub(crate) rev: u64,
 }
@@ -173,6 +198,8 @@ pub struct Graph {
     /// downstream traversal.
     outgoing: BTreeSet<(NodeId, NodeId, usize)>,
     names: HashMap<String, NodeId>,
+    /// `ch()` references as `(read node, reading node, reading input)`.
+    pub(crate) ch_edges: BTreeSet<(NodeId, NodeId, usize)>,
     rev_counter: u64,
 }
 
@@ -187,6 +214,7 @@ impl Graph {
             links: BTreeMap::new(),
             outgoing: BTreeSet::new(),
             names: HashMap::new(),
+            ch_edges: BTreeSet::new(),
             rev_counter: 0,
         }
     }
@@ -230,7 +258,8 @@ impl Graph {
             .get(qualified_id)
             .ok_or_else(|| GraphError::UnknownNodeType(qualified_id.to_owned()))?
             .clone();
-        let values = vec![None; imp.spec().inputs.len()];
+        let inputs = imp.spec().inputs.len();
+        let values = vec![None; inputs];
         self.rev_counter += 1;
         self.nodes.insert(
             id,
@@ -239,6 +268,8 @@ impl Graph {
                 type_id: qualified_id.to_owned(),
                 imp,
                 values,
+                exprs: (0..inputs).map(|_| None).collect(),
+                anims: vec![None; inputs],
                 rev: self.rev_counter,
             },
         );
@@ -247,11 +278,22 @@ impl Graph {
     }
 
     /// Remove a node and every link attached to it. Inputs that were fed by
-    /// the node fall back to their own values or defaults.
+    /// the node fall back to their own sources, values or defaults.
     ///
     /// # Errors
-    /// Fails if the node does not exist.
+    /// Fails if the node does not exist, or with [`GraphError::Referenced`]
+    /// if another node's expression reads one of its inputs.
     pub fn remove_node(&mut self, id: NodeId) -> Result<(), GraphError> {
+        if !self.nodes.contains_key(&id) {
+            return Err(GraphError::UnknownNode(id));
+        }
+        if let Some((by, port)) = self.referenced_by(id).into_iter().next() {
+            return Err(GraphError::Referenced { node: id, by, port });
+        }
+        let inputs = self.nodes.get(&id).map_or(0, |n| n.exprs.len());
+        for index in 0..inputs {
+            self.unindex_expression(id, index);
+        }
         let node = self.nodes.remove(&id).ok_or(GraphError::UnknownNode(id))?;
         self.names.remove(&node.name);
 
@@ -374,6 +416,9 @@ impl Graph {
     /// what a node computes, so it does not invalidate cooked results.
     /// Renaming a node to its current name is a no-op.
     ///
+    /// Every `ch()` path that reads the node is rewritten to the new name
+    /// (see [`Graph::set_expression`]).
+    ///
     /// # Errors
     /// Fails for an unknown node, an empty name or a name used by another
     /// node.
@@ -391,6 +436,15 @@ impl Graph {
         let old = std::mem::replace(&mut node.name, name.to_owned());
         self.names.remove(&old);
         self.names.insert(name.to_owned(), id);
+        if let Err(err) = self.rewrite_references(id, &old, name) {
+            // Unreachable in practice; restore the old name.
+            self.names.remove(name);
+            self.names.insert(old.clone(), id);
+            if let Some(node) = self.nodes.get_mut(&id) {
+                node.name = old;
+            }
+            return Err(err);
+        }
         Ok(old)
     }
 
@@ -488,7 +542,8 @@ impl Graph {
     }
 
     /// A canonical, comparable copy of the editable state: node ids, names,
-    /// types, explicitly set inputs and links. Cook revisions and the graph
+    /// types, explicitly set inputs, expressions, animation channels and
+    /// links. Cook revisions and the graph
     /// instance id are not part of it, so two graphs built by the same
     /// edits have equal snapshots.
     #[must_use]
@@ -503,6 +558,14 @@ impl Graph {
                 inputs: self
                     .input_values(id)
                     .map(|(port, value)| (port.to_owned(), value.clone()))
+                    .collect(),
+                expressions: self
+                    .expressions(id)
+                    .map(|(port, source)| (port.to_owned(), source.to_owned()))
+                    .collect(),
+                animations: self
+                    .animations(id)
+                    .map(|(port, channel)| (port.to_owned(), channel.clone()))
                     .collect(),
             })
             .collect();
@@ -566,14 +629,30 @@ impl Graph {
             .map(|(&(_, port), &src)| (port, src))
     }
 
-    fn bump(&mut self, id: NodeId) {
+    /// Every node `id` directly depends on (link sources and nodes read by
+    /// `ch()`), possibly with repeats.
+    pub(crate) fn dependencies(&self, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
+        let reads = self.nodes.get(&id).into_iter().flat_map(|n| {
+            n.exprs
+                .iter()
+                .flatten()
+                .flat_map(|e| e.targets.iter().map(|t: &InputRef| t.node))
+        });
+        self.upstream(id).map(|(_, src)| src.node).chain(reads)
+    }
+
+    pub(crate) fn bump(&mut self, id: NodeId) {
         self.rev_counter += 1;
         if let Some(node) = self.nodes.get_mut(&id) {
             node.rev = self.rev_counter;
         }
     }
 
-    fn input_port(&self, node: NodeId, port: &str) -> Result<(usize, PortType), GraphError> {
+    pub(crate) fn input_port(
+        &self,
+        node: NodeId,
+        port: &str,
+    ) -> Result<(usize, PortType), GraphError> {
         let n = self.nodes.get(&node).ok_or(GraphError::UnknownNode(node))?;
         let spec = n.imp.spec();
         spec.input_index(port)
@@ -598,9 +677,10 @@ impl Graph {
     }
 
     /// Whether `from` is `to` or already depends on `to`, i.e. whether
-    /// adding the link `from -> to` would close a cycle. Walks downstream
-    /// from `to`, which is cheap when `to` is new.
-    fn depends_on(&self, from: NodeId, to: NodeId) -> bool {
+    /// adding the link (or `ch()` reference) `from -> to` would close a
+    /// cycle. Walks downstream from `to` through links and `ch()`
+    /// references, which is cheap when `to` is new.
+    pub(crate) fn depends_on(&self, from: NodeId, to: NodeId) -> bool {
         if from == to {
             return true;
         }
@@ -615,6 +695,12 @@ impl Graph {
                 .range((current, NodeId(Uuid::nil()), 0)..)
                 .take_while(|(f, _, _)| *f == current)
             {
+                if next == from {
+                    return true;
+                }
+                stack.push(next);
+            }
+            for (next, _) in self.ch_dependents(current) {
                 if next == from {
                     return true;
                 }

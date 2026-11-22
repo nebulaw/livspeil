@@ -264,6 +264,85 @@ pub fn compile(source: &str, env: &dyn Env) -> Result<Program, ExprError> {
     compile::Gen::new(env).finish(&ast)
 }
 
+/// A `ch("path")` call found in an expression's source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelRef {
+    /// The decoded path.
+    pub path: String,
+    /// Byte span of the string literal, quotes included.
+    pub span: Span,
+}
+
+/// Every `ch()` call with a string literal argument in `source`, in source
+/// order (duplicates included). Used to rewrite paths, for example when a
+/// referenced node is renamed.
+///
+/// # Errors
+/// Returns the parse error when `source` is not a valid expression.
+pub fn channel_refs(source: &str) -> Result<Vec<ChannelRef>, ExprError> {
+    if source.len() > MAX_SOURCE_LEN {
+        return Err(ExprError::new(
+            ErrorKind::SourceTooLong {
+                limit: MAX_SOURCE_LEN,
+            },
+            Span::new(0, source.len()),
+        ));
+    }
+    let ast = parser::parse(source).map_err(|e| *e)?;
+    let mut out = Vec::new();
+    // Iterative walk: the tree height is bounded, but this keeps stack use
+    // flat anyway.
+    let mut stack: Vec<&parser::Expr> = vec![&ast];
+    while let Some(e) = stack.pop() {
+        match &e.kind {
+            parser::ExprKind::Call { name, args, .. } => {
+                if name == "ch" {
+                    if let [arg] = args.as_slice() {
+                        if let parser::ExprKind::Str(path) = &arg.kind {
+                            out.push(ChannelRef {
+                                path: path.clone(),
+                                span: arg.span,
+                            });
+                        }
+                    }
+                }
+                stack.extend(args.iter().rev());
+            }
+            parser::ExprKind::Unary(_, a) | parser::ExprKind::Member { base: a, .. } => {
+                stack.push(a);
+            }
+            parser::ExprKind::Binary(_, a, b) => {
+                stack.push(b);
+                stack.push(a);
+            }
+            parser::ExprKind::Cond(c, a, b) => {
+                stack.push(b);
+                stack.push(a);
+                stack.push(c);
+            }
+            _ => {}
+        }
+    }
+    out.sort_by_key(|r| r.span.start);
+    Ok(out)
+}
+
+/// A string literal for `text` in expression syntax: quotes and backslashes
+/// are escaped, everything else is kept as is.
+#[must_use]
+pub fn quote(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for c in text.chars() {
+        if c == '"' || c == '\\' {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('"');
+    out
+}
+
 /// Deterministic text form of a value, as produced by `str()`.
 ///
 /// Floats use the shortest representation that round-trips (`1.0`, `0.1`,

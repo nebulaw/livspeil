@@ -12,10 +12,15 @@ repository.workspace = true
 authors.workspace = true
 publish.workspace = true
 
+[features]
+# Serde derives for animation channels (journals, documents).
+serde = ["dep:serde", "livspeil-node-api/serde"]
+
 [dependencies]
 # Pure-Rust libm (MIT): bit-identical transcendental functions on every platform.
 libm = "0.2"
 livspeil-node-api = { path = "../livspeil-node-api" }
+serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }

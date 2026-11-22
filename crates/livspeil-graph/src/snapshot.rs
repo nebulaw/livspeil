@@ -4,6 +4,7 @@
 //! Canonical, comparable copies of a graph's editable state.
 
 use livspeil_node_api::Value;
+use livspeil_params::AnimChannel;
 
 use crate::NodeId;
 
@@ -27,6 +28,12 @@ pub struct NodeSnapshot {
     pub type_id: String,
     /// Explicitly set inputs as `(port name, value)`, in port order.
     pub inputs: Vec<(String, Value)>,
+    /// Expressions as `(port name, source)`, in port order.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub expressions: Vec<(String, String)>,
+    /// Animation channels as `(port name, channel)`, in port order.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub animations: Vec<(String, AnimChannel)>,
 }
 
 /// The editable state of a graph: nodes in id order and links ordered by
