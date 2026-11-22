@@ -33,17 +33,20 @@
 //!
 //! # Delivery order
 //!
-//! Deterministic and independent of caching. One FIFO queue per tick,
-//! seeded with, in order:
+//! Deterministic and independent of caching. A tick has these *roots*, in
+//! order:
 //!
 //! 1. the host's events ([`ExternalEvent`]), in the order given: an event
 //!    for an `Event` input is delivered to it, one for an `Event` output is
 //!    emitted from it;
 //! 2. a poll of every polling node, in node id order.
 //!
-//! Then items are taken from the front until the queue is empty. A poll
-//! or delivery calls the node's handler; the events it emits are appended
-//! in emission order. An emission is recorded in [`TickReport::fired`] and
+//! Each root is put in a FIFO queue that is drained completely (its whole
+//! cascade, breadth first) before the next root starts, so a poll sees
+//! every state change made by the roots before it (an `on_change` polled
+//! after a timer sees what the timer toggled in the same tick). A poll or
+//! delivery calls the node's handler; the events it emits are appended in
+//! emission order. An emission is recorded in [`TickReport::fired`] and
 //! queues one delivery per linked `Event` input, ordered by target node id
 //! and input port. Interface nodes of subnets (`core.subnet.input`,
 //! `core.output` with port type `Event`) forward what they receive to their
@@ -342,9 +345,10 @@ impl Cooker {
     }
 
     /// Run the *input* and *events* phases of one tick: set the clock to
-    /// `clock`, queue `external` (in order) and a poll of every polling
-    /// node (in id order), and deliver until the queue is empty or the
-    /// event limit is reached. Cook the targets afterwards. Call it once
+    /// `clock`, then process `external` (in order) and a poll of every
+    /// polling node (in id order), each with its whole cascade of events,
+    /// until everything is delivered or the event limit is reached. Cook
+    /// the targets afterwards. Call it once
     /// per frame: polling nodes such as `core.event.every` fire again when
     /// a tick is repeated. See the `cook/events.rs` module docs for the
     /// order and caching rules.
@@ -364,22 +368,23 @@ impl Cooker {
         if external.is_empty() && self.events.pollers.is_empty() {
             return report;
         }
-        let mut queue = VecDeque::new();
+        let mut roots = Vec::with_capacity(external.len() + self.events.pollers.len());
         for ext in external {
             let Some(slot) = graph.slot_of(ext.node) else {
                 continue;
             };
             let (port, event) = (ext.port, ext.event.clone());
-            queue.push_back(match ext.direction {
+            roots.push(match ext.direction {
                 PortDirection::Input => Item::Deliver { slot, port, event },
                 PortDirection::Output => Item::Emit { slot, port, event },
             });
         }
-        queue.extend(self.events.pollers.iter().map(|&slot| Item::Poll { slot }));
-
-        while let Some(item) = queue.pop_front() {
+        roots.extend(self.events.pollers.iter().map(|&slot| Item::Poll { slot }));
+        let mut roots = roots.into_iter();
+        let mut queue = VecDeque::new();
+        while let Some(item) = queue.pop_front().or_else(|| roots.next()) {
             if report.processed >= self.events.limit {
-                report.dropped = queue.len() + 1;
+                report.dropped = queue.len() + roots.len() + 1;
                 break;
             }
             report.processed += 1;

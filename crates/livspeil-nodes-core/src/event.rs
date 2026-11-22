@@ -96,8 +96,9 @@ impl Every {
 /// `floor(x)` as an `i64`, rejecting values out of range.
 fn floor_index(x: f64) -> Result<i64, NodeError> {
     let f = x.floor();
-    // i64::MIN and MAX as f64 are -2^63 and 2^63.
-    if f.is_finite() && f >= -9.223_372_036_854_775_808e18 && f < 9.223_372_036_854_775_808e18 {
+    // 2^63 (exactly representable): i64 covers [-2^63, 2^63).
+    const TWO_63: f64 = 9.223_372_036_854_776e18;
+    if (-TWO_63..TWO_63).contains(&f) {
         // In range by the check above.
         #[allow(clippy::cast_possible_truncation)]
         Ok(f as i64)

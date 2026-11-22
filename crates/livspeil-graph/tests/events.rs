@@ -295,7 +295,7 @@ fn cookers_keep_their_own_state() {
 }
 
 #[test]
-fn delivery_order_is_emission_then_target_id() {
+fn delivery_order_is_root_then_emission_then_target_id() {
     let mut g = graph();
     // Ids chosen so that creation order and id order differ.
     let src = g.add_node_with_id(id(50), GATE, "src").unwrap();
@@ -319,9 +319,9 @@ fn delivery_order_is_emission_then_target_id() {
         order,
         [
             (src, p(1)),
-            (src, p(2)),
             (early, p(1)),
             (late, p(1)),
+            (src, p(2)),
             (early, p(2)),
             (late, p(2)),
         ]

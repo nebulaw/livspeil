@@ -488,7 +488,6 @@ impl Cooker {
                 e.rev != node.rev
                     || e.clock != clock
                     || state_version > e.stamp
-
                     || node
                         .link_in
                         .iter()
