@@ -11,7 +11,7 @@
 //! * Every edit to a graph gets a new *epoch*. An edit that can change what
 //!   a node computes (an input value, link, expression, animation channel,
 //!   a removed upstream node) marks the node and everything downstream of
-//!   it, through links and `ch()` readers, with that epoch (the graph's
+//!   it, through links and `ch()`/`out()` readers, with that epoch (the graph's
 //!   per-slot `dirty` epochs; see [`Graph`] for how the walk stops early).
 //!   Renames do not mark anything.
 //! * A [`Cooker`] stores, per node, the graph epoch at which it last
@@ -27,9 +27,9 @@
 //!   target is not stale. Otherwise it walks the cached evaluation order of
 //!   the target's upstream and visits only the stale nodes.
 //! * A stale node is re-cooked only if something it reads really changed:
-//!   its own revision, the output version of a linked upstream node or the
-//!   resolved-inputs version of a node it reads through `ch()` is newer
-//!   than the node's own `stamp`, or (if time-dependent itself) the clock
+//!   its own revision, the output version of a linked upstream node or of
+//!   a node it reads through `out()`, or the resolved-inputs version of a
+//!   node it reads through `ch()` is newer than the node's own `stamp`, or (if time-dependent itself) the clock
 //!   differs. A re-cooked node whose outputs are equal keeps its version,
 //!   so its dependents are reused (early cutoff). Versions come from one
 //!   monotonic counter per cooker, so "newer than the stamp" is exact.
@@ -62,7 +62,7 @@ use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use livspeil_node_api::{CookContext, NodeError, SystemContext, Value};
-use livspeil_params::expr::{EvalContext, ExprError};
+use livspeil_params::expr::{EvalContext, ExprError, RefKind};
 use uuid::Uuid;
 
 use crate::graph::{Graph, Node, NodeId};
@@ -498,7 +498,10 @@ impl Cooker {
                         .iter()
                         .flatten()
                         .flat_map(|x| x.targets.iter())
-                        .any(|t| newer(t.slot, |d| d.inputs_version))
+                        .any(|t| match t.kind {
+                            RefKind::Input => newer(t.slot, |d| d.inputs_version),
+                            RefKind::Output => newer(t.slot, |d| d.version),
+                        })
             }
         };
         if !changed {
@@ -653,7 +656,8 @@ fn gather_inputs(
     Ok(())
 }
 
-/// Evaluate an expression against the resolved inputs it reads.
+/// Evaluate an expression against the resolved inputs (`ch()`) and last
+/// good outputs (`out()`) it reads.
 fn eval_expression(
     entries: &[Option<Entry>],
     expr: &Expression,
@@ -667,8 +671,11 @@ fn eval_expression(
         let value = entries
             .get(target.slot)
             .and_then(Option::as_ref)
-            .and_then(|e| e.inputs.as_ref())
-            .and_then(|inputs| inputs.get(target.port))
+            .and_then(|e| match target.kind {
+                RefKind::Input => e.inputs.as_ref(),
+                RefKind::Output => e.outputs.as_ref(),
+            })
+            .and_then(|values| values.get(target.port))
             .ok_or(CookError::Upstream { node: target.node })?;
         slots.push(value.clone());
     }

@@ -11,7 +11,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use livspeil_node_api::{PortType, Value};
-use livspeil_params::expr::{Channel, EvalContext, compile, format_value};
+use livspeil_params::expr::{Channel, Env, EvalContext, compile, format_value};
 use livspeil_testkit::assert_golden;
 
 const CASES: &[&str] = &[
@@ -86,19 +86,53 @@ const CASES: &[&str] = &[
     "\"open",
     "1 = 2",
     "abs(-9223372036854775807 - 1)",
+    // out(): outputs of other nodes (D48)
+    "smoothstep(5, 8, out(\"time_of_day/hour\"))",
+    "max(0, out(\"sun/elevation\") / 90)",
+    "ceil(out(\"books/count\") / 12.0)",
+    "out(\"books/count\") / 12",
+    "ch(\"radius\") * out(\"sun/elevation\")",
+    "out(\"nope/x\")",
+    "out(\"radius\")",
+    "out(\"db/rows\")",
+    "out(1)",
 ];
 
-fn env() -> BTreeMap<String, Channel> {
-    let mut env = BTreeMap::new();
+/// Parameters for `ch()` and outputs for `out()`, in one slot space.
+struct Golden {
+    inputs: BTreeMap<String, Channel>,
+    outputs: BTreeMap<String, Channel>,
+}
+
+impl Env for Golden {
+    fn resolve(&self, path: &str) -> Option<Channel> {
+        self.inputs.get(path).copied()
+    }
+
+    fn resolve_output(&self, path: &str) -> Option<Channel> {
+        self.outputs.get(path).copied()
+    }
+}
+
+fn env() -> Golden {
+    let mut inputs = BTreeMap::new();
     let mut add = |path: &str, slot, ty| {
-        env.insert(path.to_owned(), Channel { slot, ty });
+        inputs.insert(path.to_owned(), Channel { slot, ty });
     };
     add("radius", 0, PortType::Float);
     add("center", 1, PortType::Vec2);
     add("count", 2, PortType::Int);
     add("tint", 3, PortType::Color);
     add("label", 4, PortType::String);
-    env
+    let mut outputs = BTreeMap::new();
+    let mut add = |path: &str, slot, ty| {
+        outputs.insert(path.to_owned(), Channel { slot, ty });
+    };
+    add("time_of_day/hour", 5, PortType::Float);
+    add("sun/elevation", 6, PortType::Float);
+    add("books/count", 7, PortType::Int);
+    add("db/rows", 8, PortType::Table);
+    Golden { inputs, outputs }
 }
 
 fn render(value: &Value) -> String {
@@ -117,6 +151,9 @@ fn expressions() {
         Value::Int(3),
         Value::Color([0.62, 0.15, 250.0, 1.0]),
         Value::String("sun".to_owned()),
+        Value::Float(6.5),
+        Value::Float(45.0),
+        Value::Int(25),
     ];
     let ctx = EvalContext::new(12, 0.5, 1.0 / 60.0, &slots);
     let mut out = String::new();
@@ -132,6 +169,9 @@ fn expressions() {
                     }
                     if !p.dependencies().is_empty() {
                         let _ = write!(info, " [deps {:?}]", p.dependencies());
+                    }
+                    if !p.output_dependencies().is_empty() {
+                        let _ = write!(info, " [out deps {:?}]", p.output_dependencies());
                     }
                     format!("{} : {}{info}", render(&v), p.result_type())
                 }

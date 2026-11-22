@@ -61,8 +61,15 @@
 //! `$F` (frame, `Int`), `$T` (seconds, `Float`), `$DT` (seconds since the
 //! previous frame, `Float`); any of them makes the program time dependent.
 //! Constants: `true`, `false`, `pi`, `tau`. `ch("path")` reads another
-//! parameter; the path must be a string literal and is resolved at compile
-//! time by an [`Env`].
+//! parameter (a node's resolved *input*) and `out("path")` another node's
+//! computed *output* (decision D48), for example
+//! `smoothstep(5, 8, out("time_of_day/hour"))`. In both the path must be a
+//! string literal; it is resolved at compile time by an [`Env`]
+//! ([`Env::resolve`] for `ch()`, [`Env::resolve_output`] for `out()`), and
+//! the expression has the type of the port it names. Ports whose type
+//! expressions cannot hold (`Table`, `Curve`, `Image`, ...) are compile
+//! errors at the path. [`Program::dependencies`] and
+//! [`Program::output_dependencies`] list the slots each kind reads.
 //!
 //! | Function | Arguments | Result |
 //! |---|---|---|
@@ -114,22 +121,60 @@ pub const MAX_DEPTH: usize = 256;
 /// Maximum length of an expression's source in bytes.
 pub const MAX_SOURCE_LEN: usize = 64 * 1024;
 
-/// A parameter that `ch("path")` resolved to.
+/// A parameter that `ch("path")` (or an output that `out("path")`)
+/// resolved to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Channel {
     /// Index into [`EvalContext::slots`].
     pub slot: usize,
-    /// The parameter's type; also the type of the `ch()` expression.
+    /// The port's type; also the type of the `ch()`/`out()` expression.
     pub ty: PortType,
 }
 
-/// Resolves `ch("path")` references while compiling.
-pub trait Env {
-    /// The slot and type of the parameter at `path`, or `None` if unknown.
-    fn resolve(&self, path: &str) -> Option<Channel>;
+/// Whether a path reference reads an input (`ch()`) or an output (`out()`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "snake_case")
+)]
+pub enum RefKind {
+    /// `ch("node/port")`: the resolved value of an input.
+    Input,
+    /// `out("node/port")`: the computed value of an output.
+    Output,
 }
 
-/// An environment without parameters: every `ch()` fails to compile.
+impl RefKind {
+    /// The function name in expression syntax: `ch` or `out`.
+    #[must_use]
+    pub fn function(self) -> &'static str {
+        match self {
+            RefKind::Input => "ch",
+            RefKind::Output => "out",
+        }
+    }
+}
+
+/// Resolves `ch("path")` and `out("path")` references while compiling.
+///
+/// Inputs and outputs share one slot space: an environment must give
+/// distinct slots to distinct ports, whichever kind they are.
+pub trait Env {
+    /// The slot and type of the parameter (input) at `path`, or `None` if
+    /// unknown.
+    fn resolve(&self, path: &str) -> Option<Channel>;
+
+    /// The slot and type of the output at `path`, or `None` if unknown.
+    /// The default knows no outputs, so every `out()` fails to compile.
+    fn resolve_output(&self, path: &str) -> Option<Channel> {
+        let _ = path;
+        None
+    }
+}
+
+/// An environment without parameters: every `ch()` and `out()` fails to
+/// compile.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoChannels;
 
@@ -160,7 +205,8 @@ pub struct EvalContext<'a> {
     pub time: f64,
     /// `$DT`, seconds.
     pub dt: f64,
-    /// Values of the parameters `ch()` reads, indexed by [`Channel::slot`].
+    /// Values of the ports `ch()` and `out()` read, indexed by
+    /// [`Channel::slot`].
     pub slots: &'a [Value],
 }
 
@@ -196,7 +242,10 @@ pub struct Program {
     spans: Vec<Span>,
     strings: Vec<String>,
     ty: PortType,
+    /// Slots read through `ch()`.
     deps: Vec<usize>,
+    /// Slots read through `out()`.
+    out_deps: Vec<usize>,
     time_dependent: bool,
     /// Peak depth of the numeric stack.
     max_num: usize,
@@ -226,6 +275,13 @@ impl Program {
         &self.deps
     }
 
+    /// The slots read through `out()`, sorted and without duplicates.
+    /// Slots in branches that may not run are included.
+    #[must_use]
+    pub fn output_dependencies(&self) -> &[usize] {
+        &self.out_deps
+    }
+
     /// Whether the program reads `$F`, `$T` or `$DT`.
     #[must_use]
     pub fn is_time_dependent(&self) -> bool {
@@ -246,11 +302,12 @@ impl Program {
     }
 }
 
-/// Compile `source`, resolving `ch()` paths through `env`.
+/// Compile `source`, resolving `ch()` and `out()` paths through `env`.
 ///
 /// # Errors
 /// Returns an [`ExprError`] with a byte span for syntax errors, unknown
-/// names, wrong arity, type mismatches and unknown `ch()` paths.
+/// names, wrong arity, type mismatches, unknown `ch()`/`out()` paths and
+/// ports of types expressions cannot use.
 pub fn compile(source: &str, env: &dyn Env) -> Result<Program, ExprError> {
     if source.len() > MAX_SOURCE_LEN {
         return Err(ExprError::new(
@@ -264,18 +321,20 @@ pub fn compile(source: &str, env: &dyn Env) -> Result<Program, ExprError> {
     compile::Gen::new(env).finish(&ast)
 }
 
-/// A `ch("path")` call found in an expression's source.
+/// A `ch("path")` or `out("path")` call found in an expression's source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChannelRef {
     /// The decoded path.
     pub path: String,
     /// Byte span of the string literal, quotes included.
     pub span: Span,
+    /// `ch()` (an input) or `out()` (an output).
+    pub kind: RefKind,
 }
 
-/// Every `ch()` call with a string literal argument in `source`, in source
-/// order (duplicates included). Used to rewrite paths, for example when a
-/// referenced node is renamed.
+/// Every `ch()` and `out()` call with a string literal argument in
+/// `source`, in source order (duplicates included). Used to rewrite paths,
+/// for example when a referenced node is renamed.
 ///
 /// # Errors
 /// Returns the parse error when `source` is not a valid expression.
@@ -296,14 +355,18 @@ pub fn channel_refs(source: &str) -> Result<Vec<ChannelRef>, ExprError> {
     while let Some(e) = stack.pop() {
         match &e.kind {
             parser::ExprKind::Call { name, args, .. } => {
-                if name == "ch" {
-                    if let [arg] = args.as_slice() {
-                        if let parser::ExprKind::Str(path) = &arg.kind {
-                            out.push(ChannelRef {
-                                path: path.clone(),
-                                span: arg.span,
-                            });
-                        }
+                let kind = match name.as_str() {
+                    "ch" => Some(RefKind::Input),
+                    "out" => Some(RefKind::Output),
+                    _ => None,
+                };
+                if let (Some(kind), [arg]) = (kind, args.as_slice()) {
+                    if let parser::ExprKind::Str(path) = &arg.kind {
+                        out.push(ChannelRef {
+                            path: path.clone(),
+                            span: arg.span,
+                            kind,
+                        });
                     }
                 }
                 stack.extend(args.iter().rev());

@@ -36,19 +36,38 @@
 //! `ch()` reads the *resolved* value of the input (after links,
 //! expressions and animation), with the input's port type.
 //!
+//! # `out()` paths (M0.11, decision D48)
+//!
+//! `out("node/port")` reads the computed value of *output* `port` of a
+//! node instead, with the output's port type, so a formula can replace a
+//! chain of math nodes: `smoothstep(5, 8, out("time_of_day/hour"))`. Paths
+//! use exactly the syntax and resolution rules of `ch()` above; only the
+//! port name is looked up among the node's outputs. The value read is the
+//! node's last good output, so a node that fails after producing a good
+//! output keeps feeding its readers (as through a link), and one that
+//! never produced an output gives its readers
+//! [`crate::CookError::Upstream`].
+//!
 //! # Dependencies
 //!
-//! An expression that reads `ch("m/p")` on node `n` makes `n` depend on node
-//! `m`, exactly like a link from `m` to `n`: such an edge may not close a
-//! cycle ([`GraphError::WouldCycle`]), the cooker evaluates `m` first, and
-//! `n` re-cooks when the resolved inputs of `m` change.
+//! An expression that reads `ch("m/p")` or `out("m/p")` on node `n` makes
+//! `n` depend on node `m`, exactly like a link from `m` to `n`: such an
+//! edge may not close a cycle ([`GraphError::WouldCycle`]), the cooker
+//! evaluates `m` first, and `n` re-cooks when the resolved inputs of `m`
+//! change (`ch()`) or when the outputs of `m` change (`out()`; early cutoff
+//! applies: a re-cooked `m` with equal outputs does not re-cook `n`). Both
+//! kinds are indexed the same way (one edge per reading input and read
+//! node), so invalidation, evaluation order and time dependence need
+//! nothing new. [`Graph::expression_refs`] lists every reference, for
+//! example to draw them as dashed wires.
 //!
 //! # Renames and deletes
 //!
 //! Expression sources stay the single source of truth, and they never
 //! dangle:
 //!
-//! * Renaming a node rewrites every `ch()` path literal that refers to it
+//! * Renaming a node rewrites every `ch()` and `out()` path literal that
+//!   refers to it
 //!   or passes through it (renaming a subnet rewrites the paths into it),
 //!   in every expression of the graph: only the path segment naming the
 //!   node changes, so relative paths stay relative and a `../` prefix is
@@ -65,17 +84,40 @@ use std::collections::BTreeSet;
 use std::ops::Range;
 
 use livspeil_params::AnimChannel;
-use livspeil_params::expr::{self, Channel, Env, Program};
+use livspeil_params::expr::{self, Channel, Env, Program, RefKind};
 
 use crate::graph::{Graph, GraphError, NodeId};
 
-/// An input of a node, by port index: the target of a `ch()` reference.
+/// A port of a node, by port index: the target of a `ch()` reference (an
+/// input, [`RefKind::Input`]) or of an `out()` reference (an output,
+/// [`RefKind::Output`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct InputRef {
     pub(crate) node: NodeId,
     /// The node's slot (see [`Graph`]); fixed while the node exists.
     pub(crate) slot: usize,
+    /// Index into the node's inputs or outputs, depending on `kind`.
     pub(crate) port: usize,
+    pub(crate) kind: RefKind,
+}
+
+/// One `ch()` or `out()` reference of an expression: input `reader_port`
+/// of node `reader` reads port `target_port` of node `target` (an input
+/// for [`RefKind::Input`], an output for [`RefKind::Output`]). See
+/// [`Graph::expression_refs`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ExprRef {
+    /// The node holding the expression.
+    pub reader: NodeId,
+    /// The input the expression drives.
+    pub reader_port: String,
+    /// `ch()` reads an input, `out()` an output.
+    pub kind: RefKind,
+    /// The node read.
+    pub target: NodeId,
+    /// The port read: an input or output name, depending on `kind`.
+    pub target_port: String,
 }
 
 /// A compiled expression attached to an input.
@@ -83,7 +125,7 @@ pub(crate) struct InputRef {
 pub(crate) struct Expression {
     pub(crate) source: String,
     pub(crate) program: Program,
-    /// Slot `i` of the program reads input `targets[i]`.
+    /// Slot `i` of the program reads port `targets[i]`.
     pub(crate) targets: Vec<InputRef>,
 }
 
@@ -184,23 +226,36 @@ pub(crate) fn render_path(
     path
 }
 
-/// Resolves `ch()` paths against a graph, assigning one slot per distinct
-/// input.
+/// Resolves `ch()` and `out()` paths against a graph, assigning one slot
+/// per distinct port.
 struct GraphEnv<'a> {
     graph: &'a Graph,
     network: Option<NodeId>,
     targets: RefCell<Vec<InputRef>>,
 }
 
-impl Env for GraphEnv<'_> {
-    fn resolve(&self, path: &str) -> Option<Channel> {
+impl GraphEnv<'_> {
+    fn resolve_kind(&self, path: &str, kind: RefKind) -> Option<Channel> {
         let resolved = resolve_path(self.graph, self.network, path)?;
         let (node, port_name) = (resolved.node, resolved.port.as_str());
         let spec = self.graph.node_spec(node)?;
-        let port = spec.input_index(port_name)?;
-        let ty = spec.inputs.get(port)?.ty;
+        let (port, ty) = match kind {
+            RefKind::Input => {
+                let port = spec.input_index(port_name)?;
+                (port, spec.inputs.get(port)?.ty)
+            }
+            RefKind::Output => {
+                let port = spec.output_index(port_name)?;
+                (port, spec.outputs.get(port)?.ty)
+            }
+        };
         let slot = self.graph.slot_of(node)?;
-        let target = InputRef { node, slot, port };
+        let target = InputRef {
+            node,
+            slot,
+            port,
+            kind,
+        };
         let mut targets = self.targets.borrow_mut();
         let slot = match targets.iter().position(|t| *t == target) {
             Some(slot) => slot,
@@ -210,6 +265,16 @@ impl Env for GraphEnv<'_> {
             }
         };
         Some(Channel { slot, ty })
+    }
+}
+
+impl Env for GraphEnv<'_> {
+    fn resolve(&self, path: &str) -> Option<Channel> {
+        self.resolve_kind(path, RefKind::Input)
+    }
+
+    fn resolve_output(&self, path: &str) -> Option<Channel> {
+        self.resolve_kind(path, RefKind::Output)
     }
 }
 
@@ -234,7 +299,7 @@ pub(crate) fn compile(
 }
 
 /// `source` (of an expression on a node in network `network`) with every
-/// `ch()` path that names node `renamed` changed to name it `new`, judged
+/// `ch()` and `out()` path that names node `renamed` changed to name it `new`, judged
 /// against the current names. Returns `None` when nothing changes.
 pub(crate) fn rewrite(
     graph: &Graph,
@@ -294,7 +359,9 @@ impl Graph {
     /// Priority of an input's sources: link, expression, animation channel,
     /// static value, spec default.
     ///
-    /// `ch()` paths are relative to the network holding `node`:
+    /// `ch("path")` reads an input of another node and `out("path")` an
+    /// output (see the [module docs](self) of `sources`). Paths are
+    /// relative to the network holding `node`:
     /// `"x/port"` names input `port` of sibling `x` (`"sub/x/port"` looks
     /// inside subnet `sub`), `"../x/port"` names node `x` of the parent
     /// network (in the root network, the root itself, as before subnets
@@ -302,11 +369,14 @@ impl Graph {
     /// is first read the pre-M0.7 way (one leading `../` removed, the rest
     /// before the last `/` as a single name). `ch()` reads the input's
     /// *resolved* value (after links, expressions and animation), in any
-    /// network. A node cannot read its own inputs.
+    /// network; `out()` reads the output's last good value. A node cannot
+    /// read its own inputs or outputs.
     ///
-    /// Each `ch()` reference makes `node` depend on the node it reads, like
-    /// a link: it must not close a cycle, and `node` re-cooks when the read
-    /// node's resolved inputs change. Expressions reading `$F`, `$T` or
+    /// Each `ch()` or `out()` reference makes `node` depend on the node it
+    /// reads, like a link: it must not close a cycle, and `node` re-cooks
+    /// when the read node's resolved inputs (`ch()`) or outputs (`out()`)
+    /// change. If an `out()` target has never produced an output, `node`
+    /// fails with [`crate::CookError::Upstream`]. Expressions reading `$F`, `$T` or
     /// `$DT` (and animation channels) make the node re-cook every frame.
     /// Evaluation errors become [`crate::CookError::Expression`] on the
     /// node, which keeps its last good output.
@@ -320,9 +390,10 @@ impl Graph {
     ///
     /// # Errors
     /// Fails for an unknown node or port, a syntax, name or type error
-    /// ([`GraphError::Expression`], including unknown `ch()` paths), a
-    /// result type the input does not accept ([`GraphError::TypeMismatch`])
-    /// or a `ch()` reference that would create a cycle
+    /// ([`GraphError::Expression`], including unknown `ch()`/`out()` paths
+    /// and ports of types expressions cannot use), a result type the input
+    /// does not accept ([`GraphError::TypeMismatch`]) or a `ch()`/`out()`
+    /// reference that would create a cycle
     /// ([`GraphError::WouldCycle`]).
     pub fn set_expression(
         &mut self,
@@ -487,8 +558,10 @@ impl Graph {
         })
     }
 
-    /// The inputs of other nodes whose expressions read an input of `node`
-    /// through `ch()`, as `(node, port name)`, ordered by node id and port.
+    /// The inputs of other nodes whose expressions read a port of `node`
+    /// (an input through `ch()` or an output through `out()`), as
+    /// `(node, port name)`, ordered by node id and port, each once. See
+    /// [`Graph::expression_refs`] for what each one reads.
     #[must_use]
     pub fn referenced_by(&self, node: NodeId) -> Vec<(NodeId, String)> {
         self.ch_dependents(node)
@@ -499,8 +572,55 @@ impl Graph {
             .collect()
     }
 
+    /// Every `ch()` and `out()` reference of every expression in the
+    /// graph (all networks), for example for a UI that draws them as
+    /// dashed wires. Sorted by reader, reader port index, kind, target and
+    /// target port index; a port read several times by one expression is
+    /// listed once.
+    #[must_use]
+    pub fn expression_refs(&self) -> Vec<ExprRef> {
+        // Sort key: (reader, reader input, kind, target, target port).
+        type Key = (NodeId, usize, RefKind, NodeId, usize);
+        let mut keyed: Vec<(Key, ExprRef)> = Vec::new();
+        for reader in self.node_ids() {
+            let Some(n) = self.node(reader) else {
+                continue;
+            };
+            let spec = n.imp.spec();
+            for (index, e) in n.exprs.iter().enumerate() {
+                let (Some(e), Some(port)) = (e, spec.inputs.get(index)) else {
+                    continue;
+                };
+                for t in &e.targets {
+                    let Some(target_spec) = self.node_spec(t.node) else {
+                        continue;
+                    };
+                    let target_port = match t.kind {
+                        RefKind::Input => target_spec.inputs.get(t.port),
+                        RefKind::Output => target_spec.outputs.get(t.port),
+                    };
+                    let Some(target_port) = target_port else {
+                        continue;
+                    };
+                    keyed.push((
+                        (reader, index, t.kind, t.node, t.port),
+                        ExprRef {
+                            reader,
+                            reader_port: port.name.to_owned(),
+                            kind: t.kind,
+                            target: t.node,
+                            target_port: target_port.name.to_owned(),
+                        },
+                    ));
+                }
+            }
+        }
+        keyed.sort_by_key(|(key, _)| *key);
+        keyed.into_iter().map(|(_, r)| r).collect()
+    }
+
     /// `(dependent node, dependent input index)` of every expression that
-    /// reads an input of `node`.
+    /// reads a port of `node` (through `ch()` or `out()`).
     pub(crate) fn ch_dependents(&self, node: NodeId) -> impl Iterator<Item = (NodeId, usize)> + '_ {
         self.ch_edges
             .range((node, NodeId::MIN, 0)..)

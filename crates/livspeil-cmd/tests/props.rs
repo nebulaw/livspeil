@@ -178,7 +178,8 @@ fn link() -> impl Strategy<Value = Command> {
 }
 
 /// Expression sources: valid ones reading `$T` or other nodes through
-/// `ch()` (which may be unknown, mistyped or cyclic), plus broken ones.
+/// `ch()` and `out()` (which may be unknown, mistyped or cyclic), plus
+/// broken ones.
 fn source() -> impl Strategy<Value = String> {
     let template = prop::sample::select(vec![
         "$T * 2",
@@ -190,6 +191,11 @@ fn source() -> impl Strategy<Value = String> {
         "ch(\"{n}/a\") + ch(\"{m}/b\")",
         "ch(\"/{m}/{n}/{p}\") + 1",
         "ch(\"{m}/{n}/a\") + ch(\"../../{n}/b\")",
+        // out() (M0.11): outputs, possibly unknown, mistyped or cyclic.
+        "out(\"{n}/{o}\") + 1",
+        "out(\"{n}/out\") * 0.5 + ch(\"{m}/{p}\")",
+        "out(\"{n}/flag\") ? out(\"{m}/n\") : 0",
+        "out(\"/{m}/{n}/{o}\") + out(\"../{n}/out\")",
         "true",
         "1 +",
     ]);
@@ -198,8 +204,14 @@ fn source() -> impl Strategy<Value = String> {
         owned(&NAMES[..10]),
         owned(&NAMES[..10]),
         owned(&INPUTS),
+        owned(&OUTPUTS),
     )
-        .prop_map(|(t, n, m, p)| t.replace("{n}", &n).replace("{m}", &m).replace("{p}", &p))
+        .prop_map(|(t, n, m, p, o)| {
+            t.replace("{n}", &n)
+                .replace("{m}", &m)
+                .replace("{p}", &p)
+                .replace("{o}", &o)
+        })
 }
 
 fn channel() -> impl Strategy<Value = AnimChannel> {

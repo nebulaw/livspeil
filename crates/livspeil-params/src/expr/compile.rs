@@ -8,7 +8,7 @@ use livspeil_node_api::PortType;
 use super::error::{ErrorKind, ExprError, Span};
 use super::parser::{BinOp, Expr, ExprKind, UnOp};
 use super::vm::{Cmp, F1, F2, F3, I2, Op};
-use super::{Env, Program};
+use super::{Env, Program, RefKind};
 
 type Ty = PortType;
 
@@ -47,7 +47,7 @@ fn is_expr_type(t: Ty) -> bool {
     )
 }
 
-/// Built-in functions. `if` and `ch` are special forms.
+/// Built-in functions. `if`, `ch` and `out` are special forms.
 #[derive(Debug, Clone, Copy)]
 enum Fun {
     Math(F1),
@@ -74,6 +74,7 @@ enum Fun {
     ToFloat,
     If,
     Ch,
+    Out,
 }
 
 /// `(function, min arity, max arity)`.
@@ -125,6 +126,7 @@ fn lookup(name: &str) -> Option<(Fun, usize, usize)> {
         "float" => one(ToFloat),
         "if" => three(If),
         "ch" => one(Ch),
+        "out" => one(Out),
         _ => None,
     }
 }
@@ -162,6 +164,7 @@ pub(crate) struct Gen<'e> {
     spans: Vec<Span>,
     strings: Vec<String>,
     deps: Vec<usize>,
+    out_deps: Vec<usize>,
     time: bool,
     num: isize,
     max_num: isize,
@@ -176,6 +179,7 @@ impl<'e> Gen<'e> {
             spans: Vec::new(),
             strings: Vec::new(),
             deps: Vec::new(),
+            out_deps: Vec::new(),
             time: false,
             num: 0,
             max_num: 0,
@@ -194,12 +198,15 @@ impl<'e> Gen<'e> {
         }
         self.deps.sort_unstable();
         self.deps.dedup();
+        self.out_deps.sort_unstable();
+        self.out_deps.dedup();
         Ok(Program {
             code: self.code,
             spans: self.spans,
             strings: self.strings,
             ty,
             deps: self.deps,
+            out_deps: self.out_deps,
             time_dependent: self.time,
             max_num: usize::try_from(self.max_num).unwrap_or(0),
         })
@@ -677,7 +684,8 @@ impl<'e> Gen<'e> {
                 };
                 self.gen_cond(c, a, b, span)
             }
-            Fun::Ch => self.gen_ch(args, span),
+            Fun::Ch => self.gen_ref(RefKind::Input, args, span),
+            Fun::Out => self.gen_ref(RefKind::Output, args, span),
             Fun::Concat => {
                 for (i, arg) in args.iter().enumerate() {
                     let t = self.gen_expr(arg)?;
@@ -911,34 +919,50 @@ impl<'e> Gen<'e> {
                 floats!();
                 Ok(Ty::Float)
             }
-            Fun::If | Fun::Ch | Fun::Concat => Err(error(
+            Fun::If | Fun::Ch | Fun::Out | Fun::Concat => Err(error(
                 ErrorKind::Internal("special form reached generic call path"),
                 span,
             )),
         }
     }
 
+    /// `ch("path")` (an input, `RefKind::Input`) or `out("path")` (an
+    /// output, `RefKind::Output`).
     #[inline(never)]
-    fn gen_ch(&mut self, args: &[Expr], span: Span) -> Result<Ty, Box<ExprError>> {
+    fn gen_ref(&mut self, kind: RefKind, args: &[Expr], span: Span) -> Result<Ty, Box<ExprError>> {
         let Some(arg) = args.first() else {
-            return Err(error(ErrorKind::Internal("ch arity"), span));
+            return Err(error(ErrorKind::Internal("ch/out arity"), span));
         };
         let ExprKind::Str(path) = &arg.kind else {
-            return Err(error(ErrorKind::ChannelPathNotLiteral, arg.span));
+            let kind = match kind {
+                RefKind::Input => ErrorKind::ChannelPathNotLiteral,
+                RefKind::Output => ErrorKind::OutputPathNotLiteral,
+            };
+            return Err(error(kind, arg.span));
         };
-        let Some(channel) = self.env.resolve(path) else {
-            return Err(error(ErrorKind::UnknownChannel(path.clone()), arg.span));
+        let resolved = match kind {
+            RefKind::Input => self.env.resolve(path),
+            RefKind::Output => self.env.resolve_output(path),
+        };
+        let Some(channel) = resolved else {
+            let kind = match kind {
+                RefKind::Input => ErrorKind::UnknownChannel(path.clone()),
+                RefKind::Output => ErrorKind::UnknownOutput(path.clone()),
+            };
+            return Err(error(kind, arg.span));
         };
         if !is_expr_type(channel.ty) {
-            return Err(error(
-                ErrorKind::UnsupportedChannelType {
-                    path: path.clone(),
-                    ty: channel.ty,
-                },
-                arg.span,
-            ));
+            let (path, ty) = (path.clone(), channel.ty);
+            let kind = match kind {
+                RefKind::Input => ErrorKind::UnsupportedChannelType { path, ty },
+                RefKind::Output => ErrorKind::UnsupportedOutputType { path, ty },
+            };
+            return Err(error(kind, arg.span));
         }
-        self.deps.push(channel.slot);
+        match kind {
+            RefKind::Input => self.deps.push(channel.slot),
+            RefKind::Output => self.out_deps.push(channel.slot),
+        }
         self.emit(Op::Load(channel.slot, channel.ty), span);
         Ok(channel.ty)
     }
