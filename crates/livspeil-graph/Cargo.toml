@@ -14,10 +14,11 @@ publish.workspace = true
 
 [features]
 # Serde derives for ids, links and snapshots (journals, documents).
-serde = ["dep:serde", "uuid/serde", "livspeil-node-api/serde"]
+serde = ["dep:serde", "uuid/serde", "livspeil-node-api/serde", "livspeil-params/serde"]
 
 [dependencies]
 livspeil-node-api = { path = "../livspeil-node-api" }
+livspeil-params = { path = "../livspeil-params" }
 serde = { version = "1", features = ["derive"], optional = true }
 uuid = { version = "1", features = ["v7"] }
 

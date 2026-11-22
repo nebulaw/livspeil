@@ -14,24 +14,32 @@
 //!   outputs as before (early cutoff). Failures never panic the host: a
 //!   failing node keeps its last good output and carries an error.
 //!
+//! - Inputs can also be driven by an expression or an animation channel
+//!   ([`Graph::set_expression`], [`Graph::set_animation`], M0.5b). Priority:
+//!   link, expression, animation, static value, default. `ch("node/port")`
+//!   in an expression reads another node's resolved input and counts as a
+//!   dependency edge for cycles and caching; renaming a node rewrites the
+//!   paths that name it, and removing a node that is read is refused. See
+//!   [`Graph::set_expression`] for the details.
+//!
 //! - [`GraphSnapshot`] is a canonical, comparable copy of the editable state
 //!   (used by the command bus tests to prove undo and replay exact).
 //!
 //! Cargo feature `serde` (off by default) derives `Serialize` and
 //! `Deserialize` for [`NodeId`] (as a UUID string), [`Endpoint`], [`Link`]
 //! and the snapshot types, and turns on the same feature in
-//! `livspeil-node-api`. The command journal in `livspeil-cmd` enables it.
+//! `livspeil-node-api` and `livspeil-params`. The command journal in `livspeil-cmd` enables it.
 //!
 //! Edits made through the command bus (`livspeil-cmd`, M0.3) get undo,
 //! change events and journaling; the methods here are the primitive edits.
 //!
-//! Not yet implemented (later milestones): subnets and Charms, parameters
-//! and expressions (M0.5), the document format (M0.4), event ports, and
-//! parallel evaluation.
+//! Not yet implemented (later milestones): subnets and Charms, the
+//! document format (M0.4), event ports, and parallel evaluation.
 
 mod cook;
 mod graph;
 mod snapshot;
+mod sources;
 
 pub use cook::{CookError, CookStats, Cooker};
 pub use graph::{Endpoint, Graph, GraphError, Link, NodeId, PortDirection};

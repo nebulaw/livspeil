@@ -8,6 +8,7 @@ use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use livspeil_node_api::{CookContext, NodeError, Value};
+use livspeil_params::expr::{EvalContext, ExprError};
 use uuid::Uuid;
 
 use crate::graph::{Endpoint, Graph, NodeId};
@@ -27,6 +28,11 @@ pub enum CookError {
     Panicked(String),
     /// The node returned outputs that do not match its spec.
     BadOutput(String),
+    /// The expression driving input `port` failed while evaluating.
+    Expression {
+        port: &'static str,
+        error: ExprError,
+    },
 }
 
 impl fmt::Display for CookError {
@@ -42,6 +48,9 @@ impl fmt::Display for CookError {
             CookError::Node(err) => write!(f, "{err}"),
             CookError::Panicked(msg) => write!(f, "node panicked: {msg}"),
             CookError::BadOutput(msg) => write!(f, "bad node output: {msg}"),
+            CookError::Expression { port, error } => {
+                write!(f, "expression on input '{port}' failed: {error}")
+            }
         }
     }
 }
@@ -64,8 +73,12 @@ struct Signature {
     rev: u64,
     /// Output version of each linked upstream node, by input port.
     upstream: Vec<Option<u64>>,
-    /// The frame, for time-dependent nodes only.
-    frame: Option<u64>,
+    /// Resolved-inputs version of each node read through `ch()`, in the
+    /// order of the node's expressions and their slots.
+    reads: Vec<Option<u64>>,
+    /// Frame, time bits and dt bits, for nodes that are time-dependent
+    /// themselves or through an expression or animation channel.
+    clock: Option<(u64, u64, u64)>,
 }
 
 #[derive(Debug)]
@@ -76,6 +89,23 @@ struct Entry {
     /// Changes only when the outputs change (0 = never produced).
     version: u64,
     error: Option<CookError>,
+    /// Last successfully resolved input values, read by `ch()`.
+    inputs: Option<Vec<Value>>,
+    /// Changes only when `inputs` change (0 = never resolved).
+    inputs_version: u64,
+}
+
+impl Entry {
+    fn new(signature: Signature) -> Self {
+        Entry {
+            signature,
+            outputs: None,
+            version: 0,
+            error: None,
+            inputs: None,
+            inputs_version: 0,
+        }
+    }
 }
 
 /// Evaluates nodes of a [`Graph`] and caches the results.
@@ -197,9 +227,9 @@ impl Cooker {
                 continue;
             }
             stack.push((node, true));
-            for (_, src) in graph.upstream(node) {
-                if !seen.contains(&src.node) {
-                    stack.push((src.node, false));
+            for dep in graph.dependencies(node) {
+                if !seen.contains(&dep) {
+                    stack.push((dep, false));
                 }
             }
         }
@@ -225,11 +255,23 @@ impl Cooker {
             linked[port] = Some(src);
             upstream_versions[port] = self.cache.get(&src.node).map(|e| e.version);
         }
-
+        let reads = node
+            .exprs
+            .iter()
+            .flatten()
+            .flat_map(|e| e.targets.iter())
+            .map(|t| self.cache.get(&t.node).map(|e| e.inputs_version))
+            .collect();
+        let time_dependent = spec.time_dependent || graph.sources_time_dependent(id);
         let signature = Signature {
             rev: node.rev,
             upstream: upstream_versions,
-            frame: spec.time_dependent.then_some(self.clock.frame),
+            reads,
+            clock: time_dependent.then_some((
+                self.clock.frame,
+                self.clock.time.to_bits(),
+                self.clock.dt.to_bits(),
+            )),
         };
         if self
             .cache
@@ -240,46 +282,63 @@ impl Cooker {
             return;
         }
 
-        let result = self.gather_inputs(graph, id, &linked).and_then(|inputs| {
-            self.stats.cooked += 1;
-            run_node(node.imp.as_ref(), &self.clock, &inputs)
-        });
+        let result = match self.gather_inputs(graph, id, &linked) {
+            Ok(inputs) => {
+                let changed = self
+                    .cache
+                    .get(&id)
+                    .is_none_or(|e| e.inputs.as_ref() != Some(&inputs));
+                let inputs_version = if changed {
+                    Some(self.next_version())
+                } else {
+                    None
+                };
+                self.stats.cooked += 1;
+                let result = run_node(node.imp.as_ref(), &self.clock, &inputs);
+                let entry = self
+                    .cache
+                    .entry(id)
+                    .or_insert_with(|| Entry::new(signature.clone()));
+                if let Some(v) = inputs_version {
+                    entry.inputs_version = v;
+                    entry.inputs = Some(inputs);
+                }
+                result
+            }
+            Err(error) => Err(error),
+        };
 
+        let version = match &result {
+            Ok(outputs) => {
+                let unchanged = self
+                    .cache
+                    .get(&id)
+                    .is_some_and(|e| e.outputs.as_ref() == Some(outputs));
+                (!unchanged).then(|| self.next_version())
+            }
+            Err(_) => None,
+        };
+        let entry = self
+            .cache
+            .entry(id)
+            .or_insert_with(|| Entry::new(signature.clone()));
+        entry.signature = signature;
         match result {
             Ok(outputs) => {
-                let previous = self.cache.get(&id);
-                let unchanged = previous.is_some_and(|e| e.outputs.as_ref() == Some(&outputs));
-                let version = if unchanged {
-                    previous.map_or(0, |e| e.version)
-                } else {
-                    self.next_version()
-                };
-                self.cache.insert(
-                    id,
-                    Entry {
-                        signature,
-                        outputs: Some(outputs),
-                        version,
-                        error: None,
-                    },
-                );
+                if let Some(v) = version {
+                    entry.version = v;
+                    entry.outputs = Some(outputs);
+                }
+                entry.error = None;
             }
-            Err(error) => {
-                // Keep the last good output and version.
-                let entry = self.cache.entry(id).or_insert_with(|| Entry {
-                    signature: signature.clone(),
-                    outputs: None,
-                    version: 0,
-                    error: None,
-                });
-                entry.signature = signature;
-                entry.error = Some(error);
-            }
+            // Keep the last good output, version and inputs.
+            Err(error) => entry.error = Some(error),
         }
     }
 
     /// Resolve every input of a node to a value: the upstream output if
-    /// linked, else the explicit value, else the spec default.
+    /// linked, else its expression, else its animation channel, else the
+    /// explicit value, else the spec default.
     fn gather_inputs(
         &self,
         graph: &Graph,
@@ -310,6 +369,18 @@ impl Cooker {
                             ))
                         })?
                 }
+                None if node.exprs[index].is_some() => {
+                    self.eval_expression(graph, id, index, port.name, port.ty)?
+                }
+                None if node.anims[index].is_some() => node.anims[index]
+                    .as_ref()
+                    .and_then(|a| a.sample(self.clock.time).coerce(port.ty))
+                    .ok_or_else(|| {
+                        CookError::BadOutput(format!(
+                            "animation does not fit input '{}'",
+                            port.name
+                        ))
+                    })?,
                 None => node.values[index]
                     .clone()
                     .or_else(|| port.default.clone())
@@ -319,6 +390,43 @@ impl Cooker {
             inputs.push(value);
         }
         Ok(inputs)
+    }
+
+    /// Evaluate the expression on input `index` of node `id`.
+    fn eval_expression(
+        &self,
+        graph: &Graph,
+        id: NodeId,
+        index: usize,
+        port: &'static str,
+        ty: livspeil_node_api::PortType,
+    ) -> Result<Value, CookError> {
+        let Some(expr) = graph
+            .nodes
+            .get(&id)
+            .and_then(|n| n.exprs.get(index))
+            .and_then(Option::as_ref)
+        else {
+            return Err(CookError::UnknownNode(id));
+        };
+        let mut slots = Vec::with_capacity(expr.targets.len());
+        for target in &expr.targets {
+            let value = self
+                .cache
+                .get(&target.node)
+                .and_then(|e| e.inputs.as_ref())
+                .and_then(|inputs| inputs.get(target.port))
+                .ok_or(CookError::Upstream { node: target.node })?;
+            slots.push(value.clone());
+        }
+        let ctx = EvalContext::from_cook(&self.clock, &slots);
+        let value = expr
+            .program
+            .eval(&ctx)
+            .map_err(|error| CookError::Expression { port, error })?;
+        value
+            .coerce(ty)
+            .ok_or_else(|| CookError::BadOutput(format!("expression does not fit input '{port}'")))
     }
 }
 

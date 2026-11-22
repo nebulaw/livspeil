@@ -171,6 +171,7 @@ version = "0.0.0"
 dependencies = [
  "livspeil-node-api",
  "livspeil-nodes-core",
+ "livspeil-params",
  "livspeil-testkit",
  "serde",
  "uuid",
