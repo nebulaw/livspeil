@@ -20,13 +20,17 @@
 //! Cases per shape and size: `cold` (first cook with an empty cache),
 //! `warm` (re-cook with nothing changed), `edit_head` (set one input at the
 //! head, then re-cook the sink; reported both as the total and as the cook
-//! alone), `cutoff` (swap the head's two inputs so its output stays the same:
-//! the head re-cooks and early cutoff stops propagation), `set_input` (the
-//! edit alone) and `build` (`add_node` + `link` for the whole graph).
+//! alone), `mark_dirty` (`set_input` right after a cook, which walks the
+//! whole affected subgraph; the cook is not timed), `cutoff` (swap the
+//! head's two inputs so its output stays the same: the head re-cooks and
+//! early cutoff stops propagation), `set_input` (the edit alone, repeated
+//! without cooks in between, so after the first one the walk stops at the
+//! head) and `build` (`add_node` + `link` for the whole graph).
 //!
-//! There is no separate "mark dirty" pass: an edit only bumps the node's
-//! revision, and the next cook validates the cache lazily. See
-//! `docs/benchmarks.md` for how the spec's targets map onto these cases.
+//! Invalidation is push-based: `set_input` marks the edited node and its
+//! downstream dirty (the spec's "mark the affected subgraph dirty"), and a
+//! cook visits only dirty nodes, so `warm` measures the `O(1)` fast path.
+//! See `docs/benchmarks.md` for how the spec's targets map onto these cases.
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -253,6 +257,23 @@ fn bench_cook(c: &mut Criterion) {
             });
             // Leave the graph in a state the cooker has seen.
             cooker.cook(&graph, sink).expect("cook");
+
+            // The edit right after a cook: marks the whole affected subgraph
+            // dirty (the cook between edits is not timed).
+            group.bench_function(BenchmarkId::new("mark_dirty", n), |b| {
+                b.iter_custom(|iters| {
+                    let mut total = Duration::ZERO;
+                    for _ in 0..iters {
+                        flip = !flip;
+                        let v = if flip { 1.0 } else { 0.0 };
+                        let start = Instant::now();
+                        graph.set_input(head, "b", Value::Float(v)).expect("set");
+                        total += start.elapsed();
+                        black_box(cooker.cook(&graph, sink).expect("cook"));
+                    }
+                    total
+                });
+            });
 
             // (c) Change one input at the head and re-cook the sink.
             group.bench_function(BenchmarkId::new("edit_head", n), |b| {

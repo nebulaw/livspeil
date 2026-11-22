@@ -3,9 +3,10 @@
 
 //! The editable graph: nodes, links and the rules they must obey.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use livspeil_node_api::{NodeImpl, NodeRegistry, NodeSpec, PortType, Value};
 use livspeil_params::AnimChannel;
@@ -162,6 +163,7 @@ impl fmt::Display for GraphError {
 impl std::error::Error for GraphError {}
 
 pub(crate) struct Node {
+    pub(crate) id: NodeId,
     pub(crate) name: String,
     pub(crate) type_id: String,
     pub(crate) imp: Arc<dyn NodeImpl>,
@@ -172,13 +174,51 @@ pub(crate) struct Node {
     pub(crate) exprs: Vec<Option<Expression>>,
     /// Animation channels, by input port index.
     pub(crate) anims: Vec<Option<AnimChannel>>,
+    /// The link feeding each input port as `(source slot, output port)`: a
+    /// dense mirror of [`Graph::links`] for the cooker's hot path.
+    pub(crate) link_in: Vec<Option<(usize, usize)>>,
     /// Bumped whenever this node's inputs or links change.
     pub(crate) rev: u64,
+}
+
+impl Node {
+    /// Whether any input source (expression or animation channel) depends
+    /// on the frame clock.
+    pub(crate) fn sources_time_dependent(&self) -> bool {
+        self.anims.iter().any(Option::is_some)
+            || self
+                .exprs
+                .iter()
+                .flatten()
+                .any(|e| e.program.is_time_dependent())
+    }
+
+    /// Whether the node must re-cook when the clock changes: its spec says
+    /// so, or one of its sources reads the clock.
+    pub(crate) fn time_dependent(&self) -> bool {
+        self.imp.spec().time_dependent || self.sources_time_dependent()
+    }
+
+    /// Slots of every node this one directly depends on (link sources and
+    /// nodes read by `ch()`), possibly with repeats.
+    pub(crate) fn dependencies(&self) -> impl Iterator<Item = usize> + '_ {
+        let reads = self
+            .exprs
+            .iter()
+            .flatten()
+            .flat_map(|e| e.targets.iter().map(|t: &InputRef| t.slot));
+        self.link_in
+            .iter()
+            .flatten()
+            .map(|&(slot, _)| slot)
+            .chain(reads)
+    }
 }
 
 impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Node")
+            .field("id", &self.id)
             .field("name", &self.name)
             .field("type_id", &self.type_id)
             .field("rev", &self.rev)
@@ -186,12 +226,75 @@ impl fmt::Debug for Node {
     }
 }
 
+/// `dependents` in compressed sparse row form: the dependents of slot `s`
+/// are `targets[offsets[s]..offsets[s + 1]]`. Contiguous, so the downstream
+/// walk does not chase one heap allocation per node.
+#[derive(Debug, Default)]
+struct DependentsIndex {
+    /// The `deps_rev` this copy was built for.
+    built_for: Option<u64>,
+    offsets: Vec<usize>,
+    targets: Vec<usize>,
+}
+
+impl DependentsIndex {
+    fn rebuild(&mut self, dependents: &[Vec<usize>]) {
+        self.offsets.clear();
+        self.targets.clear();
+        self.offsets.push(0);
+        for list in dependents {
+            self.targets.extend_from_slice(list);
+            self.offsets.push(self.targets.len());
+        }
+    }
+
+    fn dependents(&self, slot: usize) -> &[usize] {
+        match (self.offsets.get(slot), self.offsets.get(slot + 1)) {
+            (Some(&start), Some(&end)) => self.targets.get(start..end).unwrap_or(&[]),
+            _ => &[],
+        }
+    }
+}
+
 /// A network of typed nodes (kernel spec, section 3).
+///
+/// # Storage and invalidation
+///
+/// Nodes live in a slab of dense *slots* (`usize` indices, reused after
+/// removal); [`NodeId`] stays the public identity and `index` maps ids to
+/// slots. The cooker's hot paths work on slots only.
+///
+/// Every edit gets a new *epoch* (`rev_counter`). An edit that can change
+/// what a node computes marks the node and everything downstream of it
+/// (links and `ch()` readers, `dependents`) with that epoch in `dirty`.
+/// A cooker remembers, per node, the epoch at which it last validated the
+/// node; the node is stale for that cooker when `dirty > validated`. See
+/// the `cook` module for the cooker side.
+///
+/// The walk uses a compact copy of the dependents lists that is rebuilt
+/// (in `O(nodes + edges)`) by the first edit after the lists changed.
+///
+/// The downstream walk stops at nodes that are already stale for *every*
+/// cooker: `observed` is the largest epoch any cooker has started a cook
+/// at, so a node with `dirty > observed` (and, by induction, everything
+/// downstream of it) is already newer than any cooker's validation. Right
+/// after a cook nothing is above `observed`, so the first edit walks the
+/// whole affected subgraph once; further edits before the next cook (a
+/// slider drag between frames) stop almost immediately.
+///
+/// `topo_rev` changes whenever the dependency structure (node set, links,
+/// `ch()` edges) or the set of time-dependent nodes changes; cookers cache
+/// evaluation orders and the time-dependent closure until it changes.
 #[derive(Debug)]
 pub struct Graph {
     id: Uuid,
     registry: Arc<NodeRegistry>,
-    pub(crate) nodes: BTreeMap<NodeId, Node>,
+    /// Node storage by slot; `None` marks a free slot.
+    slots: Vec<Option<Node>>,
+    /// Free slots, reused by the next added node.
+    free: Vec<usize>,
+    /// Slot of every node, in id order.
+    index: BTreeMap<NodeId, usize>,
     /// Links keyed by their target input, which enforces one link per input.
     links: BTreeMap<(NodeId, usize), Endpoint>,
     /// The same links as `(source node, target node, target port)`, for fast
@@ -201,6 +304,22 @@ pub struct Graph {
     /// `ch()` references as `(read node, reading node, reading input)`.
     pub(crate) ch_edges: BTreeSet<(NodeId, NodeId, usize)>,
     rev_counter: u64,
+    /// Per slot: the epoch of the last edit that affected the node (its own
+    /// or one upstream).
+    dirty: Vec<u64>,
+    /// Per slot: direct dependents (link targets and `ch()` readers), with
+    /// one entry per link or `ch()` edge.
+    dependents: Vec<Vec<usize>>,
+    /// Changes whenever `dependents` changes.
+    deps_rev: u64,
+    /// A compact copy of `dependents` for the downstream walk.
+    walk: DependentsIndex,
+    /// Largest epoch any cooker has started a cook at.
+    observed: AtomicU64,
+    /// Revision of the dependency structure and time dependence.
+    topo_rev: u64,
+    /// Scratch stack for the downstream walk.
+    mark_stack: Vec<usize>,
 }
 
 impl Graph {
@@ -210,12 +329,21 @@ impl Graph {
         Graph {
             id: Uuid::now_v7(),
             registry,
-            nodes: BTreeMap::new(),
+            slots: Vec::new(),
+            free: Vec::new(),
+            index: BTreeMap::new(),
             links: BTreeMap::new(),
             outgoing: BTreeSet::new(),
             names: HashMap::new(),
             ch_edges: BTreeSet::new(),
             rev_counter: 0,
+            dirty: Vec::new(),
+            dependents: Vec::new(),
+            deps_rev: 0,
+            walk: DependentsIndex::default(),
+            observed: AtomicU64::new(0),
+            topo_rev: 0,
+            mark_stack: Vec::new(),
         }
     }
 
@@ -250,7 +378,7 @@ impl Graph {
         if self.names.contains_key(name) {
             return Err(GraphError::DuplicateName(name.to_owned()));
         }
-        if self.nodes.contains_key(&id) {
+        if self.index.contains_key(&id) {
             return Err(GraphError::DuplicateId(id));
         }
         let imp = self
@@ -259,20 +387,36 @@ impl Graph {
             .ok_or_else(|| GraphError::UnknownNodeType(qualified_id.to_owned()))?
             .clone();
         let inputs = imp.spec().inputs.len();
-        let values = vec![None; inputs];
         self.rev_counter += 1;
-        self.nodes.insert(
+        self.topo_rev += 1;
+        let node = Node {
             id,
-            Node {
-                name: name.to_owned(),
-                type_id: qualified_id.to_owned(),
-                imp,
-                values,
-                exprs: (0..inputs).map(|_| None).collect(),
-                anims: vec![None; inputs],
-                rev: self.rev_counter,
-            },
-        );
+            name: name.to_owned(),
+            type_id: qualified_id.to_owned(),
+            imp,
+            values: vec![None; inputs],
+            exprs: (0..inputs).map(|_| None).collect(),
+            anims: vec![None; inputs],
+            link_in: vec![None; inputs],
+            rev: self.rev_counter,
+        };
+        let slot = match self.free.pop() {
+            Some(slot) => {
+                self.slots[slot] = Some(node);
+                self.dependents[slot].clear();
+                self.deps_rev += 1;
+                self.dirty[slot] = self.rev_counter;
+                slot
+            }
+            None => {
+                self.slots.push(Some(node));
+                self.dependents.push(Vec::new());
+                self.deps_rev += 1;
+                self.dirty.push(self.rev_counter);
+                self.slots.len() - 1
+            }
+        };
+        self.index.insert(id, slot);
         self.names.insert(name.to_owned(), id);
         Ok(id)
     }
@@ -284,18 +428,17 @@ impl Graph {
     /// Fails if the node does not exist, or with [`GraphError::Referenced`]
     /// if another node's expression reads one of its inputs.
     pub fn remove_node(&mut self, id: NodeId) -> Result<(), GraphError> {
-        if !self.nodes.contains_key(&id) {
+        let Some(&slot) = self.index.get(&id) else {
             return Err(GraphError::UnknownNode(id));
-        }
+        };
         if let Some((by, port)) = self.referenced_by(id).into_iter().next() {
             return Err(GraphError::Referenced { node: id, by, port });
         }
-        let inputs = self.nodes.get(&id).map_or(0, |n| n.exprs.len());
+        self.topo_rev += 1;
+        let inputs = self.node(id).map_or(0, |n| n.exprs.len());
         for index in 0..inputs {
             self.unindex_expression(id, index);
         }
-        let node = self.nodes.remove(&id).ok_or(GraphError::UnknownNode(id))?;
-        self.names.remove(&node.name);
 
         // Links into the removed node.
         let incoming: Vec<(NodeId, usize)> = self
@@ -306,6 +449,9 @@ impl Graph {
         for key in incoming {
             if let Some(src) = self.links.remove(&key) {
                 self.outgoing.remove(&(src.node, key.0, key.1));
+                if let Some(&from) = self.index.get(&src.node) {
+                    self.remove_dependent(from, slot);
+                }
             }
         }
 
@@ -319,8 +465,19 @@ impl Graph {
         for (from, to, port) in outgoing {
             self.outgoing.remove(&(from, to, port));
             self.links.remove(&(to, port));
+            if let Some(n) = self.node_mut(to) {
+                n.link_in[port] = None;
+            }
             self.bump(to);
         }
+
+        self.index.remove(&id);
+        let node = self.slots[slot].take().ok_or(GraphError::UnknownNode(id))?;
+        self.names.remove(&node.name);
+        self.dependents[slot].clear();
+        self.deps_rev += 1;
+        self.free.push(slot);
+        self.rev_counter += 1;
         Ok(())
     }
 
@@ -336,7 +493,7 @@ impl Graph {
             expected: ty,
             found,
         })?;
-        if let Some(n) = self.nodes.get_mut(&node) {
+        if let Some(n) = self.node_mut(node) {
             n.values[index] = Some(value);
         }
         self.bump(node);
@@ -349,7 +506,7 @@ impl Graph {
     /// Fails for an unknown node or port.
     pub fn clear_input(&mut self, node: NodeId, port: &str) -> Result<(), GraphError> {
         let (index, _) = self.input_port(node, port)?;
-        if let Some(n) = self.nodes.get_mut(&node) {
+        if let Some(n) = self.node_mut(node) {
             n.values[index] = None;
         }
         self.bump(node);
@@ -385,6 +542,10 @@ impl Graph {
         if self.depends_on(from, to) {
             return Err(GraphError::WouldCycle);
         }
+        let (Some(&from_slot), Some(&to_slot)) = (self.index.get(&from), self.index.get(&to))
+        else {
+            return Err(GraphError::UnknownNode(from));
+        };
         self.links.insert(
             (to, in_index),
             Endpoint {
@@ -393,6 +554,11 @@ impl Graph {
             },
         );
         self.outgoing.insert((from, to, in_index));
+        if let Some(n) = self.node_mut(to) {
+            n.link_in[in_index] = Some((from_slot, out_index));
+        }
+        self.add_dependent(from_slot, to_slot);
+        self.topo_rev += 1;
         self.bump(to);
         Ok(())
     }
@@ -408,6 +574,14 @@ impl Graph {
             return Ok(false);
         };
         self.outgoing.remove(&(src.node, to, index));
+        if let Some(n) = self.node_mut(to) {
+            n.link_in[index] = None;
+        }
+        if let (Some(&from_slot), Some(&to_slot)) = (self.index.get(&src.node), self.index.get(&to))
+        {
+            self.remove_dependent(from_slot, to_slot);
+        }
+        self.topo_rev += 1;
         self.bump(to);
         Ok(true)
     }
@@ -426,13 +600,14 @@ impl Graph {
         if name.is_empty() {
             return Err(GraphError::EmptyName);
         }
-        let node = self.nodes.get_mut(&id).ok_or(GraphError::UnknownNode(id))?;
-        if node.name == name {
+        let current = self.node(id).ok_or(GraphError::UnknownNode(id))?;
+        if current.name == name {
             return Ok(name.to_owned());
         }
         if self.names.contains_key(name) {
             return Err(GraphError::DuplicateName(name.to_owned()));
         }
+        let node = self.node_mut(id).ok_or(GraphError::UnknownNode(id))?;
         let old = std::mem::replace(&mut node.name, name.to_owned());
         self.names.remove(&old);
         self.names.insert(name.to_owned(), id);
@@ -440,7 +615,7 @@ impl Graph {
             // Unreachable in practice; restore the old name.
             self.names.remove(name);
             self.names.insert(old.clone(), id);
-            if let Some(node) = self.nodes.get_mut(&id) {
+            if let Some(node) = self.node_mut(id) {
                 node.name = old;
             }
             return Err(err);
@@ -451,7 +626,7 @@ impl Graph {
     /// Whether a node with this id exists.
     #[must_use]
     pub fn contains(&self, id: NodeId) -> bool {
-        self.nodes.contains_key(&id)
+        self.index.contains_key(&id)
     }
 
     /// The explicitly set value of an input, or `None` when the input uses
@@ -462,8 +637,7 @@ impl Graph {
     pub fn input_value(&self, node: NodeId, port: &str) -> Result<Option<&Value>, GraphError> {
         let (index, _) = self.input_port(node, port)?;
         Ok(self
-            .nodes
-            .get(&node)
+            .node(node)
             .and_then(|n| n.values.get(index))
             .and_then(Option::as_ref))
     }
@@ -471,7 +645,7 @@ impl Graph {
     /// Every explicitly set input value of a node as `(port name, value)`,
     /// in port order. Empty for an unknown node.
     pub fn input_values(&self, node: NodeId) -> impl Iterator<Item = (&str, &Value)> + '_ {
-        self.nodes.get(&node).into_iter().flat_map(|n| {
+        self.node(node).into_iter().flat_map(|n| {
             let spec = n.imp.spec();
             n.values
                 .iter()
@@ -492,7 +666,7 @@ impl Graph {
     ) -> Result<Option<(NodeId, &str)>, GraphError> {
         let (index, _) = self.input_port(to, to_port)?;
         Ok(self.links.get(&(to, index)).and_then(|src| {
-            let spec = self.nodes.get(&src.node)?.imp.spec();
+            let spec = self.node(src.node)?.imp.spec();
             Some((src.node, spec.outputs.get(src.port)?.name))
         }))
     }
@@ -531,8 +705,8 @@ impl Graph {
     /// A link with port names instead of indices.
     #[must_use]
     pub fn named(&self, link: Link) -> Option<NamedLink> {
-        let from_spec = self.nodes.get(&link.from.node)?.imp.spec();
-        let to_spec = self.nodes.get(&link.to.node)?.imp.spec();
+        let from_spec = self.node(link.from.node)?.imp.spec();
+        let to_spec = self.node(link.to.node)?.imp.spec();
         Some(NamedLink {
             from: link.from.node,
             from_port: from_spec.outputs.get(link.from.port)?.name.to_owned(),
@@ -549,9 +723,10 @@ impl Graph {
     #[must_use]
     pub fn snapshot(&self) -> GraphSnapshot {
         let nodes = self
-            .nodes
-            .iter()
-            .map(|(&id, n)| NodeSnapshot {
+            .index
+            .keys()
+            .filter_map(|&id| Some((id, self.node(id)?)))
+            .map(|(id, n)| NodeSnapshot {
                 id,
                 name: n.name.clone(),
                 type_id: n.type_id.clone(),
@@ -576,7 +751,7 @@ impl Graph {
     /// Number of nodes.
     #[must_use]
     pub fn node_count(&self) -> usize {
-        self.nodes.len()
+        self.index.len()
     }
 
     /// Number of links.
@@ -587,25 +762,25 @@ impl Graph {
 
     /// All node ids in id order.
     pub fn node_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.nodes.keys().copied()
+        self.index.keys().copied()
     }
 
     /// The name of a node.
     #[must_use]
     pub fn node_name(&self, id: NodeId) -> Option<&str> {
-        self.nodes.get(&id).map(|n| n.name.as_str())
+        self.node(id).map(|n| n.name.as_str())
     }
 
     /// The qualified type id of a node.
     #[must_use]
     pub fn node_type(&self, id: NodeId) -> Option<&str> {
-        self.nodes.get(&id).map(|n| n.type_id.as_str())
+        self.node(id).map(|n| n.type_id.as_str())
     }
 
     /// The spec of a node's type.
     #[must_use]
     pub fn node_spec(&self, id: NodeId) -> Option<&NodeSpec> {
-        self.nodes.get(&id).map(|n| n.imp.spec())
+        self.node(id).map(|n| n.imp.spec())
     }
 
     /// Find a node by name.
@@ -622,30 +797,121 @@ impl Graph {
         })
     }
 
-    /// The links feeding a node, as `(input port index, source endpoint)`.
-    pub(crate) fn upstream(&self, id: NodeId) -> impl Iterator<Item = (usize, Endpoint)> + '_ {
-        self.links
-            .range((id, 0)..=(id, usize::MAX))
-            .map(|(&(_, port), &src)| (port, src))
+    /// The node with this id.
+    pub(crate) fn node(&self, id: NodeId) -> Option<&Node> {
+        self.index.get(&id).and_then(|&slot| self.node_at(slot))
     }
 
-    /// Every node `id` directly depends on (link sources and nodes read by
-    /// `ch()`), possibly with repeats.
-    pub(crate) fn dependencies(&self, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
-        let reads = self.nodes.get(&id).into_iter().flat_map(|n| {
-            n.exprs
-                .iter()
-                .flatten()
-                .flat_map(|e| e.targets.iter().map(|t: &InputRef| t.node))
-        });
-        self.upstream(id).map(|(_, src)| src.node).chain(reads)
+    pub(crate) fn node_mut(&mut self, id: NodeId) -> Option<&mut Node> {
+        let slot = *self.index.get(&id)?;
+        self.slots.get_mut(slot)?.as_mut()
     }
 
+    /// The node in a slot, if the slot is in use.
+    pub(crate) fn node_at(&self, slot: usize) -> Option<&Node> {
+        self.slots.get(slot)?.as_ref()
+    }
+
+    /// The slot of a node.
+    pub(crate) fn slot_of(&self, id: NodeId) -> Option<usize> {
+        self.index.get(&id).copied()
+    }
+
+    /// Number of slots (used and free); every slot is below this.
+    pub(crate) fn slot_count(&self) -> usize {
+        self.slots.len()
+    }
+
+    /// The epoch of the last edit that affected the node in `slot` (see
+    /// [`Graph`]). 0 for unknown slots.
+    pub(crate) fn dirty_at(&self, slot: usize) -> u64 {
+        self.dirty.get(slot).copied().unwrap_or(0)
+    }
+
+    /// Direct dependents of the node in `slot` (with repeats).
+    pub(crate) fn dependents_at(&self, slot: usize) -> &[usize] {
+        self.dependents.get(slot).map_or(&[], Vec::as_slice)
+    }
+
+    /// The current edit epoch: changes with every edit.
+    pub(crate) fn epoch(&self) -> u64 {
+        self.rev_counter
+    }
+
+    /// Record that a cooker is validating nodes against epoch `epoch`.
+    pub(crate) fn observe(&self, epoch: u64) {
+        self.observed.fetch_max(epoch, Ordering::Relaxed);
+    }
+
+    /// Revision of the dependency structure and of time dependence.
+    pub(crate) fn topo_rev(&self) -> u64 {
+        self.topo_rev
+    }
+
+    /// Note a change of the dependency structure or time dependence.
+    pub(crate) fn structure_changed(&mut self) {
+        self.topo_rev += 1;
+    }
+
+    /// Record a `ch()` edge `read -> reader` in the dense dependents.
+    pub(crate) fn add_dependent(&mut self, from: usize, to: usize) {
+        if let Some(list) = self.dependents.get_mut(from) {
+            list.push(to);
+            self.deps_rev += 1;
+        }
+    }
+
+    /// Forget one `from -> to` edge from the dense dependents.
+    pub(crate) fn remove_dependent(&mut self, from: usize, to: usize) {
+        if let Some(list) = self.dependents.get_mut(from) {
+            if let Some(pos) = list.iter().position(|&s| s == to) {
+                list.swap_remove(pos);
+                self.deps_rev += 1;
+            }
+        }
+    }
+
+    /// A new edit epoch for node `id`: bump its revision and mark it and
+    /// everything downstream dirty.
     pub(crate) fn bump(&mut self, id: NodeId) {
         self.rev_counter += 1;
-        if let Some(node) = self.nodes.get_mut(&id) {
-            node.rev = self.rev_counter;
+        let epoch = self.rev_counter;
+        let Some(slot) = self.slot_of(id) else {
+            return;
+        };
+        if let Some(node) = self.slots.get_mut(slot).and_then(Option::as_mut) {
+            node.rev = epoch;
         }
+        self.mark_dirty(slot, epoch);
+    }
+
+    /// Mark `start` and its downstream with `epoch`, stopping at nodes that
+    /// are already stale for every cooker (see [`Graph`]).
+    fn mark_dirty(&mut self, start: usize, epoch: u64) {
+        let observed = *self.observed.get_mut();
+        match self.dirty.get_mut(start) {
+            Some(dirty) if *dirty <= observed => *dirty = epoch,
+            _ => return,
+        }
+        if self.walk.built_for != Some(self.deps_rev) {
+            self.walk.rebuild(&self.dependents);
+            self.walk.built_for = Some(self.deps_rev);
+        }
+        // Nodes are marked when pushed, so each is pushed at most once.
+        let mut stack = std::mem::take(&mut self.mark_stack);
+        stack.clear();
+        stack.push(start);
+        while let Some(slot) = stack.pop() {
+            for &dep in self.walk.dependents(slot) {
+                if let Some(dirty) = self.dirty.get_mut(dep) {
+                    if *dirty <= observed {
+                        *dirty = epoch;
+                        stack.push(dep);
+                    }
+                }
+            }
+        }
+        self.mark_stack = stack;
     }
 
     pub(crate) fn input_port(
@@ -653,7 +919,7 @@ impl Graph {
         node: NodeId,
         port: &str,
     ) -> Result<(usize, PortType), GraphError> {
-        let n = self.nodes.get(&node).ok_or(GraphError::UnknownNode(node))?;
+        let n = self.node(node).ok_or(GraphError::UnknownNode(node))?;
         let spec = n.imp.spec();
         spec.input_index(port)
             .map(|i| (i, spec.inputs[i].ty))
@@ -665,7 +931,7 @@ impl Graph {
     }
 
     fn output_port(&self, node: NodeId, port: &str) -> Result<(usize, PortType), GraphError> {
-        let n = self.nodes.get(&node).ok_or(GraphError::UnknownNode(node))?;
+        let n = self.node(node).ok_or(GraphError::UnknownNode(node))?;
         let spec = n.imp.spec();
         spec.output_index(port)
             .map(|i| (i, spec.outputs[i].ty))
@@ -684,23 +950,16 @@ impl Graph {
         if from == to {
             return true;
         }
-        let mut seen = BTreeSet::new();
+        let (Some(from), Some(to)) = (self.slot_of(from), self.slot_of(to)) else {
+            return false;
+        };
+        let mut seen = HashSet::new();
         let mut stack = vec![to];
         while let Some(current) = stack.pop() {
             if !seen.insert(current) {
                 continue;
             }
-            for &(_, next, _) in self
-                .outgoing
-                .range((current, NodeId(Uuid::nil()), 0)..)
-                .take_while(|(f, _, _)| *f == current)
-            {
-                if next == from {
-                    return true;
-                }
-                stack.push(next);
-            }
-            for (next, _) in self.ch_dependents(current) {
+            for &next in self.dependents_at(current) {
                 if next == from {
                     return true;
                 }

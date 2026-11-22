@@ -55,6 +55,8 @@ use crate::graph::{Graph, GraphError, NodeId};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct InputRef {
     pub(crate) node: NodeId,
+    /// The node's slot (see [`Graph`]); fixed while the node exists.
+    pub(crate) slot: usize,
     pub(crate) port: usize,
 }
 
@@ -88,7 +90,8 @@ impl Env for GraphEnv<'_> {
         let spec = self.graph.node_spec(node)?;
         let port = spec.input_index(port_name)?;
         let ty = spec.inputs.get(port)?.ty;
-        let target = InputRef { node, port };
+        let slot = self.graph.slot_of(node)?;
+        let target = InputRef { node, slot, port };
         let mut targets = self.targets.borrow_mut();
         let slot = match targets.iter().position(|t| *t == target) {
             Some(slot) => slot,
@@ -197,12 +200,21 @@ impl Graph {
         {
             return Err(GraphError::WouldCycle);
         }
+        let before = self.dependency_shape(node, index);
         self.unindex_expression(node, index);
+        let reader = self.slot_of(node);
         for t in &compiled.targets {
-            self.ch_edges.insert((t.node, node, index));
+            if self.ch_edges.insert((t.node, node, index)) {
+                if let Some(reader) = reader {
+                    self.add_dependent(t.slot, reader);
+                }
+            }
         }
-        if let Some(n) = self.nodes.get_mut(&node) {
+        if let Some(n) = self.node_mut(node) {
             n.exprs[index] = Some(compiled);
+        }
+        if self.dependency_shape(node, index) != before {
+            self.structure_changed();
         }
         self.bump(node);
         Ok(())
@@ -214,14 +226,15 @@ impl Graph {
     /// Fails for an unknown node or port.
     pub fn clear_expression(&mut self, node: NodeId, port: &str) -> Result<(), GraphError> {
         let (index, _) = self.input_port(node, port)?;
-        let had = self
-            .nodes
-            .get(&node)
-            .is_some_and(|n| n.exprs[index].is_some());
+        let had = self.node(node).is_some_and(|n| n.exprs[index].is_some());
         if had {
+            let before = self.dependency_shape(node, index);
             self.unindex_expression(node, index);
-            if let Some(n) = self.nodes.get_mut(&node) {
+            if let Some(n) = self.node_mut(node) {
                 n.exprs[index] = None;
+            }
+            if self.dependency_shape(node, index) != before {
+                self.structure_changed();
             }
             self.bump(node);
         }
@@ -235,8 +248,7 @@ impl Graph {
     pub fn expression(&self, node: NodeId, port: &str) -> Result<Option<&str>, GraphError> {
         let (index, _) = self.input_port(node, port)?;
         Ok(self
-            .nodes
-            .get(&node)
+            .node(node)
             .and_then(|n| n.exprs.get(index))
             .and_then(Option::as_ref)
             .map(|e| e.source.as_str()))
@@ -245,7 +257,7 @@ impl Graph {
     /// Every expression of a node as `(port name, source)`, in port order.
     /// Empty for an unknown node.
     pub fn expressions(&self, node: NodeId) -> impl Iterator<Item = (&str, &str)> + '_ {
-        self.nodes.get(&node).into_iter().flat_map(|n| {
+        self.node(node).into_iter().flat_map(|n| {
             let spec = n.imp.spec();
             n.exprs
                 .iter()
@@ -274,8 +286,12 @@ impl Graph {
                 found,
             });
         }
-        if let Some(n) = self.nodes.get_mut(&node) {
+        let before = self.time_dependent(node);
+        if let Some(n) = self.node_mut(node) {
             n.anims[index] = Some(channel);
+        }
+        if self.time_dependent(node) != before {
+            self.structure_changed();
         }
         self.bump(node);
         Ok(())
@@ -287,12 +303,15 @@ impl Graph {
     /// Fails for an unknown node or port.
     pub fn clear_animation(&mut self, node: NodeId, port: &str) -> Result<(), GraphError> {
         let (index, _) = self.input_port(node, port)?;
+        let before = self.time_dependent(node);
         let had = self
-            .nodes
-            .get_mut(&node)
+            .node_mut(node)
             .and_then(|n| n.anims[index].take())
             .is_some();
         if had {
+            if self.time_dependent(node) != before {
+                self.structure_changed();
+            }
             self.bump(node);
         }
         Ok(())
@@ -305,8 +324,7 @@ impl Graph {
     pub fn animation(&self, node: NodeId, port: &str) -> Result<Option<&AnimChannel>, GraphError> {
         let (index, _) = self.input_port(node, port)?;
         Ok(self
-            .nodes
-            .get(&node)
+            .node(node)
             .and_then(|n| n.anims.get(index))
             .and_then(Option::as_ref))
     }
@@ -314,7 +332,7 @@ impl Graph {
     /// Every animation channel of a node as `(port name, channel)`, in port
     /// order. Empty for an unknown node.
     pub fn animations(&self, node: NodeId) -> impl Iterator<Item = (&str, &AnimChannel)> + '_ {
-        self.nodes.get(&node).into_iter().flat_map(|n| {
+        self.node(node).into_iter().flat_map(|n| {
             let spec = n.imp.spec();
             n.anims
                 .iter()
@@ -329,7 +347,7 @@ impl Graph {
     pub fn referenced_by(&self, node: NodeId) -> Vec<(NodeId, String)> {
         self.ch_dependents(node)
             .filter_map(|(dep, port)| {
-                let spec = self.nodes.get(&dep)?.imp.spec();
+                let spec = self.node(dep)?.imp.spec();
                 Some((dep, spec.inputs.get(port)?.name.to_owned()))
             })
             .collect()
@@ -347,12 +365,17 @@ impl Graph {
     /// Forget the dependency edges of the expression on `node`'s input
     /// `index`, if any.
     pub(crate) fn unindex_expression(&mut self, node: NodeId, index: usize) {
-        let Some(e) = self.nodes.get(&node).and_then(|n| n.exprs[index].as_ref()) else {
+        let Some(e) = self.node(node).and_then(|n| n.exprs[index].as_ref()) else {
             return;
         };
-        let targets: Vec<NodeId> = e.targets.iter().map(|t| t.node).collect();
-        for t in targets {
-            self.ch_edges.remove(&(t, node, index));
+        let targets: Vec<(NodeId, usize)> = e.targets.iter().map(|t| (t.node, t.slot)).collect();
+        let reader = self.slot_of(node);
+        for (t, slot) in targets {
+            if self.ch_edges.remove(&(t, node, index)) {
+                if let Some(reader) = reader {
+                    self.remove_dependent(slot, reader);
+                }
+            }
         }
     }
 
@@ -369,7 +392,7 @@ impl Graph {
         deps.dedup();
         let mut updates = Vec::with_capacity(deps.len());
         for (dep, port) in deps {
-            let Some(e) = self.nodes.get(&dep).and_then(|n| n.exprs[port].as_ref()) else {
+            let Some(e) = self.node(dep).and_then(|n| n.exprs[port].as_ref()) else {
                 continue;
             };
             let Some(source) = rewrite(&e.source, old, new) else {
@@ -387,22 +410,32 @@ impl Graph {
         // Same program and targets, new source text: no revision bump,
         // cooked results stay valid.
         for (dep, port, compiled) in updates {
-            if let Some(n) = self.nodes.get_mut(&dep) {
+            if let Some(n) = self.node_mut(dep) {
                 n.exprs[port] = Some(compiled);
             }
         }
         Ok(())
     }
 
-    /// Whether any input source of `node` depends on the frame clock.
-    pub(crate) fn sources_time_dependent(&self, node: NodeId) -> bool {
-        self.nodes.get(&node).is_some_and(|n| {
-            n.anims.iter().any(Option::is_some)
-                || n.exprs
-                    .iter()
-                    .flatten()
-                    .any(|e| e.program.is_time_dependent())
-        })
+    /// Whether `node` re-cooks when the clock changes.
+    fn time_dependent(&self, node: NodeId) -> bool {
+        self.node(node)
+            .is_some_and(super::graph::Node::time_dependent)
+    }
+
+    /// What the expression on input `index` of `node` contributes to the
+    /// cooker's cached structure: the nodes it reads and whether the node
+    /// is time-dependent.
+    fn dependency_shape(&self, node: NodeId, index: usize) -> (Vec<usize>, bool) {
+        let mut reads: Vec<usize> = self
+            .node(node)
+            .and_then(|n| n.exprs.get(index))
+            .and_then(Option::as_ref)
+            .map(|e| e.targets.iter().map(|t| t.slot).collect())
+            .unwrap_or_default();
+        reads.sort_unstable();
+        reads.dedup();
+        (reads, self.time_dependent(node))
     }
 }
 
