@@ -1,0 +1,25 @@
+core.curve.ramp(curve=curve(0.0:0.0 1.0:1.0), position=0.0) => out=0.0
+core.curve.ramp(curve=curve(0.0:0.0 1.0:1.0), position=-0.5) => out=0.0
+core.curve.ramp(curve=curve(0.0:0.0 1.0:1.0), position=0.25) => out=0.25
+core.curve.ramp(curve=curve(0.0:0.0 1.0:1.0), position=0.5) => out=0.5
+core.curve.ramp(curve=curve(0.0:0.0 1.0:1.0), position=1.0) => out=1.0
+core.curve.ramp(curve=curve(0.0:0.0 1.0:1.0), position=1.5) => out=1.0
+core.curve.ramp(curve=curve(0.0:0.0 1.0:1.0), position=NaN) => out=0.0
+core.curve.ramp(curve=curve(0.0:0.0 1.0:1.0), position=inf) => out=1.0
+core.curve.ramp(curve=curve(0.0:0.0 0.5:1.0 1.0:0.25), position=0.1) => out=0.10400000000000002
+core.curve.ramp(curve=curve(0.0:0.0 0.5:1.0 1.0:0.25), position=0.25) => out=0.5
+core.curve.ramp(curve=curve(0.0:0.0 0.5:1.0 1.0:0.25), position=0.75) => out=0.625
+core.curve.ramp(curve=curve(0.0:0.0 0.5:1.0 1.0:0.25), position=0.1) => out=0.0
+core.curve.ramp(curve=curve(0.0:0.0 0.5:1.0 1.0:0.25), position=0.25) => out=0.0
+core.curve.ramp(curve=curve(0.0:0.0 0.5:1.0 1.0:0.25), position=0.75) => out=1.0
+core.curve.ramp(curve=curve(0.0:0.0 1.0:1.0), position=0.1) => out=0.35200000000000004
+core.curve.ramp(curve=curve(0.0:0.0 1.0:1.0), position=0.25) => out=0.71875
+core.curve.ramp(curve=curve(0.0:0.0 1.0:1.0), position=0.75) => out=1.03125
+core.curve.ramp(curve=curve(0.0:0.0 1.0:1.0), position=0.1) => out=0.5497001908075181
+core.curve.ramp(curve=curve(0.0:0.0 1.0:1.0), position=0.25) => out=1.3679179901216232
+core.curve.ramp(curve=curve(0.0:0.0 1.0:1.0), position=0.75) => out=1.0458506740016678
+core.curve.ramp(curve=curve(0.0:0.0 0.5:1.0 1.0:0.25), position=-0.25) => out=0.625
+core.curve.ramp(curve=curve(0.0:0.0 0.5:1.0 1.0:0.25), position=1.25) => out=0.625
+core.curve.ramp(curve=curve(0.0:0.0 0.5:1.0 1.0:0.25), position=1.75) => out=0.5
+core.curve.ramp(curve=curve(0.0:0.0 0.5:1.0 1.0:0.25), position=2.25) => out=0.5
+core.curve.ramp(curve=curve(0.0:3.5), position=-100.0) => out=3.5

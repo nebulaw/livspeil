@@ -357,6 +357,7 @@ name = "livspeil-node-api"
 version = "0.0.0"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -364,6 +365,7 @@ name = "livspeil-nodes-core"
 version = "0.0.0"
 dependencies = [
  "livspeil-node-api",
+ "livspeil-params",
  "livspeil-testkit",
 ]
 
