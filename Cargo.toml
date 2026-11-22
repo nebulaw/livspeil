@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/nebulaw/livspeil"
+authors = ["Livspeil contributors"]
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
