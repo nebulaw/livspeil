@@ -62,3 +62,12 @@ vec2(1, 2).z => compile error: Vec2 has no component '.z' at 11..12
 "open => compile error: unterminated string literal at 0..5
 1 = 2 => compile error: expected an operator ('==' compares), found '=' at 2..3
 abs(-9223372036854775807 - 1) => runtime error: integer overflow at 0..29
+smoothstep(5, 8, out("time_of_day/hour")) => 0.5 : Float [out deps [5]]
+max(0, out("sun/elevation") / 90) => 0.5 : Float [out deps [6]]
+ceil(out("books/count") / 12.0) => 3.0 : Float [out deps [7]]
+out("books/count") / 12 => 2 : Int [out deps [7]]
+ch("radius") * out("sun/elevation") => 56.25 : Float [deps [0]] [out deps [6]]
+out("nope/x") => compile error: unknown output path "nope/x" at 4..12
+out("radius") => compile error: unknown output path "radius" at 4..12
+out("db/rows") => compile error: output "db/rows" has type Table, which expressions cannot use at 4..13
+out(1) => compile error: out() takes exactly one string literal path at 4..5

@@ -87,13 +87,20 @@ pub enum ErrorKind {
     ChannelPathNotLiteral,
     /// `ch("path")` resolved to a type expressions cannot hold.
     UnsupportedChannelType { path: String, ty: PortType },
+    /// `out("path")` names an output the environment does not know.
+    UnknownOutput(String),
+    /// `out()` needs exactly one string literal so dependencies are static.
+    OutputPathNotLiteral,
+    /// `out("path")` resolved to a type expressions cannot hold.
+    UnsupportedOutputType { path: String, ty: PortType },
 
     // ---- Runtime -----------------------------------------------------------
     /// Integer division or modulo by zero.
     DivisionByZero,
     /// Integer arithmetic overflowed `i64`.
     IntegerOverflow,
-    /// The evaluation context has no value for a slot read by `ch()`.
+    /// The evaluation context has no value for a slot read by `ch()` or
+    /// `out()`.
     MissingSlot { slot: usize },
     /// The evaluation context holds a value of the wrong type for a slot.
     SlotTypeMismatch {
@@ -173,6 +180,14 @@ impl fmt::Display for ErrorKind {
             ErrorKind::UnsupportedChannelType { path, ty } => write!(
                 f,
                 "parameter \"{path}\" has type {ty}, which expressions cannot use"
+            ),
+            ErrorKind::UnknownOutput(path) => write!(f, "unknown output path \"{path}\""),
+            ErrorKind::OutputPathNotLiteral => {
+                f.write_str("out() takes exactly one string literal path")
+            }
+            ErrorKind::UnsupportedOutputType { path, ty } => write!(
+                f,
+                "output \"{path}\" has type {ty}, which expressions cannot use"
             ),
             ErrorKind::DivisionByZero => f.write_str("integer division by zero"),
             ErrorKind::IntegerOverflow => f.write_str("integer overflow"),
