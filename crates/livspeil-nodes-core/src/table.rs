@@ -16,13 +16,22 @@
 //! text (`text`, the `str()` form of expressions: strings unchanged,
 //! floats in shortest round-trip form, vectors `vec3(1.0, 2.0, 3.0)`), as
 //! a number (`number`: Floats, Ints converted, Bools 0 or 1, anything else
-//! 0) and whether the cell exists (`found`). Typed per-column outputs can
-//! come later with polymorphic ports.
+//! 0) and whether the cell exists (`found`).
+//!
+//! `core.table.get_value@1` (M0.17) is the typed getter: one generic node
+//! with a type variable `T: Any` on its `value` output rather than one
+//! node per type (`get_float`, `get_vec3`, ...). Column types are data,
+//! so `T` cannot come from the table: it resolves from where `value` is
+//! linked or from the type pinned on the node (`port-type="Vec3"` in
+//! documents), and a column whose type `T` does not accept is an
+//! invalid-input error on `column`.
 
 use std::cmp::Ordering;
+use std::sync::Arc;
 
 use livspeil_node_api::{
-    CookContext, NodeError, NodeImpl, NodeSpec, PortType, Table, TableColumn, Value,
+    CookContext, NodeError, NodeImpl, NodeSpec, PortType, Table, TableColumn, TypeClass, TypeVar,
+    Value, resolve_spec,
 };
 use livspeil_params::expr::format_value;
 
@@ -244,6 +253,95 @@ impl NodeImpl for TableGet {
     }
 }
 
+/// `core.table.get_value@1`: one cell of a table with a declared type:
+/// `<T: Any = Float>(table: Table, row: Int = 0, column: String = "value")
+/// -> (value: T, found: Bool)`.
+///
+/// `T` resolves from where `value` is linked or from the type pinned on
+/// the node (see the module docs). The named column must have type `T`
+/// (an `Int` column also serves `T = Float`), otherwise the cook fails
+/// with an invalid-input error on `column`, whether or not the row
+/// exists. A row out of range gives `found = false` and the zero value of
+/// `T`; so does a table without columns (an unconnected input). An
+/// unknown column of a table with columns is an error, as in
+/// `core.table.get`.
+#[derive(Debug)]
+pub struct TableGetValue {
+    spec: NodeSpec,
+    vars: Vec<TypeVar>,
+    ty: PortType,
+}
+
+impl TableGetValue {
+    #[must_use]
+    pub fn new() -> Self {
+        TableGetValue {
+            spec: NodeSpec::new("core.table.get_value", 1, "One cell of a table, typed")
+                .input("table", PortType::Table, empty_table())
+                .input("row", PortType::Int, Some(Value::Int(0)))
+                .input("column", PortType::String, text("value"))
+                .output("value", PortType::Float)
+                .output("found", PortType::Bool),
+            vars: vec![TypeVar::new("T", TypeClass::Any, PortType::Float).output("value")],
+            ty: PortType::Float,
+        }
+    }
+}
+node_boilerplate!(TableGetValue);
+
+impl NodeImpl for TableGetValue {
+    fn spec(&self) -> &NodeSpec {
+        &self.spec
+    }
+
+    fn type_vars(&self) -> &[TypeVar] {
+        &self.vars
+    }
+
+    fn with_types(&self, types: &[PortType]) -> Option<Arc<dyn NodeImpl>> {
+        let &[ty] = types else { return None };
+        let spec = resolve_spec(&self.spec, &self.vars, types).ok()?;
+        Some(Arc::new(TableGetValue {
+            spec,
+            vars: Vec::new(),
+            ty,
+        }))
+    }
+
+    fn cook(&self, _ctx: &CookContext, inputs: &[Value]) -> Result<Vec<Value>, NodeError> {
+        let t = table(inputs, 0, "table")?;
+        let row = match inputs.get(1) {
+            Some(Value::Int(r)) => *r,
+            _ => {
+                return Err(NodeError::InvalidInput {
+                    port: "row",
+                    reason: "expected an Int".to_owned(),
+                });
+            }
+        };
+        let name = string(inputs, 2, "column")?;
+        let column = column_index(t, name, "column")?;
+        if let Some(c) = column.and_then(|c| t.columns().get(c)) {
+            if !self.ty.accepts(c.ty()) {
+                return Err(NodeError::InvalidInput {
+                    port: "column",
+                    reason: format!("column \"{name}\" holds {} values, not {}", c.ty(), self.ty),
+                });
+            }
+        }
+        let cell = column
+            .and_then(|c| usize::try_from(row).ok().and_then(|r| t.cell(r, c)))
+            .and_then(|v| v.clone().coerce(self.ty));
+        let zero = || {
+            Value::zero(self.ty).ok_or_else(|| NodeError::Failed(format!("no {} value", self.ty)))
+        };
+        Ok(match cell {
+            Some(v) => vec![v, Value::Bool(true)],
+            None => vec![zero()?, Value::Bool(false)],
+        })
+    }
+}
+
 /// `core.table.filter_text@1`: the rows of `table` whose String column
 /// `column` (default `"name"`) contains `text` (default `""`, which keeps
 /// every row), in their original order. With `ignore_case` (default
@@ -427,6 +525,53 @@ mod tests {
                 _ => panic!(),
             })
             .collect()
+    }
+
+    fn get_value(ty: PortType, inputs: &[Value]) -> Result<Vec<Value>, NodeError> {
+        let base: Arc<dyn NodeImpl> = Arc::new(TableGetValue::new());
+        let node = livspeil_node_api::instantiate(&base, &[ty]).unwrap();
+        cook(node.as_ref(), inputs)
+    }
+
+    #[test]
+    fn get_value_is_typed() {
+        let int = |i| Value::Int(i);
+        assert_eq!(
+            get_value(PortType::String, &[books(), int(1), s("name")]).unwrap(),
+            [s("Emma"), Value::Bool(true)]
+        );
+        assert_eq!(
+            get_value(PortType::Int, &[books(), int(2), s("size")]).unwrap(),
+            [int(3), Value::Bool(true)]
+        );
+        // Int columns serve Float.
+        assert_eq!(
+            get_value(PortType::Float, &[books(), int(2), s("size")]).unwrap(),
+            [Value::Float(3.0), Value::Bool(true)]
+        );
+        assert_eq!(
+            get_value(PortType::String, &[books(), int(9), s("name")]).unwrap(),
+            [s(""), Value::Bool(false)]
+        );
+        assert_eq!(
+            get_value(
+                PortType::Vec3,
+                &[Value::Table(Table::empty()), int(0), s("x")]
+            )
+            .unwrap(),
+            [Value::Vec3([0.0; 3]), Value::Bool(false)]
+        );
+        let err = get_value(PortType::Vec3, &[books(), int(9), s("size")]).unwrap_err();
+        assert_eq!(
+            err,
+            NodeError::InvalidInput {
+                port: "column",
+                reason: "column \"size\" holds Int values, not Vec3".to_owned()
+            }
+        );
+        assert!(get_value(PortType::Int, &[books(), int(0), s("nope")]).is_err());
+        assert!(get_value(PortType::Int, &[books(), s("0"), s("size")]).is_err());
+        assert!(TableGetValue::new().with_types(&[]).is_none());
     }
 
     #[test]
