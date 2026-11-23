@@ -37,3 +37,9 @@ path = ["examples/wasm/**/*.wasm"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Livspeil contributors"
 SPDX-License-Identifier = "CC0-1.0"
+
+[[annotations]]
+path = ["sdk/python/livspeil/py.typed"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Livspeil contributors"
+SPDX-License-Identifier = "MPL-2.0"

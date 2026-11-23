@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! `livspeil cook --wasm` (M0.15): sandboxed wasm node packages are
-//! registered next to the core nodes before the room is loaded.
+//! registered next to the core nodes before the room is loaded (cargo
+//! feature `wasm`, on by default).
+
+#![cfg(feature = "wasm")]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};

@@ -17,6 +17,8 @@ let package = host.load_file(Path::new("hello-node.wasm"))?;
 package.register(&mut registry)?;                        // Arc<dyn NodeImpl> per node type
 ```
 
+`--wasm` is the CLI's cargo feature `wasm`, on by default. The host uses wasmtime 36 (LTS), which needs Rust 1.86: every wasmtime release that builds on the workspace MSRV 1.85 (34.x and older) has open security advisories. So `livspeil-wasm-host` declares `rust-version = "1.86"`, while `cargo build -p livspeil-cli --no-default-features` builds without wasmtime on Rust 1.85 (`--wasm` then fails with exit code 1). CI checks that build.
+
 `validate` and `diff` do not take `--wasm` yet: a room that uses package nodes fails `validate` with "unknown node type".
 
 ## Authoring a package

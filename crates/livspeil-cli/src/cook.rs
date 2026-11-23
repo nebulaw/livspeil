@@ -35,6 +35,11 @@
 //!
 //! Floats use exactly six decimals (`-0.000000` is written `0.000000`), so
 //! the last-bit differences between platform math libraries do not show.
+//! `--precision N` (0 to 17) prints `N` decimals instead (negative zero
+//! unsigned the same way); `--precision full` prints every float in its
+//! shortest round-trip form (`0.1`, `1.0`, `1e-7`, `-0.0`), which is exact
+//! but platform-dependent in the last bits. The precision applies to
+//! `time=` too.
 //! Values: Float `0.500000`, Int `3`, Bool `true`, `vec2(x y)`,
 //! `vec3(x y z)`, `vec4(x y z w)`, Color `oklch(L C H A)`, String as a JSON
 //! string literal. A failed node prints `<error: message>` for each port.
@@ -52,10 +57,14 @@
 //! Every frame is one tick of the cooker: input (the frame clock and the
 //! events injected for that frame), events (delivered with
 //! `Cooker::tick`), cook (the printed nodes), publish (the printed line).
-//! `--event NODE.PORT@FRAME` (repeatable) injects an event without payload
-//! in frame `FRAME` (counting from 0): delivered to the `Event` input
-//! `PORT` of `NODE`, or emitted from its `Event` output `PORT` if it has
-//! no such input. Events of one frame are injected in command-line order.
+//! `--event NODE.PORT@FRAME[=VALUE]` (repeatable) injects an event in
+//! frame `FRAME` (counting from 0): delivered to the `Event` input `PORT`
+//! of `NODE`, or emitted from its `Event` output `PORT` if it has no such
+//! input. `VALUE`, if given, is the payload, written in the `room.kdl`
+//! value syntax (`1.0`, `3`, `#true`, `"text"`, `(vec3)"1 2 3"`,
+//! `(color)"oklch(0.8 0.1 60)"`; see `livspeil_doc::parse_value`); the
+//! first `=` starts it. Events of one frame are injected in command-line
+//! order.
 //! Event node state is runtime only: every run starts from the initial
 //! states.
 //!
@@ -68,14 +77,34 @@
 //! `frame=N time=T event-error <node>: <message>` and makes the exit code
 //! 3, like a node error.
 //!
+//! Frames that are cooked but not printed (`--every`) still report their
+//! event problems: before the next printed frame (or at the end of the
+//! run), one summary line per kind covers the skipped frames since the
+//! last printed one, from the first to the last frame that had it:
+//!
+//! ```text
+//! frames 3..49: 47 event overflows (last: processed=10000 dropped=1)
+//! frames 3..49: 2 event errors (last: timer: invalid input 'period': must be positive, got 0)
+//! ```
+//!
+//! (`frame 7: ...` when only one frame had it; the counts are ticks for
+//! overflows and failed handler calls for errors). A handler error in any
+//! frame, printed or not, makes the exit code 3.
+//!
 //! # File system
 //!
 //! Nodes that read files (`core.fs.list_dir`) see the room package
 //! directory (the folder holding `room.kdl`) as their file root, or the
 //! directory given with `--fs-root DIR`. They cannot reach outside it
-//! (see `livspeil_nodes_core::StdFs`). The listing is a snapshot taken
-//! when first needed; it is not refreshed during a run, so every frame
-//! sees the same files.
+//! (see `livspeil_nodes_core::StdFs`). By default the listing is a
+//! snapshot taken when first needed; it is not refreshed during a run, so
+//! every frame sees the same files. With `--watch-fs`, at the start of
+//! every frame the folders listed so far are checked (modification time
+//! and number of entries; `RefreshPolicy::Watch`), and when one changed,
+//! the file-system nodes list again in that frame: created, deleted and
+//! renamed files show up, other nodes are not re-cooked (unless the
+//! listing they read changed). A file changed in place without changing
+//! its folder is not noticed.
 //!
 //! # WebAssembly nodes
 //!
@@ -83,6 +112,8 @@
 //! `.wat` text) and registers its node types next to the core nodes before
 //! the document is loaded; see `livspeil_wasm_host` and
 //! `docs/wasm-nodes.md`. A package that fails to load is an error (exit 1).
+//! The support is the cargo feature `wasm` (on by default); without it,
+//! `--wasm` fails with exit code 1.
 //!
 //! # JSONL format
 //!
@@ -103,27 +134,57 @@
 //! tagged value as above. After `outputs`, `"events":{"processed":P,
 //! "dropped":D}` is present only when the events were cut at the limit,
 //! and `"event_errors":[{"node":..,"error":..}]` only when a handler
-//! failed.
-//! Floats are rounded to six decimals, like the text format, and written in
-//! the shortest form that reads back as that value (`0.8`, `1.0`);
-//! non-finite floats are `null`. `stats` is present only with `--stats`.
+//! failed. The summary of skipped frames is one object per kind, written
+//! where the text lines would be: `{"skipped":{"from":A,"to":B,
+//! "overflows":N,"last":{"processed":P,"dropped":D}}}` and
+//! `{"skipped":{"from":A,"to":B,"event_errors":N,"last":{"node":..,
+//! "error":..}}}` (they have no `"frame"` key).
+//! Floats are rounded to six decimals (or `--precision N` decimals), like
+//! the text format, and written in the shortest form that reads back as
+//! that value (`0.8`, `1.0`); with `--precision full` they are not rounded
+//! (the shortest round-trip form of the exact value, `0.30000000000000004`).
+//! Non-finite floats are `null`. `stats` is present only with `--stats`.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{self, BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use livspeil_doc::parse;
 use livspeil_graph::{CookError, Cooker, ExternalEvent, Graph, NodeId, OUTPUT_TYPE, TickReport};
-use livspeil_node_api::{CookContext, Event, NodeRegistry, PortType, Value};
-use livspeil_nodes_core::{StdFs, core_registry};
+use livspeil_node_api::{CookContext, Event, NodeRegistry, PortType, SystemHost, Value};
+use livspeil_nodes_core::{RefreshPolicy, StdFs, core_registry};
+#[cfg(feature = "wasm")]
 use livspeil_wasm_host::WasmHost;
 
 use crate::{read, report, usage};
 
 /// Exit code when at least one printed value is a node error.
 const EXIT_NODE_ERROR: u8 = 3;
+
+/// `--precision`: how floats are printed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Precision {
+    /// This many decimals (text), rounded to them (JSONL).
+    Decimals(usize),
+    /// The shortest form that reads back as the exact value.
+    Full,
+}
+
+/// Most decimals `--precision` accepts (more than an `f64` holds).
+const MAX_DECIMALS: usize = 17;
+
+impl Precision {
+    fn parse(text: &str) -> Option<Self> {
+        if text == "full" {
+            return Some(Precision::Full);
+        }
+        let n: usize = text.parse().ok()?;
+        (n <= MAX_DECIMALS).then_some(Precision::Decimals(n))
+    }
+}
 
 /// Output format of `cook`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,27 +210,46 @@ struct Options {
     events: Vec<EventArg>,
     /// `--wasm FILE`: node packages to register before loading.
     wasm: Vec<String>,
+    /// `--precision N|full` (default 6 decimals).
+    precision: Precision,
+    /// `--watch-fs`: re-list folders that changed on disk.
+    watch_fs: bool,
 }
 
-/// One `--event NODE.PORT@FRAME`.
+/// One `--event NODE.PORT@FRAME[=VALUE]`.
 #[derive(Debug, Clone, PartialEq)]
 struct EventArg {
     node: String,
     port: String,
     frame: u64,
+    /// The payload, in the document value syntax.
+    payload: Option<Value>,
 }
 
 impl EventArg {
-    fn parse(text: &str) -> Option<Self> {
-        let (target, frame) = text.rsplit_once('@')?;
-        let (node, port) = target.rsplit_once('.')?;
+    /// Parse the argument; the error says what is wrong.
+    fn parse(text: &str) -> Result<Self, String> {
+        const SHAPE: &str = "expected NODE.PORT@FRAME or NODE.PORT@FRAME=VALUE";
+        let bad = || format!("invalid value '{text}' for --event ({SHAPE})");
+        // Node names cannot contain '=', so the first one starts the value.
+        let (head, payload) = match text.split_once('=') {
+            Some((head, value)) => {
+                let value = livspeil_doc::parse_value(value)
+                    .map_err(|err| format!("--event {head}: invalid payload {err}"))?;
+                (head, Some(value))
+            }
+            None => (text, None),
+        };
+        let (target, frame) = head.rsplit_once('@').ok_or_else(bad)?;
+        let (node, port) = target.rsplit_once('.').ok_or_else(bad)?;
         if node.is_empty() || port.is_empty() {
-            return None;
+            return Err(bad());
         }
-        Some(EventArg {
+        Ok(EventArg {
             node: node.to_owned(),
             port: port.to_owned(),
-            frame: frame.parse().ok()?,
+            frame: frame.parse().map_err(|_| bad())?,
+            payload,
         })
     }
 }
@@ -207,6 +287,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
         fs_root: None,
         events: Vec::new(),
         wasm: Vec::new(),
+        precision: Precision::Decimals(6),
+        watch_fs: false,
     };
     let mut args = args.peekable();
     while let Some(arg) = args.next() {
@@ -222,15 +304,19 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
         };
         match flag.as_str() {
             "-h" | "--help" => return Ok(Parsed::Help),
-            "--stats" => {
+            "--stats" | "--watch-fs" => {
                 if inline.is_some() {
-                    return Err("--stats takes no value".to_owned());
+                    return Err(format!("{flag} takes no value"));
                 }
-                options.stats = true;
+                if flag == "--stats" {
+                    options.stats = true;
+                } else {
+                    options.watch_fs = true;
+                }
                 continue;
             }
             "--frames" | "--fps" | "--start" | "--every" | "--node" | "--format" | "--fs-root"
-            | "--event" | "--wasm" => {}
+            | "--event" | "--precision" | "--wasm" => {}
             _ => return Err(format!("unknown option '{flag}'")),
         }
         let value = match inline.or_else(|| args.next()) {
@@ -264,10 +350,13 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
                 }
                 options.nodes.push(value);
             }
-            "--event" => {
-                options.events.push(EventArg::parse(&value).ok_or_else(|| {
-                    format!("invalid value '{value}' for --event (NODE.PORT@FRAME)")
-                })?)
+            "--event" => options.events.push(EventArg::parse(&value)?),
+            "--precision" => {
+                options.precision = Precision::parse(&value).ok_or_else(|| {
+                    format!(
+                        "invalid value '{value}' for --precision (0 to {MAX_DECIMALS}, or full)"
+                    )
+                })?;
             }
             "--wasm" => {
                 if value.is_empty() {
@@ -355,20 +444,32 @@ fn cook(options: &Options) -> ExitCode {
     } else {
         root
     };
-    match StdFs::new(&root) {
-        Ok(fs) => cooker.set_system(Some(Arc::new(fs))),
+    let policy = if options.watch_fs {
+        RefreshPolicy::Watch {
+            min_interval: Duration::ZERO,
+        }
+    } else {
+        RefreshPolicy::Snapshot
+    };
+    let fs = match StdFs::new(&root) {
+        Ok(fs) => Arc::new(fs.with_refresh(policy)),
         Err(err) => {
             eprintln!("livspeil cook: file root {}: {err}", root.display());
             return ExitCode::FAILURE;
         }
-    }
+    };
+    cooker.set_system(Some(Arc::clone(&fs) as Arc<dyn SystemHost>));
     let dt = 1.0 / options.fps;
     let mut node_error = false;
+    let mut skipped = Skipped::default();
     for frame in 0..options.frames {
         // Exact for every frame count a run can reach (below 2^53).
         #[allow(clippy::cast_precision_loss)]
         let time = options.start + frame as f64 / options.fps;
         cooker.reset_stats();
+        // Input phase: with --watch-fs, look for changed folders once per
+        // frame (a no-op for the default snapshot).
+        fs.refresh();
         let injected: Vec<ExternalEvent> = events
             .iter()
             .filter(|(f, _)| *f == frame)
@@ -379,10 +480,16 @@ fn cook(options: &Options) -> ExitCode {
             .iter()
             .map(|t| cook_target(&mut cooker, &graph, t))
             .collect();
+        // Handler errors count in every frame, printed or not.
+        node_error |= !report.errors.is_empty();
         if frame % options.every != 0 {
+            skipped.add(frame, &report, &graph);
             continue;
         }
-        node_error |= outcomes.iter().any(Result::is_err) || !report.errors.is_empty();
+        if let Err(err) = skipped.write(&mut out, options.format) {
+            return output_failed(&err);
+        }
+        node_error |= outcomes.iter().any(Result::is_err);
         let stats = options.stats.then(|| cooker.stats());
         let frame_out = FrameOut {
             frame,
@@ -392,6 +499,7 @@ fn cook(options: &Options) -> ExitCode {
             report: &report,
             graph: &graph,
             stats,
+            precision: options.precision,
         };
         let written = match options.format {
             Format::Text => write_text(&mut out, &frame_out),
@@ -401,7 +509,10 @@ fn cook(options: &Options) -> ExitCode {
             return output_failed(&err);
         }
     }
-    if let Err(err) = out.flush() {
+    if let Err(err) = skipped
+        .write(&mut out, options.format)
+        .and_then(|()| out.flush())
+    {
         return output_failed(&err);
     }
     if node_error {
@@ -412,20 +523,32 @@ fn cook(options: &Options) -> ExitCode {
 }
 
 /// The core nodes plus those of the `--wasm` packages (M0.15).
+#[cfg(feature = "wasm")]
 fn wasm_registry(paths: &[String]) -> Result<NodeRegistry, ExitCode> {
     let mut registry = core_registry();
     if paths.is_empty() {
         return Ok(registry);
     }
-    let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+    let paths: Vec<std::path::PathBuf> = paths.iter().map(std::path::PathBuf::from).collect();
     WasmHost::new()
-        .map_err(|err| (PathBuf::new(), err))
+        .map_err(|err| (std::path::PathBuf::new(), err))
         .and_then(|host| livspeil_wasm_host::register_files(&host, &mut registry, &paths))
         .map_err(|(path, err)| {
             eprintln!("livspeil cook: wasm package {}: {err}", path.display());
             ExitCode::FAILURE
         })?;
     Ok(registry)
+}
+
+/// Without the `wasm` feature, `--wasm` is an error.
+#[cfg(not(feature = "wasm"))]
+fn wasm_registry(paths: &[String]) -> Result<NodeRegistry, ExitCode> {
+    if paths.is_empty() {
+        Ok(core_registry())
+    } else {
+        eprintln!("livspeil cook: --wasm: this build has no wasm support (cargo feature `wasm`)");
+        Err(ExitCode::FAILURE)
+    }
 }
 
 fn output_failed(err: &io::Error) -> ExitCode {
@@ -441,7 +564,11 @@ fn external_events(graph: &Graph, args: &[EventArg]) -> Result<Vec<(u64, Externa
                 .find(&arg.node)
                 .or_else(|| graph.find_path(&arg.node))
                 .ok_or_else(|| format!("--event: no node named '{}'", arg.node))?;
-            let event = ExternalEvent::new(graph, id, &arg.port, Event::bang()).map_err(|_| {
+            let event = match &arg.payload {
+                Some(value) => Event::with(value.clone()),
+                None => Event::bang(),
+            };
+            let event = ExternalEvent::new(graph, id, &arg.port, event).map_err(|_| {
                 format!(
                     "--event: node '{}' has no Event port '{}'",
                     arg.node, arg.port
@@ -557,12 +684,13 @@ fn upstream(
 /// depends on failed this frame (its value would be stale).
 fn cook_target(cooker: &mut Cooker, graph: &Graph, target: &Target) -> Outcome {
     let result = cooker.cook(graph, target.id);
-    if let Some(err) = cooker.error(target.id) {
+    // Value errors only: handler errors are reported per tick.
+    if let Some(err) = cooker.value_error(target.id) {
         return Err(describe(graph, err));
     }
     let values = result.map_err(|err| describe(graph, &err))?;
     for (name, dep) in &target.upstream {
-        if let Some(err) = cooker.error(*dep) {
+        if let Some(err) = cooker.value_error(*dep) {
             return Err(format!(
                 "upstream node '{name}' failed: {}",
                 describe(graph, err)
@@ -583,18 +711,27 @@ fn describe(graph: &Graph, err: &CookError) -> String {
     }
 }
 
-/// A float with six decimals; negative zero (after rounding) is unsigned.
-fn fixed(x: f64) -> String {
-    let s = format!("{x:.6}");
-    if s == "-0.000000" {
-        "0.000000".to_owned()
-    } else {
-        s
+/// A float with `--precision` decimals, negative zero (after rounding)
+/// unsigned; or with `full`, its shortest round-trip form (`0.1`, `1.0`,
+/// `1e-7`, `-0.0`).
+fn fixed(x: f64, p: Precision) -> String {
+    match p {
+        Precision::Full => format!("{x:?}"),
+        Precision::Decimals(n) => {
+            let s = format!("{x:.n$}");
+            match s.strip_prefix('-') {
+                Some(rest) if rest.bytes().all(|b| b == b'0' || b == b'.') => rest.to_owned(),
+                _ => s,
+            }
+        }
     }
 }
 
-fn fixed_list(xs: &[f64]) -> String {
-    xs.iter().map(|&x| fixed(x)).collect::<Vec<_>>().join(" ")
+fn fixed_list(xs: &[f64], p: Precision) -> String {
+    xs.iter()
+        .map(|&x| fixed(x, p))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn json_string(s: &str) -> String {
@@ -602,29 +739,33 @@ fn json_string(s: &str) -> String {
     serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_owned())
 }
 
-/// A float rounded to six decimals, as JSON (`null` if not finite).
-fn json_float(x: f64) -> String {
+/// A float rounded to `--precision` decimals (or exact with `full`), as
+/// JSON (`null` if not finite).
+fn json_float(x: f64, p: Precision) -> String {
     if !x.is_finite() {
         return "null".to_owned();
     }
-    let rounded: f64 = fixed(x).parse().unwrap_or(x);
+    let rounded: f64 = match p {
+        Precision::Full => x,
+        Precision::Decimals(_) => fixed(x, p).parse().unwrap_or(x),
+    };
     serde_json::to_string(&rounded).unwrap_or_else(|_| "null".to_owned())
 }
 
-fn json_list(xs: &[f64]) -> String {
-    let items: Vec<String> = xs.iter().map(|&x| json_float(x)).collect();
+fn json_list(xs: &[f64], p: Precision) -> String {
+    let items: Vec<String> = xs.iter().map(|&x| json_float(x, p)).collect();
     format!("[{}]", items.join(","))
 }
 
-fn text_value(value: &Value) -> String {
+fn text_value(value: &Value, p: Precision) -> String {
     match value {
-        Value::Float(x) => fixed(*x),
+        Value::Float(x) => fixed(*x, p),
         Value::Int(i) => i.to_string(),
         Value::Bool(b) => b.to_string(),
-        Value::Vec2(v) => format!("vec2({})", fixed_list(v)),
-        Value::Vec3(v) => format!("vec3({})", fixed_list(v)),
-        Value::Vec4(v) => format!("vec4({})", fixed_list(v)),
-        Value::Color(c) => format!("oklch({})", fixed_list(c)),
+        Value::Vec2(v) => format!("vec2({})", fixed_list(v, p)),
+        Value::Vec3(v) => format!("vec3({})", fixed_list(v, p)),
+        Value::Vec4(v) => format!("vec4({})", fixed_list(v, p)),
+        Value::Color(c) => format!("oklch({})", fixed_list(c, p)),
         Value::String(s) => json_string(s),
         Value::Table(t) => {
             let columns: Vec<String> = t
@@ -633,7 +774,12 @@ fn text_value(value: &Value) -> String {
                 .map(|c| format!("{}:{}", c.name(), c.ty()))
                 .collect();
             let rows: Vec<String> = (0..t.row_count())
-                .map(|r| t.row(r).map(text_value).collect::<Vec<_>>().join(" "))
+                .map(|r| {
+                    t.row(r)
+                        .map(|v| text_value(v, p))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
                 .collect();
             format!("table[{}][{}]", columns.join(" "), rows.join("; "))
         }
@@ -641,7 +787,7 @@ fn text_value(value: &Value) -> String {
             let keys: Vec<String> = c
                 .keys()
                 .iter()
-                .map(|k| format!("{}:{}", fixed(k.position), fixed(k.value)))
+                .map(|k| format!("{}:{}", fixed(k.position, p), fixed(k.value, p)))
                 .collect();
             format!("curve({})", keys.join(" "))
         }
@@ -649,34 +795,34 @@ fn text_value(value: &Value) -> String {
     }
 }
 
-fn json_value(value: &Value) -> String {
-    let (tag, body) = json_parts(value);
+fn json_value(value: &Value, p: Precision) -> String {
+    let (tag, body) = json_parts(value, p);
     format!("{{\"{tag}\":{body}}}")
 }
 
 /// The type tag and untagged JSON of a value.
-fn json_parts(value: &Value) -> (&'static str, String) {
+fn json_parts(value: &Value, p: Precision) -> (&'static str, String) {
     match value {
-        Value::Float(x) => ("float", json_float(*x)),
+        Value::Float(x) => ("float", json_float(*x, p)),
         Value::Int(i) => ("int", i.to_string()),
         Value::Bool(b) => ("bool", b.to_string()),
-        Value::Vec2(v) => ("vec2", json_list(v)),
-        Value::Vec3(v) => ("vec3", json_list(v)),
-        Value::Vec4(v) => ("vec4", json_list(v)),
-        Value::Color(c) => ("color", json_list(c)),
+        Value::Vec2(v) => ("vec2", json_list(v, p)),
+        Value::Vec3(v) => ("vec3", json_list(v, p)),
+        Value::Vec4(v) => ("vec4", json_list(v, p)),
+        Value::Color(c) => ("color", json_list(c, p)),
         Value::String(s) => ("string", json_string(s)),
         Value::Table(t) => {
             let columns: Vec<String> = t
                 .columns()
                 .iter()
                 .map(|c| {
-                    let tag = Value::zero(c.ty()).map_or("unsupported", |z| json_parts(&z).0);
+                    let tag = Value::zero(c.ty()).map_or("unsupported", |z| json_parts(&z, p).0);
                     format!("{{\"name\":{},\"type\":\"{tag}\"}}", json_string(c.name()))
                 })
                 .collect();
             let rows: Vec<String> = (0..t.row_count())
                 .map(|r| {
-                    let cells: Vec<String> = t.row(r).map(|v| json_parts(v).1).collect();
+                    let cells: Vec<String> = t.row(r).map(|v| json_parts(v, p).1).collect();
                     format!("[{}]", cells.join(","))
                 })
                 .collect();
@@ -693,12 +839,137 @@ fn json_parts(value: &Value) -> (&'static str, String) {
             let keys: Vec<String> = c
                 .keys()
                 .iter()
-                .map(|k| json_list(&[k.position, k.value]))
+                .map(|k| json_list(&[k.position, k.value], p))
                 .collect();
             ("curve", format!("[{}]", keys.join(",")))
         }
         other => ("unsupported", json_string(other.port_type().name())),
     }
+}
+
+/// Frames from `first` to `last` (inclusive) that had a problem, with
+/// how many there were and the last one.
+#[derive(Debug, Clone, PartialEq)]
+struct Span<T> {
+    first: u64,
+    last: u64,
+    count: usize,
+    latest: T,
+}
+
+impl<T> Span<T> {
+    fn add(span: &mut Option<Self>, frame: u64, count: usize, latest: T) {
+        match span {
+            Some(s) => {
+                s.last = frame;
+                s.count += count;
+                s.latest = latest;
+            }
+            None => {
+                *span = Some(Span {
+                    first: frame,
+                    last: frame,
+                    count,
+                    latest,
+                });
+            }
+        }
+    }
+
+    fn frames(&self) -> String {
+        if self.first == self.last {
+            format!("frame {}", self.first)
+        } else {
+            format!("frames {}..{}", self.first, self.last)
+        }
+    }
+}
+
+/// Event problems of the frames that were cooked but not printed (with
+/// `--every`) since the last printed frame.
+#[derive(Debug, Default)]
+struct Skipped {
+    /// Ticks cut at the event limit; the last one's `(processed, dropped)`.
+    overflows: Option<Span<(usize, usize)>>,
+    /// Failed handlers; the last one's `(node name, message)`.
+    errors: Option<Span<(String, String)>>,
+}
+
+impl Skipped {
+    fn add(&mut self, frame: u64, report: &TickReport, graph: &Graph) {
+        if report.overflowed() {
+            Span::add(
+                &mut self.overflows,
+                frame,
+                1,
+                (report.processed, report.dropped),
+            );
+        }
+        if let Some(last) = event_errors(report, graph).pop() {
+            Span::add(&mut self.errors, frame, report.errors.len(), last);
+        }
+    }
+
+    /// Write and forget the summary, if there is one: in text
+    /// `frames A..B: N event overflows (last: processed=P dropped=D)` and
+    /// `frames A..B: N event errors (last: <node>: <message>)`; in JSONL
+    /// one `{"skipped":{..}}` object for each.
+    fn write(&mut self, out: &mut impl Write, format: Format) -> io::Result<()> {
+        let plural = |n: usize| if n == 1 { "" } else { "s" };
+        if let Some(s) = self.overflows.take() {
+            let (processed, dropped) = s.latest;
+            match format {
+                Format::Text => writeln!(
+                    out,
+                    "{}: {} event overflow{} (last: processed={processed} dropped={dropped})",
+                    s.frames(),
+                    s.count,
+                    plural(s.count)
+                )?,
+                Format::Jsonl => writeln!(
+                    out,
+                    "{{\"skipped\":{{\"from\":{},\"to\":{},\"overflows\":{},\
+                     \"last\":{{\"processed\":{processed},\"dropped\":{dropped}}}}}}}",
+                    s.first, s.last, s.count
+                )?,
+            }
+        }
+        if let Some(s) = self.errors.take() {
+            let (node, message) = &s.latest;
+            match format {
+                Format::Text => writeln!(
+                    out,
+                    "{}: {} event error{} (last: {node}: {message})",
+                    s.frames(),
+                    s.count,
+                    plural(s.count)
+                )?,
+                Format::Jsonl => writeln!(
+                    out,
+                    "{{\"skipped\":{{\"from\":{},\"to\":{},\"event_errors\":{},\
+                     \"last\":{{\"node\":{},\"error\":{}}}}}}}",
+                    s.first,
+                    s.last,
+                    s.count,
+                    json_string(node),
+                    json_string(message)
+                )?,
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Failed handlers of a tick as `(node name, message)`.
+fn event_errors(report: &TickReport, graph: &Graph) -> Vec<(String, String)> {
+    report
+        .errors
+        .iter()
+        .map(|e| {
+            let name = display_name(graph, e.node).unwrap_or_else(|| e.node.to_string());
+            (name, describe(graph, &e.error))
+        })
+        .collect()
 }
 
 /// Everything printed for one frame.
@@ -710,6 +981,7 @@ struct FrameOut<'a> {
     report: &'a TickReport,
     graph: &'a Graph,
     stats: Option<livspeil_graph::CookStats>,
+    precision: Precision,
 }
 
 impl FrameOut<'_> {
@@ -720,55 +992,48 @@ impl FrameOut<'_> {
 
     /// Failed handlers as `(node name, message)`.
     fn event_errors(&self) -> Vec<(String, String)> {
-        self.report
-            .errors
-            .iter()
-            .map(|e| {
-                let name = display_name(self.graph, e.node).unwrap_or_else(|| e.node.to_string());
-                (name, describe(self.graph, &e.error))
-            })
-            .collect()
+        event_errors(self.report, self.graph)
     }
 }
 
-fn text_events(events: &[&Event]) -> String {
+fn text_events(events: &[&Event], p: Precision) -> String {
     if events.is_empty() {
         return "none".to_owned();
     }
     events
         .iter()
         .map(|e| match &e.payload {
-            Some(p) => format!("event({})", text_value(p)),
+            Some(payload) => format!("event({})", text_value(payload, p)),
             None => "event".to_owned(),
         })
         .collect::<Vec<_>>()
         .join(",")
 }
 
-fn json_events(events: &[&Event]) -> String {
+fn json_events(events: &[&Event], p: Precision) -> String {
     let items: Vec<String> = events
         .iter()
         .map(|e| {
             e.payload
                 .as_ref()
-                .map_or_else(|| "null".to_owned(), json_value)
+                .map_or_else(|| "null".to_owned(), |v| json_value(v, p))
         })
         .collect();
     format!("{{\"event\":[{}]}}", items.join(","))
 }
 
 fn write_text(out: &mut impl Write, f: &FrameOut<'_>) -> io::Result<()> {
-    let prefix = format!("frame={} time={}", f.frame, fixed(f.time));
+    let prefix = format!("frame={} time={}", f.frame, fixed(f.time, f.precision));
     for (target, outcome) in f.targets.iter().zip(f.outcomes) {
         write!(out, "{prefix}")?;
         for (index, port) in target.ports.iter().enumerate() {
             let value = match outcome {
                 Ok(_) if target.events.get(index) == Some(&true) => {
-                    text_events(&f.fired(target, index))
+                    text_events(&f.fired(target, index), f.precision)
                 }
                 Ok(values) => values
                     .get(index)
-                    .map_or_else(|| "<missing>".to_owned(), text_value),
+                    .map_or_else(|| "<missing>".to_owned(), |v| text_value(v, f.precision)),
                 Err(message) => format!("<error: {message}>"),
             };
             write!(out, " {}.{port}={value}", target.name)?;
@@ -810,9 +1075,9 @@ fn write_jsonl(out: &mut impl Write, f: &FrameOut<'_>) -> io::Result<()> {
                         .enumerate()
                         .map(|(index, (port, value))| {
                             let value = if target.events.get(index) == Some(&true) {
-                                json_events(&f.fired(target, index))
+                                json_events(&f.fired(target, index), f.precision)
                             } else {
-                                json_value(value)
+                                json_value(value, f.precision)
                             };
                             format!("{}:{value}", json_string(port))
                         })
@@ -828,7 +1093,7 @@ fn write_jsonl(out: &mut impl Write, f: &FrameOut<'_>) -> io::Result<()> {
         out,
         "{{\"frame\":{},\"time\":{},\"outputs\":{{{}}}",
         f.frame,
-        json_float(f.time),
+        json_float(f.time, f.precision),
         nodes.join(",")
     )?;
     if f.report.overflowed() {
@@ -865,6 +1130,8 @@ fn write_jsonl(out: &mut impl Write, f: &FrameOut<'_>) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const P6: Precision = Precision::Decimals(6);
 
     fn opts(args: &[&str]) -> Result<Options, String> {
         match parse_args(args.iter().map(|s| (*s).to_owned()))? {
@@ -916,15 +1183,36 @@ mod tests {
                 EventArg {
                     node: "blink".into(),
                     port: "fired".into(),
-                    frame: 3
+                    frame: 3,
+                    payload: None,
                 },
                 EventArg {
                     node: "sub/c".into(),
                     port: "trigger".into(),
-                    frame: 0
+                    frame: 0,
+                    payload: None,
                 }
             ]
         );
+        let payload = |arg: &str| opts(&["r", "--event", arg]).map(|o| o.events[0].payload.clone());
+        assert_eq!(payload("a.b@1=1.5"), Ok(Some(Value::Float(1.5))));
+        assert_eq!(payload("a.b@1=3"), Ok(Some(Value::Int(3))));
+        assert_eq!(payload("a.b@1=#true"), Ok(Some(Value::Bool(true))));
+        assert_eq!(
+            payload("a.b@1=\"x=y@z\""),
+            Ok(Some(Value::String("x=y@z".into())))
+        );
+        assert_eq!(
+            payload("a.b@1=(vec3)\"1 2 3\""),
+            Ok(Some(Value::Vec3([1.0, 2.0, 3.0])))
+        );
+        assert_eq!(
+            payload("a.b@1=(color)\"oklch(0.5 0.1 30)\""),
+            Ok(Some(Value::Color([0.5, 0.1, 30.0, 1.0])))
+        );
+        let o = opts(&["r", "--event=a.b@2=-1"]).unwrap();
+        assert_eq!(o.events[0].payload, Some(Value::Int(-1)));
+        assert_eq!(o.events[0].frame, 2);
         let o = opts(&["r", "--event", "a.b.c@2"]).unwrap();
         assert_eq!(
             (o.events[0].node.as_str(), o.events[0].port.as_str()),
@@ -953,6 +1241,11 @@ mod tests {
             &["r", "--event", "a.@1"],
             &["r", "--event", "a.b@-1"],
             &["r", "--event"],
+            &["r", "--event", "a.b@1="],
+            &["r", "--event", "a.b@1=1 2"],
+            &["r", "--event", "a.b@1=(vec3)\"1\""],
+            &["r", "--event", "a.b@1=#nan"],
+            &["r", "--event", "a.b=1@1"],
         ] {
             assert!(opts(args).is_err(), "{args:?}");
         }
@@ -980,9 +1273,9 @@ mod tests {
         let targets = targets(&graph, &[]).unwrap();
         let mut cooker = Cooker::new();
         let stable = |x: f64| {
-            let s = fixed(x);
+            let s = fixed(x, P6);
             for y in [x * (1.0 + 1e-12), x * (1.0 - 1e-12), x + 1e-15, x - 1e-15] {
-                assert_eq!(fixed(y), s, "{x:e} is too close to a rounding boundary");
+                assert_eq!(fixed(y, P6), s, "{x:e} is too close to a rounding boundary");
             }
         };
         let mut checked = 0;
@@ -1034,29 +1327,72 @@ mod tests {
 
     #[test]
     fn float_formatting() {
-        assert_eq!(fixed(0.5), "0.500000");
-        assert_eq!(fixed(-0.0), "0.000000");
-        assert_eq!(fixed(-1e-9), "0.000000");
-        assert_eq!(fixed(-0.25), "-0.250000");
-        assert_eq!(json_float(0.8000000001), "0.8");
-        assert_eq!(json_float(1.0), "1.0");
-        assert_eq!(json_float(-1e-9), "0.0");
-        assert_eq!(json_float(f64::NAN), "null");
+        assert_eq!(fixed(0.5, P6), "0.500000");
+        assert_eq!(fixed(-0.0, P6), "0.000000");
+        assert_eq!(fixed(-1e-9, P6), "0.000000");
+        assert_eq!(fixed(-0.25, P6), "-0.250000");
+        assert_eq!(json_float(0.8000000001, P6), "0.8");
+        assert_eq!(json_float(1.0, P6), "1.0");
+        assert_eq!(json_float(-1e-9, P6), "0.0");
+        assert_eq!(json_float(f64::NAN, P6), "null");
+    }
+
+    #[test]
+    fn precision() {
+        assert_eq!(opts(&["r"]).unwrap().precision, P6);
+        assert_eq!(
+            opts(&["r", "--precision", "2"]).unwrap().precision,
+            Precision::Decimals(2)
+        );
+        assert_eq!(
+            opts(&["r", "--precision=full"]).unwrap().precision,
+            Precision::Full
+        );
+        for bad in ["-1", "18", "x", ""] {
+            assert!(opts(&["r", "--precision", bad]).is_err(), "{bad}");
+        }
+        let (p0, p2, full) = (
+            Precision::Decimals(0),
+            Precision::Decimals(2),
+            Precision::Full,
+        );
+        assert_eq!(fixed(0.125, p2), "0.12");
+        assert_eq!(fixed(-0.001, p2), "0.00");
+        assert_eq!(fixed(-0.4, p0), "0");
+        assert_eq!(fixed(2.5, p0), "2");
+        assert_eq!(fixed(0.1 + 0.2, full), "0.30000000000000004");
+        assert_eq!(fixed(1.0, full), "1.0");
+        assert_eq!(fixed(-0.0, full), "-0.0");
+        assert_eq!(fixed(1e-7, full), "1e-7");
+        assert_eq!(json_float(0.1 + 0.2, full), "0.30000000000000004");
+        assert_eq!(json_float(0.1 + 0.2, p2), "0.3");
+        assert_eq!(json_float(f64::INFINITY, full), "null");
+        assert_eq!(
+            text_value(&Value::Vec2([0.5, 1.0 / 3.0]), full),
+            "vec2(0.5 0.3333333333333333)"
+        );
+        assert_eq!(
+            json_value(
+                &Value::Color([0.123456789, 0.0, 1.0, 1.0]),
+                Precision::Decimals(3)
+            ),
+            "{\"color\":[0.123,0.0,1.0,1.0]}"
+        );
     }
 
     #[test]
     fn value_formatting() {
         assert_eq!(
-            text_value(&Value::Color([0.8, 0.12, 60.0, 1.0])),
+            text_value(&Value::Color([0.8, 0.12, 60.0, 1.0]), P6),
             "oklch(0.800000 0.120000 60.000000 1.000000)"
         );
-        assert_eq!(text_value(&Value::String("a\"b".into())), "\"a\\\"b\"");
+        assert_eq!(text_value(&Value::String("a\"b".into()), P6), "\"a\\\"b\"");
         assert_eq!(
-            json_value(&Value::Vec2([1.0, -0.5])),
+            json_value(&Value::Vec2([1.0, -0.5]), P6),
             "{\"vec2\":[1.0,-0.5]}"
         );
-        assert_eq!(json_value(&Value::Int(-3)), "{\"int\":-3}");
-        assert_eq!(json_value(&Value::Bool(true)), "{\"bool\":true}");
+        assert_eq!(json_value(&Value::Int(-3), P6), "{\"int\":-3}");
+        assert_eq!(json_value(&Value::Bool(true), P6), "{\"bool\":true}");
         let table = livspeil_node_api::Table::from_rows(
             &[
                 ("name", livspeil_node_api::PortType::String),
@@ -1070,21 +1406,107 @@ mod tests {
         .unwrap();
         let table = Value::Table(table);
         assert_eq!(
-            text_value(&table),
+            text_value(&table, P6),
             "table[name:String size:Int][\"a\" 1; \"b c\" 2]"
         );
         assert_eq!(
-            json_value(&table),
+            json_value(&table, P6),
             "{\"table\":{\"columns\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"size\",\"type\":\"int\"}],\"rows\":[[\"a\",1],[\"b c\",2]]}}"
         );
         let empty = Value::Table(livspeil_node_api::Table::empty());
-        assert_eq!(text_value(&empty), "table[][]");
+        assert_eq!(text_value(&empty, P6), "table[][]");
         let curve = Value::Curve(Arc::new(livspeil_node_api::Curve::identity()));
         assert_eq!(
-            text_value(&curve),
+            text_value(&curve, P6),
             "curve(0.000000:0.000000 1.000000:1.000000)"
         );
-        assert_eq!(json_value(&curve), "{\"curve\":[[0.0,0.0],[1.0,1.0]]}");
+        assert_eq!(json_value(&curve, P6), "{\"curve\":[[0.0,0.0],[1.0,1.0]]}");
+    }
+
+    /// `--watch-fs` (the refresh in the frame loop): files created and
+    /// deleted between frames show up in the next frame; frames without a
+    /// change re-cook nothing, and the unrelated node never re-cooks.
+    #[test]
+    fn watch_fs_relists_changed_folders_only() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        let dir =
+            std::env::temp_dir().join(format!("livspeil-cli-watch-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(dir.join("books")).unwrap();
+        std::fs::write(dir.join("books/a.pdf"), b"a").unwrap();
+        const ROOM: &str = r#"room "watch" format=1 {
+  network "/" {
+    node "list" type="core.fs.list_dir@1" id="01920000-0000-7000-8000-000000000001" {
+      input "path" "books"
+    }
+    node "count" type="core.table.count@1" id="01920000-0000-7000-8000-000000000002"
+    node "other" type="core.math.add@1" id="01920000-0000-7000-8000-000000000003" {
+      input "a" 1.0
+    }
+    link from="list.entries" to="count.table"
+  }
+}
+"#;
+        let graph = parse(ROOM)
+            .unwrap()
+            .to_graph(Arc::new(core_registry()))
+            .unwrap();
+        let targets = targets(&graph, &[]).unwrap();
+        assert_eq!(targets.len(), 2);
+        let fs = Arc::new(
+            StdFs::new(&dir)
+                .unwrap()
+                .with_refresh(RefreshPolicy::Watch {
+                    min_interval: Duration::ZERO,
+                }),
+        );
+        let mut cooker = Cooker::new();
+        cooker.set_system(Some(Arc::clone(&fs) as Arc<dyn SystemHost>));
+        // Per frame: (count, nodes cooked).
+        let mut frame = |n: u64| {
+            cooker.reset_stats();
+            fs.refresh();
+            cooker.tick(
+                &graph,
+                CookContext {
+                    frame: n,
+                    time: 0.0,
+                    dt: 0.0,
+                },
+                &[],
+            );
+            let outcomes: Vec<Outcome> = targets
+                .iter()
+                .map(|t| cook_target(&mut cooker, &graph, t))
+                .collect();
+            let count = match &outcomes[0] {
+                Ok(values) => values[0].clone(),
+                Err(e) => panic!("{e}"),
+            };
+            assert_eq!(outcomes[1], Ok(vec![Value::Float(1.0)]));
+            (count, cooker.stats().cooked)
+        };
+        assert_eq!(frame(0), (Value::Int(1), 3));
+        assert_eq!(frame(1), (Value::Int(1), 0));
+        std::fs::write(dir.join("books/b.pdf"), b"b").unwrap();
+        assert_eq!(frame(2), (Value::Int(2), 2), "list and count only");
+        assert_eq!(frame(3), (Value::Int(2), 0));
+        std::fs::remove_file(dir.join("books/a.pdf")).unwrap();
+        std::fs::remove_file(dir.join("books/b.pdf")).unwrap();
+        assert_eq!(frame(4), (Value::Int(0), 2));
+        // A change elsewhere is not looked at.
+        std::fs::write(dir.join("elsewhere.txt"), b"").unwrap();
+        assert_eq!(frame(5), (Value::Int(0), 0));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn watch_fs_option() {
+        assert!(!opts(&["r"]).unwrap().watch_fs);
+        assert!(opts(&["r", "--watch-fs"]).unwrap().watch_fs);
+        assert!(opts(&["r", "--watch-fs=1"]).is_err());
     }
 
     #[test]

@@ -209,8 +209,12 @@
 //! floats in Rust's shortest round-trip form (`1.0`, `0.1`, `1e-7`),
 //! strings always quoted with KDL escapes. `parse(format(doc)) == doc`
 //! and formatting is idempotent. [`canonicalize`] additionally keeps a
-//! leading block of `//` comments (license headers); other comments are
-//! dropped.
+//! leading block of `//` comments (license headers) and the `//` comments
+//! attached to nodes, inputs, links, networks, `charm` and `meta` entries
+//! (the lines directly above an item and a comment at the end of its
+//! line), which move with their items; other comments (block comments,
+//! comments inside values, anim keys and table rows, slashdashed items)
+//! are dropped. See `comments.rs`.
 //!
 //! [`parse`] is syntactic and strict (unknown nodes and properties are
 //! errors); [`Document::to_graph`] checks the document against a node
@@ -218,6 +222,7 @@
 
 mod anim;
 pub mod assets;
+mod comments;
 mod convert;
 pub mod diff;
 mod error;
@@ -227,6 +232,7 @@ mod model;
 mod package;
 mod parse;
 mod value;
+mod value_text;
 
 pub use assets::{AssetEntry, AssetIssue, AssetsError, AssetsLock, IssueKind, Severity};
 pub use diff::{Change, DocDiff, Op, Subject, diff};
@@ -242,3 +248,4 @@ pub use package::{
     sha256_file, split_prolog, write_assets_lock,
 };
 pub use parse::parse;
+pub use value_text::parse_value;

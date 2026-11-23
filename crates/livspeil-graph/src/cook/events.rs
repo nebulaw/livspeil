@@ -63,6 +63,19 @@
 //! event emitted from a port that is not an `Event` output) keeps its
 //! state, emits nothing and is reported in [`TickReport::errors`].
 //!
+//! # Handler errors
+//!
+//! A failed handler is also the node's error state, visible through
+//! [`Cooker::error`] (and [`Cooker::event_error`]) after the tick, like a
+//! value error. It is the error of the node's *last handler call*: it
+//! clears when the node's handler next runs successfully (a later
+//! delivery to the node, or its poll; polling nodes are called every
+//! tick, so theirs clear in the next tick that succeeds), when the node is
+//! removed (at the next tick), and when the cooker is used with another
+//! graph. A value cook does not clear it, and it does not clear value
+//! errors: [`Cooker::error`] reports a value error first, then a handler
+//! error.
+//!
 //! # Caching
 //!
 //! Before a handler runs, the cooker cooks the node (and so its upstream)
@@ -227,6 +240,8 @@ pub(super) struct EventState {
     /// Reused input buffers for handlers.
     inputs: Vec<Value>,
     slots: Vec<Value>,
+    /// Error of the last handler call, by node (see "Handler errors").
+    errors: HashMap<NodeId, CookError>,
 }
 
 impl Default for EventState {
@@ -239,6 +254,7 @@ impl Default for EventState {
             limit: DEFAULT_EVENT_LIMIT,
             inputs: Vec::new(),
             slots: Vec::new(),
+            errors: HashMap::new(),
         }
     }
 }
@@ -248,6 +264,15 @@ impl EventState {
     pub(super) fn reset(&mut self) {
         self.built_for = None;
         self.states.clear();
+        self.errors.clear();
+    }
+
+    /// The error of the node's last handler call, if it failed.
+    pub(super) fn error(&self, id: NodeId) -> Option<&CookError> {
+        if self.errors.is_empty() {
+            return None;
+        }
+        self.errors.get(&id)
     }
 
     fn get(&self, slot: usize, id: NodeId) -> Option<&NodeState> {
@@ -275,6 +300,8 @@ impl EventState {
             return;
         }
         self.built_for = Some(key);
+        // Errors of removed nodes go with them.
+        self.errors.retain(|&id, _| graph.slot_of(id).is_some());
         self.pollers.clear();
         self.pollers.extend(graph.node_ids().filter_map(|id| {
             let slot = graph.slot_of(id)?;
@@ -334,6 +361,14 @@ impl Cooker {
         self.entries.clear();
         self.failed.clear();
         self.topo_rev = None;
+    }
+
+    /// The error of the last handler call of `id`, if it failed (see the
+    /// "Handler errors" section of the `cook/events.rs` module docs).
+    /// [`Cooker::error`] returns it too when the node has no value error.
+    #[must_use]
+    pub fn event_error(&self, id: NodeId) -> Option<&CookError> {
+        self.events.error(id)
     }
 
     /// The runtime state of an event node, if an event changed it (`None`
@@ -428,19 +463,23 @@ impl Cooker {
                 }
                 Item::Poll { slot } => (slot, self.handle(graph, slot, EventTrigger::Tick)),
             };
+            let Some(id) = graph.node_at(slot).map(|n| n.id) else {
+                continue;
+            };
             match emitted {
-                Ok(emitted) => queue.extend(emitted.into_iter().map(|(port, event)| Item::Emit {
-                    slot,
-                    port,
-                    event,
-                })),
-                Err(error) => {
-                    if let Some(node) = graph.node_at(slot) {
-                        report.errors.push(EventError {
-                            node: node.id,
-                            error,
-                        });
+                Ok(emitted) => {
+                    if !self.events.errors.is_empty() {
+                        self.events.errors.remove(&id);
                     }
+                    queue.extend(emitted.into_iter().map(|(port, event)| Item::Emit {
+                        slot,
+                        port,
+                        event,
+                    }));
+                }
+                Err(error) => {
+                    self.events.errors.insert(id, error.clone());
+                    report.errors.push(EventError { node: id, error });
                 }
             }
         }
@@ -521,5 +560,133 @@ impl Cooker {
             }
             stack.extend(graph.dependents_at(slot).iter().copied());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use livspeil_node_api::{NodeError, NodeImpl, NodeRegistry, NodeSpec};
+
+    use super::*;
+
+    /// Fails on payload `Int(-1)`, else succeeds; counts calls in a value
+    /// output.
+    #[derive(Debug)]
+    struct Picky {
+        spec: NodeSpec,
+        polls: bool,
+    }
+
+    impl NodeImpl for Picky {
+        fn spec(&self) -> &NodeSpec {
+            &self.spec
+        }
+
+        fn cook(&self, _: &CookContext, _: &[Value]) -> Result<Vec<Value>, NodeError> {
+            Ok(vec![Value::Int(0)])
+        }
+
+        fn polls_events(&self) -> bool {
+            self.polls
+        }
+
+        fn on_event(&self, call: &mut EventCall<'_>) -> Result<(), NodeError> {
+            let fail = match call.trigger() {
+                EventTrigger::Input { event, .. } => event.payload == Some(Value::Int(-1)),
+                // Pollers fail on odd frames.
+                EventTrigger::Tick => call.ctx().frame % 2 == 1,
+            };
+            if fail {
+                Err(NodeError::Failed("picky refused".to_owned()))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    fn picky(type_name: &'static str, polls: bool) -> Arc<Picky> {
+        Arc::new(Picky {
+            spec: NodeSpec::new(type_name, 1, "Fails on demand")
+                .input("trigger", PortType::Event, Some(Value::Event))
+                .output("calls", PortType::Int),
+            polls,
+        })
+    }
+
+    fn graph() -> Graph {
+        let mut registry = NodeRegistry::new();
+        registry.register(picky("test.picky", false)).unwrap();
+        registry.register(picky("test.poller", true)).unwrap();
+        Graph::new(Arc::new(registry))
+    }
+
+    fn clock(frame: u64) -> CookContext {
+        CookContext {
+            frame,
+            time: 0.0,
+            dt: 0.0,
+        }
+    }
+
+    #[test]
+    fn handler_errors_stay_until_the_next_successful_call() {
+        let mut g = graph();
+        let a = g.add_node("test.picky@1", "a").unwrap();
+        let b = g.add_node("test.picky@1", "b").unwrap();
+        let ev = |node, v: i64| {
+            ExternalEvent::new(&g, node, "trigger", Event::with(Value::Int(v))).unwrap()
+        };
+        let mut c = Cooker::new();
+        let report = c.tick(&g, clock(0), &[ev(a, -1)]);
+        assert_eq!(report.errors.len(), 1);
+        assert!(matches!(c.error(a), Some(CookError::Node(_))));
+        assert_eq!(c.event_error(a), c.error(a));
+        assert_eq!(c.value_error(a), None);
+        assert_eq!(c.error(b), None);
+        // Cooking does not clear it, nor do ticks without events for it.
+        assert!(c.cook(&g, a).is_ok());
+        assert!(c.error(a).is_some());
+        let report = c.tick(&g, clock(1), &[ev(b, 1)]);
+        assert!(report.errors.is_empty());
+        assert!(c.error(a).is_some());
+        // The next successful call clears it.
+        c.tick(&g, clock(2), &[ev(a, 1)]);
+        assert_eq!(c.error(a), None);
+        // A later failure sets it again; removing the node drops it.
+        c.tick(&g, clock(3), &[ev(a, -1)]);
+        assert!(c.error(a).is_some());
+        g.remove_node(a).unwrap();
+        c.tick(&g, clock(4), &[]);
+        assert_eq!(c.event_error(a), None);
+    }
+
+    #[test]
+    fn poller_errors_follow_each_poll() {
+        let mut g = graph();
+        let p = g.add_node("test.poller@1", "p").unwrap();
+        let mut c = Cooker::new();
+        for frame in 0..4 {
+            let report = c.tick(&g, clock(frame), &[]);
+            assert_eq!(report.errors.len(), usize::from(frame % 2 == 1));
+            assert_eq!(c.error(p).is_some(), frame % 2 == 1, "frame {frame}");
+        }
+    }
+
+    #[test]
+    fn errors_carry_the_message_and_reset_with_the_graph() {
+        let mut g = graph();
+        let a = g.add_node("test.picky@1", "a").unwrap();
+        let mut c = Cooker::new();
+        let ev = ExternalEvent::new(&g, a, "trigger", Event::with(Value::Int(-1))).unwrap();
+        c.tick(&g, clock(0), &[ev]);
+        assert!(
+            matches!(c.error(a), Some(CookError::Node(NodeError::Failed(m))) if m == "picky refused")
+        );
+        // Another graph resets the errors.
+        let other = graph();
+        c.tick(&other, clock(1), &[]);
+        assert_eq!(c.error(a), None);
     }
 }

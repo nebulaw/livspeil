@@ -642,10 +642,12 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 name = "livspeil-cli"
 version = "0.0.0"
 dependencies = [
+ "livspeil-cmd",
  "livspeil-doc",
  "livspeil-graph",
  "livspeil-node-api",
  "livspeil-nodes-core",
+ "livspeil-script",
  "livspeil-testkit",
  "livspeil-wasm-host",
  "serde_json",
@@ -722,6 +724,19 @@ dependencies = [
  "livspeil-testkit",
  "proptest",
  "serde",
+]
+
+[[package]]
+name = "livspeil-script"
+version = "0.0.0"
+dependencies = [
+ "livspeil-cmd",
+ "livspeil-doc",
+ "livspeil-graph",
+ "livspeil-node-api",
+ "livspeil-nodes-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
