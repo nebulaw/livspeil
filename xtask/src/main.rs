@@ -20,6 +20,10 @@ TASKS:
              registered nodes (keeping `description` and [[tests]]), create
              files for new nodes and refresh docs/nodes.md; then run their
              [[tests]]
+    wasm-example
+             Assemble examples/wasm/hello-node/hello-node.wat into the
+             committed hello-node.wasm fixture (the Rust wasm targets are
+             not needed), then run the wasm host tests
     deny     Run cargo-deny (license and advisory checks)
     reuse    Run reuse lint (SPDX compliance)
 ";
@@ -36,6 +40,20 @@ fn main() -> ExitCode {
             &["test", "-p", "livspeil-nodes-core", "--test", "node_specs"],
             ("UPDATE_NODE_SPECS", "1"),
         ),
+        Some("wasm-example") => {
+            run_with_env(
+                "cargo",
+                &[
+                    "test",
+                    "-p",
+                    "livspeil-wasm-host",
+                    "--test",
+                    "hello",
+                    "fixture_is_up_to_date",
+                ],
+                ("UPDATE_GOLDEN", "1"),
+            ) && run("cargo", &["test", "-p", "livspeil-wasm-host"])
+        }
         Some("deny") => run_required("cargo", &["deny", "check"], "cargo-deny"),
         Some("reuse") => run_required("reuse", &["lint"], "reuse"),
         None | Some("help" | "-h" | "--help") => {

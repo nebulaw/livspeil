@@ -1,0 +1,108 @@
+// SPDX-FileCopyrightText: 2026 Livspeil contributors
+// SPDX-License-Identifier: MPL-2.0
+
+// The Livspeil node package interface (decision D13).
+//
+// This world is the logical contract between Livspeil and a third-party
+// node package. Version 0.1.0 of the world corresponds to the core-module
+// ABI version 1 implemented by `livspeil-wasm-host`: the host does not
+// load components yet, it loads core modules that export `describe` and
+// `cook` with these types in the byte encoding given in
+// docs/wasm-nodes.md ("ABI reference"). A component binding of this same
+// world is planned; the types will not change for it.
+//
+// Packages import nothing: no WASI, no clock, no file system, no network.
+// A node is a deterministic pure function of its inputs (and of the
+// cook context when it declares `time-dependent`).
+//
+// Deferred: Table, Curve and Event values, Enum ports, seeded randomness.
+
+package livspeil:node@0.1.0;
+
+interface types {
+    /// The port types a package can use (a subset of the kernel's).
+    enum port-type {
+        float,
+        int,
+        %bool,
+        vec2,
+        vec3,
+        vec4,
+        /// OKLCH plus alpha: lightness, chroma, hue in degrees, alpha.
+        color,
+        %string,
+    }
+
+    /// A value on a port. Its case must match the port's type (an `int`
+    /// is accepted where a `float` is expected).
+    variant value {
+        float(f64),
+        int(s64),
+        %bool(bool),
+        vec2(tuple<f64, f64>),
+        vec3(tuple<f64, f64, f64>),
+        vec4(tuple<f64, f64, f64, f64>),
+        color(tuple<f64, f64, f64, f64>),
+        %string(string),
+    }
+
+    record port-spec {
+        /// `[a-z][a-z0-9_]*`, unique among the node's inputs (or outputs).
+        name: string,
+        ty: port-type,
+        /// Inputs only: the value used when the input is neither linked
+        /// nor set. Must have the port's type; floats must be finite.
+        default: option<value>,
+    }
+
+    record node-spec {
+        /// Namespaced id: two or more dot-separated `[a-z][a-z0-9_]*`
+        /// segments, not in the reserved `core` namespace.
+        id: string,
+        /// At least 1; bump on breaking changes to ports or behavior.
+        version: u32,
+        /// One-line description.
+        summary: string,
+        /// Whether the node reads the clock (`cook-context`). Other nodes
+        /// receive a zero context.
+        time-dependent: bool,
+        inputs: list<port-spec>,
+        /// At least one.
+        outputs: list<port-spec>,
+    }
+
+    /// The frame clock.
+    record cook-context {
+        frame: u64,
+        /// Seconds since the clock started.
+        time: f64,
+        /// Seconds since the previous frame.
+        dt: f64,
+    }
+
+    record invalid-input {
+        /// The name of an input port.
+        port: string,
+        reason: string,
+    }
+
+    variant node-error {
+        /// The inputs had valid types but unusable values.
+        invalid-input(invalid-input),
+        /// Any other failure.
+        failed(string),
+    }
+}
+
+world node-package {
+    use types.{node-spec, cook-context, value, node-error};
+
+    /// The node types of this package. Must return the same list on every
+    /// call.
+    export describe: func() -> list<node-spec>;
+
+    /// Cook node type `node` (an index into `describe()`). `inputs` holds
+    /// one value per input port, in order; the result must hold one value
+    /// per output port, in order.
+    export cook: func(node: u32, context: cook-context, inputs: list<value>) -> result<list<value>, node-error>;
+}

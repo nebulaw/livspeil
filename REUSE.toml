@@ -31,3 +31,9 @@ path = ["examples/*.room/assets/**"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Livspeil contributors"
 SPDX-License-Identifier = "CC0-1.0"
+
+[[annotations]]
+path = ["examples/wasm/**/*.wasm"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Livspeil contributors"
+SPDX-License-Identifier = "CC0-1.0"
