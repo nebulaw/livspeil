@@ -132,7 +132,11 @@ fn flex_snapshot() {
     for r in &rows {
         nodes.push(("row", 2, *r));
     }
-    nodes.extend([("content", 1, content), ("button", 2, button), ("label", 3, label)]);
+    nodes.extend([
+        ("content", 1, content),
+        ("button", 2, button),
+        ("label", 3, label),
+    ]);
     assert_golden(&golden_dir(), "flex", &dump(&t, &nodes));
 }
 
@@ -140,7 +144,10 @@ fn flex_snapshot() {
 fn grid_snapshot() {
     let mut t = LayoutTree::new();
     let cells: Vec<LayoutNode> = (0..5)
-        .map(|_| t.create(Style::default(), Measure::Fixed(Size::new(10.0, 20.0))).unwrap())
+        .map(|_| {
+            t.create(Style::default(), Measure::Fixed(Size::new(10.0, 20.0)))
+                .unwrap()
+        })
         .collect();
     let grid = t
         .create(
@@ -176,7 +183,9 @@ fn only_dirty_subtrees_relayout() {
     let mut t = LayoutTree::new();
     // Two fixed-width columns, each with text leaves.
     let mk_col = |t: &mut LayoutTree| {
-        let leaves: Vec<LayoutNode> = (0..4).map(|i| t.create(Style::default(), text(5 + i)).unwrap()).collect();
+        let leaves: Vec<LayoutNode> = (0..4)
+            .map(|i| t.create(Style::default(), text(5 + i)).unwrap())
+            .collect();
         let col = t.create(col_style(), Measure::None).unwrap();
         t.set_children(col, &leaves).unwrap();
         (col, leaves)
@@ -252,10 +261,19 @@ fn dock_layout_and_splitter_drags() {
     snap("initial", &dock);
 
     // Hit-testing the left splitter, including its slop.
-    assert_eq!(dock.splitter_at(bounds, Vec2::new(242.0, 400.0)), Some(DockEdge::Left));
-    assert_eq!(dock.splitter_at(bounds, Vec2::new(236.0, 400.0)), Some(DockEdge::Left));
+    assert_eq!(
+        dock.splitter_at(bounds, Vec2::new(242.0, 400.0)),
+        Some(DockEdge::Left)
+    );
+    assert_eq!(
+        dock.splitter_at(bounds, Vec2::new(236.0, 400.0)),
+        Some(DockEdge::Left)
+    );
     assert_eq!(dock.splitter_at(bounds, Vec2::new(250.0, 400.0)), None);
-    assert_eq!(dock.splitter_at(bounds, Vec2::new(600.0, 621.0)), Some(DockEdge::Bottom));
+    assert_eq!(
+        dock.splitter_at(bounds, Vec2::new(600.0, 621.0)),
+        Some(DockEdge::Bottom)
+    );
 
     let size = bounds.size();
     let drag = dock.begin_drag(DockEdge::Left).unwrap();
@@ -298,7 +316,9 @@ fn canvas_zoom_and_culling() {
     let mut canvas = Canvas::default();
     let viewport = Size::new(800.0, 600.0);
     let items: Vec<Rect> = (0..20)
-        .flat_map(|y| (0..20).map(move |x| Rect::new(x as f32 * 100.0, y as f32 * 100.0, 50.0, 50.0)))
+        .flat_map(|y| {
+            (0..20).map(move |x| Rect::new(x as f32 * 100.0, y as f32 * 100.0, 50.0, 50.0))
+        })
         .collect();
 
     let visible = canvas.cull(viewport, 0.0, &items);
@@ -309,7 +329,10 @@ fn canvas_zoom_and_culling() {
     let before = canvas.to_canvas(anchor);
     canvas.zoom_at(anchor, 2.0);
     assert!((canvas.to_canvas(anchor) - before).length() < 1e-4);
-    assert_eq!(canvas.visible_rect(viewport), Rect::new(200.0, 150.0, 400.0, 300.0));
+    assert_eq!(
+        canvas.visible_rect(viewport),
+        Rect::new(200.0, 150.0, 400.0, 300.0)
+    );
     let visible = canvas.cull(viewport, 0.0, &items);
     assert_eq!(visible.len(), 4 * 3);
     // Round-trip through the transform.
@@ -330,7 +353,11 @@ fn canvas_zoom_and_culling() {
         index.insert(*r);
     }
     let mut c = Canvas::default();
-    for (pan, zoom) in [((0.0, 0.0), 1.0), ((-730.0, -410.0), 0.5), ((120.0, 40.0), 3.0)] {
+    for (pan, zoom) in [
+        ((0.0, 0.0), 1.0),
+        ((-730.0, -410.0), 0.5),
+        ((120.0, 40.0), 3.0),
+    ] {
         c.pan = Vec2::new(pan.0, pan.1);
         c.zoom = zoom;
         let linear: Vec<u32> = c

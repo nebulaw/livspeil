@@ -47,7 +47,11 @@ pub enum Measure {
 impl Measure {
     /// Intrinsic size under the known dimensions and available space.
     #[must_use]
-    pub fn measure(&self, known: taffy::Size<Option<f32>>, available: taffy::Size<AvailableSpace>) -> Size {
+    pub fn measure(
+        &self,
+        known: taffy::Size<Option<f32>>,
+        available: taffy::Size<AvailableSpace>,
+    ) -> Size {
         let (w, h) = match self {
             Measure::None => (0.0, 0.0),
             Measure::Fixed(s) => (s.width, s.height),
@@ -64,7 +68,11 @@ impl Measure {
                     AvailableSpace::MaxContent => f32::INFINITY,
                 };
                 let width = known.width.unwrap_or(full.min(max));
-                let lines = if width > 0.0 { (full / width).ceil().max(1.0) } else { 1.0 };
+                let lines = if width > 0.0 {
+                    (full / width).ceil().max(1.0)
+                } else {
+                    1.0
+                };
                 (width, lines * line_height)
             }
         };
@@ -195,7 +203,11 @@ impl LayoutTree {
     /// # Errors
     /// Taffy errors.
     pub fn set_measure(&mut self, node: LayoutNode, measure: Measure) -> Result<bool, LayoutError> {
-        let current = self.taffy.get_node_context(node.0).cloned().unwrap_or_default();
+        let current = self
+            .taffy
+            .get_node_context(node.0)
+            .cloned()
+            .unwrap_or_default();
         if current == measure {
             return Ok(false);
         }
@@ -208,7 +220,11 @@ impl LayoutTree {
     ///
     /// # Errors
     /// Taffy errors.
-    pub fn set_children(&mut self, node: LayoutNode, children: &[LayoutNode]) -> Result<bool, LayoutError> {
+    pub fn set_children(
+        &mut self,
+        node: LayoutNode,
+        children: &[LayoutNode],
+    ) -> Result<bool, LayoutError> {
         let current = self.taffy.children(node.0)?;
         if current.len() == children.len() && current.iter().zip(children).all(|(a, b)| *a == b.0) {
             return Ok(false);
@@ -242,17 +258,22 @@ impl LayoutTree {
             },
             |inputs, _id, ctx, style| {
                 let measure = ctx.map(|m| &*m);
-                compute_leaf_layout(inputs, style, |_, _| 0.0, |known, avail| {
-                    let Some(measure) = measure else {
-                        return taffy::Size::ZERO;
-                    };
-                    counter.set(counter.get() + 1);
-                    let s = measure.measure(known, avail);
-                    taffy::Size {
-                        width: s.width,
-                        height: s.height,
-                    }
-                })
+                compute_leaf_layout(
+                    inputs,
+                    style,
+                    |_, _| 0.0,
+                    |known, avail| {
+                        let Some(measure) = measure else {
+                            return taffy::Size::ZERO;
+                        };
+                        counter.set(counter.get() + 1);
+                        let s = measure.measure(known, avail);
+                        taffy::Size {
+                            width: s.width,
+                            height: s.height,
+                        }
+                    },
+                )
             },
         )?;
         Ok(())
@@ -264,7 +285,12 @@ impl LayoutTree {
     /// Taffy errors.
     pub fn rect(&self, node: LayoutNode) -> Result<Rect, LayoutError> {
         let l = self.taffy.layout(node.0)?;
-        Ok(Rect::new(l.location.x, l.location.y, l.size.width, l.size.height))
+        Ok(Rect::new(
+            l.location.x,
+            l.location.y,
+            l.size.width,
+            l.size.height,
+        ))
     }
 }
 

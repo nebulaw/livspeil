@@ -241,7 +241,11 @@ pub fn num(v: f32) -> String {
     let v = if v == 0.0 { 0.0 } else { v };
     let s = format!("{v:.2}");
     let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s == "-0" { "0".to_owned() } else { s.to_owned() }
+    if s == "-0" {
+        "0".to_owned()
+    } else {
+        s.to_owned()
+    }
 }
 
 /// Per-corner radii.
@@ -478,6 +482,9 @@ mod tests {
         assert_eq!(a.union(&b), Rect::new(0.0, 0.0, 15.0, 15.0));
         assert!(a.contains(Vec2::new(0.0, 9.9)));
         assert!(!a.contains(Vec2::new(10.0, 5.0)));
-        assert_eq!(format!("{}", Rect::new(1.5, -0.0, 2.25, 3.0)), "1.5,0 2.25x3");
+        assert_eq!(
+            format!("{}", Rect::new(1.5, -0.0, 2.25, 3.0)),
+            "1.5,0 2.25x3"
+        );
     }
 }

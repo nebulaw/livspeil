@@ -26,7 +26,12 @@ pub enum DockEdge {
 
 impl DockEdge {
     /// All edges in layout order.
-    pub const ALL: [DockEdge; 4] = [DockEdge::Left, DockEdge::Right, DockEdge::Top, DockEdge::Bottom];
+    pub const ALL: [DockEdge; 4] = [
+        DockEdge::Left,
+        DockEdge::Right,
+        DockEdge::Top,
+        DockEdge::Bottom,
+    ];
 
     /// Whether the panel's size is a width.
     #[must_use]
@@ -84,7 +89,10 @@ impl DockLayout {
     /// The rect of a visible panel.
     #[must_use]
     pub fn panel(&self, edge: DockEdge) -> Option<Rect> {
-        self.panels.iter().find(|(e, _)| *e == edge).map(|(_, r)| *r)
+        self.panels
+            .iter()
+            .find(|(e, _)| *e == edge)
+            .map(|(_, r)| *r)
     }
 }
 
@@ -154,7 +162,9 @@ impl Dock {
     }
 
     fn visible_size(&self, edge: DockEdge) -> f32 {
-        self.side(edge).filter(|s| s.visible).map_or(0.0, |s| s.size)
+        self.side(edge)
+            .filter(|s| s.visible)
+            .map_or(0.0, |s| s.size)
     }
 
     /// The largest size `edge` may have in `bounds` given the opposite
@@ -162,10 +172,26 @@ impl Dock {
     #[must_use]
     pub fn max_size(&self, edge: DockEdge, bounds: Size) -> f32 {
         let (extent, opposite, center_min) = match edge {
-            DockEdge::Left => (bounds.width, self.visible_size(DockEdge::Right), self.center_min.width),
-            DockEdge::Right => (bounds.width, self.visible_size(DockEdge::Left), self.center_min.width),
-            DockEdge::Top => (bounds.height, self.visible_size(DockEdge::Bottom), self.center_min.height),
-            DockEdge::Bottom => (bounds.height, self.visible_size(DockEdge::Top), self.center_min.height),
+            DockEdge::Left => (
+                bounds.width,
+                self.visible_size(DockEdge::Right),
+                self.center_min.width,
+            ),
+            DockEdge::Right => (
+                bounds.width,
+                self.visible_size(DockEdge::Left),
+                self.center_min.width,
+            ),
+            DockEdge::Top => (
+                bounds.height,
+                self.visible_size(DockEdge::Bottom),
+                self.center_min.height,
+            ),
+            DockEdge::Bottom => (
+                bounds.height,
+                self.visible_size(DockEdge::Top),
+                self.center_min.height,
+            ),
         };
         (extent - opposite - center_min).max(0.0)
     }
@@ -178,7 +204,11 @@ impl Dock {
             let Some(side) = self.side(edge).filter(|s| s.visible) else {
                 return 0.0;
             };
-            let extent = if edge.is_horizontal() { bounds.width } else { bounds.height };
+            let extent = if edge.is_horizontal() {
+                bounds.width
+            } else {
+                bounds.height
+            };
             let center_min = if edge.is_horizontal() {
                 self.center_min.width
             } else {
@@ -212,7 +242,11 @@ impl Dock {
         };
         if self.side(DockEdge::Left).is_some_and(|s| s.visible) {
             let r = Rect::new(bounds.x, bounds.y, left, bounds.height);
-            push(DockEdge::Left, r, Rect::new(r.right() - t, r.y, t, r.height));
+            push(
+                DockEdge::Left,
+                r,
+                Rect::new(r.right() - t, r.y, t, r.height),
+            );
         }
         if self.side(DockEdge::Right).is_some_and(|s| s.visible) {
             let r = Rect::new(bounds.right() - right, bounds.y, right, bounds.height);
