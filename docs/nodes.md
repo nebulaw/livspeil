@@ -133,10 +133,11 @@ inputs list no default: in value cooking they carry the placeholder
 
 ## Node index
 
-54 nodes. *time* marks nodes re-cooked every frame, *system* nodes that read the host system.
+55 nodes. *time* marks nodes re-cooked every frame, *system* nodes that read the host system.
 
 | Node | Summary | Inputs | Outputs | Tests |
 |---|---|---|---|---|
+| [`core.charm@1`](#corecharm1) | An instance of a shared Charm definition | none | none | 1 |
 | [`core.color.compose@1`](#corecolorcompose1) | Build an OKLCH color (l, alpha clamped to [0, 1]; c >= 0; h wrapped to [0, 360)) | `l: Float = 0.7`<br>`c: Float = 0.1`<br>`h: Float = 250.0`<br>`alpha: Float = 1.0` | `out: Color` | 4 |
 | [`core.color.gradient@1`](#corecolorgradient1) | Three-stop OKLCH gradient (c0 at 0, c1 at p1, c2 at 1) sampled at t, mixed in OKLab | `t: Float = 0.5`<br>`c0: Color = [0.3, 0.1, 270.0, 1.0]`<br>`c1: Color = [0.7, 0.15, 45.0, 1.0]`<br>`c2: Color = [0.95, 0.05, 95.0, 1.0]`<br>`p1: Float = 0.5` | `out: Color` | 4 |
 | [`core.color.mix@1`](#corecolormix1) | Mix two OKLCH colors in OKLab space (t clamped to [0, 1]) | `a: Color = [0.8, 0.12, 60.0, 1.0]`<br>`b: Color = [0.9, 0.08, 80.0, 1.0]`<br>`t: Float = 0.5` | `out: Color` | 4 |
@@ -193,6 +194,18 @@ inputs list no default: in value cooking they carry the placeholder
 | [`core.vector.normalize3@1`](#corevectornormalize31) | Scale a Vec3 to unit length (the zero vector stays zero) | `v: Vec3 = [0.0, 0.0, 0.0]` | `out: Vec3` | 4 |
 
 ## Nodes
+
+### core.charm@1
+
+An instance of a shared Charm definition
+
+An instance of a shared Charm definition (M0.16). Like `core.subnet` it
+has no ports of its own and contains a network, but that network is the
+definition's: its nodes get ids derived from the instance id, and only the
+values of its interface inputs (the promoted parameters) are per-instance.
+Created by instantiating a definition, never directly.
+
+Spec: [`core.charm.node.toml`](../crates/livspeil-nodes-core/specs/core.charm.node.toml)
 
 ### core.color.compose@1
 
