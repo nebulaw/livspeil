@@ -22,7 +22,12 @@ pub struct ConfigError {
 impl ConfigError {
     /// An error at byte `span` of `source`.
     #[must_use]
-    pub fn at(file: &str, source: &str, span: Option<Range<usize>>, message: impl Into<String>) -> Self {
+    pub fn at(
+        file: &str,
+        source: &str,
+        span: Option<Range<usize>>,
+        message: impl Into<String>,
+    ) -> Self {
         let (line, column) = span.map_or((0, 0), |s| line_col(source, s.start));
         ConfigError {
             file: file.to_owned(),
@@ -44,7 +49,11 @@ impl fmt::Display for ConfigError {
         if self.line == 0 {
             write!(f, "{}: {}", self.file, self.message)
         } else {
-            write!(f, "{}:{}:{}: {}", self.file, self.line, self.column, self.message)
+            write!(
+                f,
+                "{}:{}:{}: {}",
+                self.file, self.line, self.column, self.message
+            )
         }
     }
 }

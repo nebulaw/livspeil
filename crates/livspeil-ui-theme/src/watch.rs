@@ -94,7 +94,7 @@ pub enum ConfigEvent {
     /// `motion.toml` changed (or was removed: then this holds the defaults).
     Motion(MotionConfig),
     /// `theme.toml` changed (or was removed: then this holds the defaults).
-    Theme(Theme),
+    Theme(Box<Theme>),
     /// A raw file changed; `None` when it was removed.
     Raw {
         /// The tag given to [`ConfigWatcher::watch`].
@@ -193,10 +193,10 @@ impl<F: ConfigFs, C: Clock> ConfigWatcher<F, C> {
     /// otherwise return no events without touching the file system.
     pub fn poll(&mut self) -> Vec<ConfigEvent> {
         let now = self.clock.now();
-        if let Some(last) = self.last_poll {
-            if now.saturating_sub(last) < self.interval {
-                return Vec::new();
-            }
+        if let Some(last) = self.last_poll
+            && now.saturating_sub(last) < self.interval
+        {
+            return Vec::new();
         }
         self.poll_now()
     }
@@ -252,8 +252,10 @@ fn hash_text(text: &str) -> u64 {
 }
 
 fn file_name(path: &Path) -> String {
-    path.file_name()
-        .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned())
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    )
 }
 
 fn io_error(file: &Watched, e: &io::Error) -> ConfigEvent {
@@ -271,7 +273,7 @@ fn io_error(file: &Watched, e: &io::Error) -> ConfigEvent {
 fn removed_event(kind: ConfigKind) -> ConfigEvent {
     match kind {
         ConfigKind::Motion => ConfigEvent::Motion(MotionConfig::default()),
-        ConfigKind::Theme => ConfigEvent::Theme(Theme::default()),
+        ConfigKind::Theme => ConfigEvent::Theme(Box::default()),
         ConfigKind::Raw(tag) => ConfigEvent::Raw {
             tag,
             contents: None,
@@ -282,7 +284,7 @@ fn removed_event(kind: ConfigKind) -> ConfigEvent {
 fn parse_event(kind: ConfigKind, text: String) -> ConfigEvent {
     let result = match kind {
         ConfigKind::Motion => MotionConfig::parse(&text).map(ConfigEvent::Motion),
-        ConfigKind::Theme => Theme::parse(&text).map(ConfigEvent::Theme),
+        ConfigKind::Theme => Theme::parse(&text).map(|t| ConfigEvent::Theme(Box::new(t))),
         ConfigKind::Raw(tag) => Ok(ConfigEvent::Raw {
             tag,
             contents: Some(text),

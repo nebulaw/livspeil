@@ -29,4 +29,6 @@ pub use tokens::{
     MaterialRecipe, Radii, Scheme, Shadow, ShadowLayer, Spacing, Theme, Tier, Tokens, TypeScale,
     clamp_contrast, material_recipe,
 };
-pub use watch::{Clock, ConfigEvent, ConfigFs, ConfigKind, ConfigWatcher, StdFs, SystemClock, config_dir};
+pub use watch::{
+    Clock, ConfigEvent, ConfigFs, ConfigKind, ConfigWatcher, StdFs, SystemClock, config_dir,
+};

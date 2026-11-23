@@ -416,10 +416,7 @@ pub fn clamp_contrast(color: Color, background: Color, min_delta: f32) -> Color 
     } else {
         (background.l - min_delta).max(0.0)
     };
-    Color {
-        l: target,
-        ..color
-    }
+    Color { l: target, ..color }
 }
 
 /// The recipe for `material` at `tier`. "Reduce transparency" and T0 use an

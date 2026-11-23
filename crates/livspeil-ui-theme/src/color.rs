@@ -222,9 +222,7 @@ impl fmt::Display for ColorParseError {
                 "expected `oklch(L C H)`, `oklch(L C H / A)`, `#rrggbb` or `#rrggbbaa`"
             }
             ColorParseError::Number => "color component is not a number",
-            ColorParseError::OutOfRange => {
-                "color component out of range (L and A in 0..1, C >= 0)"
-            }
+            ColorParseError::OutOfRange => "color component out of range (L and A in 0..1, C >= 0)",
         })
     }
 }

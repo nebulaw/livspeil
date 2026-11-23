@@ -45,8 +45,10 @@ fn spec_example_parses_exactly() {
     assert_eq!(config.speed(Some("windows")), 1.2);
     assert_eq!(config.speed(Some("menus")), 1.0);
     // Defaults equal the spec example.
-    let mut defaults = MotionConfig::default();
-    defaults.overrides = config.overrides.clone();
+    let defaults = MotionConfig {
+        overrides: config.overrides.clone(),
+        ..MotionConfig::default()
+    };
     assert_eq!(defaults, config);
 }
 
@@ -65,7 +67,8 @@ fn resolve_applies_speed_scope_and_reduce_motion() {
     };
     let micro = spring(config.resolve(None, MotionClass::Micro, PropertyKind::Movement));
     assert_eq!(micro, SpringSpec::new(0.10, 0.90));
-    let windows = spring(config.resolve(Some("windows"), MotionClass::Large, PropertyKind::Movement));
+    let windows =
+        spring(config.resolve(Some("windows"), MotionClass::Large, PropertyKind::Movement));
     assert!((windows.response - 0.26 / 1.2).abs() < 1e-6);
 
     let zero = MotionConfig::parse("speed = 0").unwrap();
@@ -146,7 +149,10 @@ fn motion_errors_have_locations() {
             "spring-unknown-field",
             "[profiles.calm]\nmicro = { response = 0.1, damping = 1, mass = 2 }\n",
         ),
-        ("override-profile", "[overrides.windows]\nprofile = \"nope\"\n"),
+        (
+            "override-profile",
+            "[overrides.windows]\nprofile = \"nope\"\n",
+        ),
         ("syntax", "profile = \n"),
     ];
     let mut out = String::new();
@@ -324,7 +330,13 @@ fn hot_reload_with_injected_clock() {
     let events = w.poll();
     assert_eq!(events.len(), 2);
     assert!(matches!(&events[0], ConfigEvent::Theme(t) if t.density == Density::Pro));
-    assert!(matches!(&events[1], ConfigEvent::Raw { tag: "keymap", contents: Some(_) }));
+    assert!(matches!(
+        &events[1],
+        ConfigEvent::Raw {
+            tag: "keymap",
+            contents: Some(_)
+        }
+    ));
 
     // Removal reverts to defaults.
     fs.remove("/cfg/motion.toml");

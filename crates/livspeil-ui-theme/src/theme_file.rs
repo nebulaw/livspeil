@@ -50,14 +50,20 @@ impl Theme {
     pub fn parse(source: &str) -> Result<Theme, ConfigError> {
         let raw: RawTheme =
             toml::from_str(source).map_err(|e| ConfigError::from_toml(THEME_FILE, source, &e))?;
-        let err = |span: Range<usize>, msg: String| ConfigError::at(THEME_FILE, source, Some(span), msg);
+        let err =
+            |span: Range<usize>, msg: String| ConfigError::at(THEME_FILE, source, Some(span), msg);
         let mut theme = Theme::default();
 
         if let Some(s) = raw.scheme {
             theme.scheme = match s.get_ref().as_str() {
                 "dark" => Scheme::Dark,
                 "light" => Scheme::Light,
-                other => return Err(err(s.span(), format!("unknown scheme `{other}` (dark, light)"))),
+                other => {
+                    return Err(err(
+                        s.span(),
+                        format!("unknown scheme `{other}` (dark, light)"),
+                    ));
+                }
             };
         }
         if let Some(d) = raw.density {
@@ -65,7 +71,10 @@ impl Theme {
                 "simple" => Density::Simple,
                 "pro" => Density::Pro,
                 other => {
-                    return Err(err(d.span(), format!("unknown density `{other}` (simple, pro)")));
+                    return Err(err(
+                        d.span(),
+                        format!("unknown density `{other}` (simple, pro)"),
+                    ));
                 }
             };
         }
@@ -74,7 +83,12 @@ impl Theme {
                 "t0" => Tier::T0,
                 "t1" => Tier::T1,
                 "t2" => Tier::T2,
-                other => return Err(err(t.span(), format!("unknown tier `{other}` (t0, t1, t2)"))),
+                other => {
+                    return Err(err(
+                        t.span(),
+                        format!("unknown tier `{other}` (t0, t1, t2)"),
+                    ));
+                }
             };
         }
         if let Some(r) = raw.reduce_transparency {
@@ -145,16 +159,25 @@ type ErrFn<'a> = dyn Fn(Range<usize>, String) -> ConfigError + 'a;
 fn size(v: &Spanned<f64>, err: &ErrFn<'_>) -> Result<f32, ConfigError> {
     let x = *v.get_ref();
     if !x.is_finite() || !(0.0..=1000.0).contains(&x) {
-        return Err(err(v.span(), format!("size must be between 0 and 1000, got {x}")));
+        return Err(err(
+            v.span(),
+            format!("size must be between 0 and 1000, got {x}"),
+        ));
     }
     Ok(x as f32)
 }
 
-fn sizes<const N: usize>(v: Spanned<Vec<Spanned<f64>>>, err: &ErrFn<'_>) -> Result<[f32; N], ConfigError> {
+fn sizes<const N: usize>(
+    v: Spanned<Vec<Spanned<f64>>>,
+    err: &ErrFn<'_>,
+) -> Result<[f32; N], ConfigError> {
     let span = v.span();
     let values = v.into_inner();
     if values.len() != N {
-        return Err(err(span, format!("expected {N} values, got {}", values.len())));
+        return Err(err(
+            span,
+            format!("expected {N} values, got {}", values.len()),
+        ));
     }
     let mut out = [0.0; N];
     for (slot, value) in out.iter_mut().zip(&values) {
@@ -163,7 +186,11 @@ fn sizes<const N: usize>(v: Spanned<Vec<Spanned<f64>>>, err: &ErrFn<'_>) -> Resu
     Ok(out)
 }
 
-fn apply_metrics(m: &mut DensityMetrics, raw: RawMetrics, err: &ErrFn<'_>) -> Result<(), ConfigError> {
+fn apply_metrics(
+    m: &mut DensityMetrics,
+    raw: RawMetrics,
+    err: &ErrFn<'_>,
+) -> Result<(), ConfigError> {
     if let Some(v) = raw.body {
         m.body = size(&v, err)?;
     }
@@ -206,7 +233,9 @@ fn parse_layer(text: &str) -> Result<ShadowLayer, String> {
         .split_whitespace()
         .map(str::parse::<f32>)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| format!("shadow layer `{text}`: expected numbers `x y blur [spread] [/ alpha]`"))?;
+        .map_err(|_| {
+            format!("shadow layer `{text}`: expected numbers `x y blur [spread] [/ alpha]`")
+        })?;
     let alpha = match alpha {
         Some(a) => a
             .parse::<f32>()
@@ -248,6 +277,8 @@ fn apply_colors(
     Ok(())
 }
 
+type RawElevations = BTreeMap<Spanned<String>, Spanned<Vec<Spanned<String>>>>;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawTheme {
@@ -259,7 +290,7 @@ struct RawTheme {
     type_sizes: Option<Spanned<Vec<Spanned<f64>>>>,
     icon_sizes: Option<Spanned<Vec<Spanned<f64>>>>,
     radii: Option<RawRadii>,
-    elevation: Option<BTreeMap<Spanned<String>, Spanned<Vec<Spanned<String>>>>>,
+    elevation: Option<RawElevations>,
     colors: Option<RawColors>,
     metrics: Option<RawDensities>,
 }

@@ -230,7 +230,12 @@ impl MotionConfig {
     ///   Calm profile takes);
     /// - otherwise the profile's spring with `response / speed`.
     #[must_use]
-    pub fn resolve(&self, scope: Option<&str>, class: MotionClass, kind: PropertyKind) -> MotionSpec {
+    pub fn resolve(
+        &self,
+        scope: Option<&str>,
+        class: MotionClass,
+        kind: PropertyKind,
+    ) -> MotionSpec {
         let over = scope.and_then(|s| self.overrides.get(s));
         let profile_name = over
             .and_then(|o| o.profile.as_deref())
@@ -276,8 +281,8 @@ impl MotionConfig {
             let raw_profile = raw_profile.into_inner();
             let base = MotionProfile::builtin(&name);
             let pick = |field: Option<Spanned<RawSpring>>,
-                            fallback: Option<SpringSpec>,
-                            class: &str|
+                        fallback: Option<SpringSpec>,
+                        class: &str|
              -> Result<SpringSpec, ConfigError> {
                 match field {
                     Some(s) => spring_from_raw(s, &err),
@@ -345,7 +350,10 @@ fn speed_from_raw(speed: Spanned<f64>, err: &ErrFn<'_>) -> Result<f32, ConfigErr
     let span = speed.span();
     let v = *speed.get_ref();
     if !v.is_finite() || !(0.0..=100.0).contains(&v) {
-        return Err(err(span, format!("speed must be between 0 and 100, got {v}")));
+        return Err(err(
+            span,
+            format!("speed must be between 0 and 100, got {v}"),
+        ));
     }
     #[allow(clippy::cast_possible_truncation)]
     Ok(v as f32)
@@ -355,7 +363,10 @@ fn spring_from_raw(raw: Spanned<RawSpring>, err: &ErrFn<'_>) -> Result<SpringSpe
     let raw = raw.into_inner();
     let (rs, r) = (raw.response.span(), *raw.response.get_ref());
     if !r.is_finite() || !(0.0..=10.0).contains(&r) {
-        return Err(err(rs, format!("response must be between 0 and 10 seconds, got {r}")));
+        return Err(err(
+            rs,
+            format!("response must be between 0 and 10 seconds, got {r}"),
+        ));
     }
     let (ds, d) = (raw.damping.span(), *raw.damping.get_ref());
     if !d.is_finite() || d <= 0.0 || d > 10.0 {
