@@ -402,6 +402,7 @@ impl Graph {
         source: &str,
     ) -> Result<(), GraphError> {
         let (index, ty) = self.input_port(node, port)?;
+        self.check_sources_editable(node)?;
         let compiled = compile(self, self.parent(node), source)?;
         let found = compiled.program.result_type();
         if !ty.accepts(found) {
@@ -437,12 +438,19 @@ impl Graph {
         Ok(())
     }
 
-    /// Remove the expression of an input, if any.
+    /// Remove the expression of an input, if any. On an interface input of
+    /// a Charm instance this restores the definition's expression, if it
+    /// has one.
     ///
     /// # Errors
-    /// Fails for an unknown node or port.
+    /// Fails for an unknown node or port (and when restoring the
+    /// definition's expression fails).
     pub fn clear_expression(&mut self, node: NodeId, port: &str) -> Result<(), GraphError> {
         let (index, _) = self.input_port(node, port)?;
+        self.check_sources_editable(node)?;
+        if let Some(source) = self.instance_default_expression(node, port) {
+            return self.set_expression(node, port, &source);
+        }
         let had = self.node(node).is_some_and(|n| n.exprs[index].is_some());
         if had {
             let before = self.dependency_shape(node, index);
@@ -496,6 +504,7 @@ impl Graph {
         channel: AnimChannel,
     ) -> Result<(), GraphError> {
         let (index, ty) = self.input_port(node, port)?;
+        self.check_sources_editable(node)?;
         let found = channel.value_type();
         if !ty.accepts(found) {
             return Err(GraphError::TypeMismatch {
@@ -514,12 +523,18 @@ impl Graph {
         Ok(())
     }
 
-    /// Remove the animation channel of an input, if any.
+    /// Remove the animation channel of an input, if any. On an interface
+    /// input of a Charm instance this restores the definition's channel,
+    /// if it has one.
     ///
     /// # Errors
     /// Fails for an unknown node or port.
     pub fn clear_animation(&mut self, node: NodeId, port: &str) -> Result<(), GraphError> {
         let (index, _) = self.input_port(node, port)?;
+        self.check_sources_editable(node)?;
+        if let Some(channel) = self.instance_default_animation(node, port) {
+            return self.set_animation(node, port, channel);
+        }
         let before = self.time_dependent(node);
         let had = self
             .node_mut(node)

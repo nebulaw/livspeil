@@ -107,16 +107,34 @@
 //! expression (`"x/port"` sibling, `"../x/port"` parent network,
 //! `"/a/b/port"` absolute); see [`Graph::set_expression`].
 //!
-//! Not yet implemented (later milestones): Charm definitions shared by
-//! several instances (each instance is a copy today) and parallel
-//! evaluation.
+//! # Shared Charm definitions (M0.16)
+//!
+//! A graph also holds a library of [`CharmDef`]s. A Charm *instance* is a
+//! node of type [`CHARM_TYPE`] (`core.charm@1`) whose contents are the
+//! definition's, materialized as ordinary nodes with ids derived from the
+//! instance id and the definition-local ids ([`instance_node_id`]), so
+//! the flat model, cooking and `ch()` paths are unchanged. Inside an
+//! instance only the interface inputs' sources are per-instance; edit the
+//! definition ([`Graph::update_definition`]) to change every instance, or
+//! [`Graph::detach`] one. [`Graph::make_definition`] turns a subnet into a
+//! definition plus an instance. See `charm_defs.rs` for the design.
+//!
+//! [`Graph::move_node_rewired`] moves a node between networks and keeps
+//! links that would cross networks by routing them through new interface
+//! ports (see `rewire.rs`).
+//!
+//! Not yet implemented (later milestones): instances inside definitions
+//! and parallel evaluation.
 
+mod charm_defs;
 mod cook;
 mod graph;
 mod network;
+mod rewire;
 mod snapshot;
 mod sources;
 
+pub use charm_defs::{CHARM_TYPE, CharmDef, ConversionPlan, DefinitionUpdate, instance_node_id};
 pub use cook::{
     CookError, CookStats, Cooker, DEFAULT_EVENT_LIMIT, EventError, ExternalEvent, FiredEvent,
     TickReport,
@@ -124,5 +142,6 @@ pub use cook::{
 pub use graph::{Endpoint, Graph, GraphError, Link, NodeId, PortDirection};
 pub use livspeil_params::expr::RefKind;
 pub use network::{CharmMeta, INPUT_TYPE, INTERFACE_PORT, OUTPUT_TYPE, SUBNET_TYPE};
+pub use rewire::{NewPort, RewirePlan};
 pub use snapshot::{GraphSnapshot, NamedLink, NodeSnapshot};
 pub use sources::ExprRef;

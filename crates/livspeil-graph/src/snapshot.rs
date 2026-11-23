@@ -6,7 +6,7 @@
 use livspeil_node_api::{PortType, Value};
 use livspeil_params::AnimChannel;
 
-use crate::{CharmMeta, NodeId};
+use crate::{CharmDef, CharmMeta, NodeId};
 
 /// A link described by port names rather than port indices.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -41,9 +41,13 @@ pub struct NodeSnapshot {
     /// `core.output@1`).
     #[cfg_attr(feature = "serde", serde(default))]
     pub port_type: Option<PortType>,
-    /// Charm metadata of a subnet.
+    /// Charm metadata of a subnet (of a Charm instance: its definition's,
+    /// with the definition's version).
     #[cfg_attr(feature = "serde", serde(default))]
     pub charm: Option<CharmMeta>,
+    /// The definition a Charm instance (`core.charm@1`) uses (M0.16).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub def: Option<String>,
 }
 
 /// The editable state of a graph: nodes of every network in id order and links ordered by
@@ -56,4 +60,7 @@ pub struct NodeSnapshot {
 pub struct GraphSnapshot {
     pub nodes: Vec<NodeSnapshot>,
     pub links: Vec<NamedLink>,
+    /// Charm definitions by id (M0.16).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub definitions: Vec<CharmDef>,
 }

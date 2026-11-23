@@ -9,6 +9,9 @@
 //!   input `value` is fed from *outside* the subnet (a link in the outer
 //!   network, or its own static value, expression or animation: the
 //!   promoted parameter); its output `value` is read *inside*.
+//! - `core.charm@1`: an instance of a shared Charm definition (M0.16).
+//!   Like a subnet it has no ports and contains a network, but that
+//!   network is the definition's (see `livspeil_graph::Graph::instantiate`).
 //! - `core.output@1`: one output port of the enclosing subnet (its input
 //!   `value` is fed inside, its output `value` is read outside). In the
 //!   root network it marks a sink: `livspeil cook` prints the root
@@ -24,6 +27,8 @@ use livspeil_node_api::{CookContext, NodeError, NodeImpl, NodeSpec, PortType, Va
 
 /// Qualified id of the subnet node.
 pub const SUBNET: &str = "core.subnet@1";
+/// Qualified id of a Charm instance node.
+pub const CHARM: &str = "core.charm@1";
 /// Qualified id of the subnet input boundary node.
 pub const SUBNET_INPUT: &str = "core.subnet.input@1";
 /// Qualified id of the output boundary node.
@@ -55,6 +60,38 @@ impl Default for Subnet {
 }
 
 impl NodeImpl for Subnet {
+    fn spec(&self) -> &NodeSpec {
+        &self.spec
+    }
+
+    fn cook(&self, _: &CookContext, _: &[Value]) -> Result<Vec<Value>, NodeError> {
+        Ok(Vec::new())
+    }
+}
+
+/// `core.charm@1`: an instance of a shared Charm definition; no ports,
+/// cooks to nothing (its contents are the definition's nodes).
+#[derive(Debug, Clone)]
+pub struct Charm {
+    spec: NodeSpec,
+}
+
+impl Charm {
+    #[must_use]
+    pub fn new() -> Self {
+        Charm {
+            spec: NodeSpec::new("core.charm", 1, "An instance of a shared Charm definition"),
+        }
+    }
+}
+
+impl Default for Charm {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl NodeImpl for Charm {
     fn spec(&self) -> &NodeSpec {
         &self.spec
     }
@@ -173,6 +210,7 @@ mod tests {
     #[test]
     fn ids_match_specs() {
         assert_eq!(Subnet::new().spec().qualified_id(), SUBNET);
+        assert_eq!(Charm::new().spec().qualified_id(), CHARM);
         assert_eq!(SubnetInput::new().spec().qualified_id(), SUBNET_INPUT);
         assert_eq!(Output::new().spec().qualified_id(), OUTPUT);
     }
@@ -194,5 +232,6 @@ mod tests {
         );
         assert!(input.cook(&ctx, &[]).is_err());
         assert!(Subnet::new().cook(&ctx, &[]).unwrap().is_empty());
+        assert!(Charm::new().cook(&ctx, &[]).unwrap().is_empty());
     }
 }

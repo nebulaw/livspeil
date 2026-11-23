@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.charm"
+version = 1
+summary = "An instance of a shared Charm definition"
+time_dependent = false
+reads_system = false
+description = '''
+An instance of a shared Charm definition (M0.16). Like `core.subnet` it
+has no ports of its own and contains a network, but that network is the
+definition's: its nodes get ids derived from the instance id, and only the
+values of its interface inputs (the promoted parameters) are per-instance.
+Created by instantiating a definition, never directly.
+'''
+inputs = []
+outputs = []
+
+[[tests]]
+name = "cooks to nothing"
+expect = {}
