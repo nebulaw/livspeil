@@ -32,7 +32,18 @@ fn show(value: &Value) -> String {
         Value::Vec2(v) => format!("vec2{v:?}"),
         Value::Vec3(v) => format!("vec3{v:?}"),
         Value::Vec4(v) => format!("vec4{v:?}"),
-        Value::Color(v) => format!("oklch{v:?}"),
+        // Colour conversions use the platform's sin/cos/cbrt, which may
+        // differ in the last bit between macOS and Linux: print 12 decimals.
+        Value::Color(v) => format!(
+            "oklch[{}]",
+            v.iter()
+                .map(|c| {
+                    let c = if *c == 0.0 { 0.0 } else { *c };
+                    format!("{c:.12}")
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         Value::Table(t) => format!("table[{}x{}]", t.column_count(), t.row_count()),
         Value::Curve(c) => format!("curve<{}>[{} keys]", c.value_type(), c.keys().len()),
         other => format!("{other:?}"),

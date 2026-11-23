@@ -10,8 +10,8 @@ core.logic.select<Vec3>() => out=vec3[0.0, 0.0, 0.0]
 core.logic.select<Vec3>(cond=true) => out=vec3[1.0, 1.0, 1.0]
 core.logic.select<Vec4>() => out=vec4[0.0, 0.0, 0.0, 0.0]
 core.logic.select<Vec4>(cond=true) => out=vec4[1.0, 1.0, 1.0, 1.0]
-core.logic.select<Color>() => out=oklch[0.0, 0.0, 0.0, 1.0]
-core.logic.select<Color>(cond=true) => out=oklch[1.0, 0.0, 0.0, 1.0]
+core.logic.select<Color>() => out=oklch[0.000000000000, 0.000000000000, 0.000000000000, 1.000000000000]
+core.logic.select<Color>(cond=true) => out=oklch[1.000000000000, 0.000000000000, 0.000000000000, 1.000000000000]
 core.logic.select<String>() => out=""
 core.logic.select<String>(cond=true) => out=""
 core.logic.select<Table>() => out=table[0x0]
@@ -23,24 +23,24 @@ core.math.lerp<Float>(t=0.25) => out=0.25
 core.math.lerp<Vec2>(t=-1.0) => out=vec2[-1.0, -1.0]
 core.math.lerp<Vec3>(a=vec3[1.0, 2.0, 3.0], b=vec3[3.0, 2.0, 1.0]) => out=vec3[2.0, 2.0, 2.0]
 core.math.lerp<Vec4>() => out=vec4[0.5, 0.5, 0.5, 0.5]
-core.math.lerp<Color>(a=oklch[0.6, 0.15, 20.0, 1.0], b=oklch[0.8, 0.12, 340.0, 0.5], t=0.0) => out=oklch[0.6, 0.15, 20.0, 1.0]
-core.math.lerp<Color>(a=oklch[0.6, 0.15, 20.0, 1.0], b=oklch[0.8, 0.12, 340.0, 0.5], t=0.25) => out=oklch[0.65, 0.1368468121333234, 11.899262506927778, 0.875]
-core.math.lerp<Color>(a=oklch[0.6, 0.15, 20.0, 1.0], b=oklch[0.8, 0.12, 340.0, 0.5], t=0.5) => out=oklch[0.7, 0.12696219905180756, 2.315844516918839, 0.75]
-core.math.lerp<Color>(a=oklch[0.6, 0.15, 20.0, 1.0], b=oklch[0.8, 0.12, 340.0, 0.5], t=0.75) => out=oklch[0.75, 0.12114887531897726, 351.4765136724383, 0.625]
-core.math.lerp<Color>(a=oklch[0.6, 0.15, 20.0, 1.0], b=oklch[0.8, 0.12, 340.0, 0.5], t=1.0) => out=oklch[0.8, 0.12, 340.0, 0.5]
-core.math.lerp<Color>(a=oklch[0.9, 0.0, 123.0, 1.0], b=oklch[0.5, 0.2, 250.0, 1.0], t=0.5) => out=oklch[0.7, 0.1, 250.0, 1.0]
+core.math.lerp<Color>(a=oklch[0.600000000000, 0.150000000000, 20.000000000000, 1.000000000000], b=oklch[0.800000000000, 0.120000000000, 340.000000000000, 0.500000000000], t=0.0) => out=oklch[0.600000000000, 0.150000000000, 20.000000000000, 1.000000000000]
+core.math.lerp<Color>(a=oklch[0.600000000000, 0.150000000000, 20.000000000000, 1.000000000000], b=oklch[0.800000000000, 0.120000000000, 340.000000000000, 0.500000000000], t=0.25) => out=oklch[0.650000000000, 0.136846812133, 11.899262506928, 0.875000000000]
+core.math.lerp<Color>(a=oklch[0.600000000000, 0.150000000000, 20.000000000000, 1.000000000000], b=oklch[0.800000000000, 0.120000000000, 340.000000000000, 0.500000000000], t=0.5) => out=oklch[0.700000000000, 0.126962199052, 2.315844516919, 0.750000000000]
+core.math.lerp<Color>(a=oklch[0.600000000000, 0.150000000000, 20.000000000000, 1.000000000000], b=oklch[0.800000000000, 0.120000000000, 340.000000000000, 0.500000000000], t=0.75) => out=oklch[0.750000000000, 0.121148875319, 351.476513672438, 0.625000000000]
+core.math.lerp<Color>(a=oklch[0.600000000000, 0.150000000000, 20.000000000000, 1.000000000000], b=oklch[0.800000000000, 0.120000000000, 340.000000000000, 0.500000000000], t=1.0) => out=oklch[0.800000000000, 0.120000000000, 340.000000000000, 0.500000000000]
+core.math.lerp<Color>(a=oklch[0.900000000000, 0.000000000000, 123.000000000000, 1.000000000000], b=oklch[0.500000000000, 0.200000000000, 250.000000000000, 1.000000000000], t=0.5) => out=oklch[0.700000000000, 0.100000000000, 250.000000000000, 1.000000000000]
 core.curve.ramp<Float>(position=0.75) => out=0.75
 core.curve.ramp<Vec2>(position=0.75) => out=vec2[0.75, 0.75]
 core.curve.ramp<Vec3>(position=0.75) => out=vec3[0.75, 0.75, 0.75]
 core.curve.ramp<Vec4>(position=0.75) => out=vec4[0.75, 0.75, 0.75, 0.75]
-core.curve.ramp<Color>(position=0.75) => out=oklch[0.75, 0.0, 0.0, 1.0]
-core.curve.ramp<Color>(curve=curve<Color>[3 keys], position=-1.0) => out=oklch[0.95, 0.05, 90.0, 1.0]
-core.curve.ramp<Color>(curve=curve<Color>[3 keys], position=0.0) => out=oklch[0.95, 0.05, 90.0, 1.0]
-core.curve.ramp<Color>(curve=curve<Color>[3 keys], position=0.25) => out=oklch[0.825, 0.10778471247625715, 50.2346140376006, 1.0]
-core.curve.ramp<Color>(curve=curve<Color>[3 keys], position=0.5) => out=oklch[0.7, 0.18, 40.0, 1.0]
-core.curve.ramp<Color>(curve=curve<Color>[3 keys], position=0.75) => out=oklch[0.5, 0.08672841927574249, 7.197536633068019, 1.0]
-core.curve.ramp<Color>(curve=curve<Color>[3 keys], position=1.0) => out=oklch[0.3, 0.1, 290.0, 1.0]
-core.curve.ramp<Color>(curve=curve<Color>[3 keys], position=2.0) => out=oklch[0.3, 0.1, 290.0, 1.0]
+core.curve.ramp<Color>(position=0.75) => out=oklch[0.750000000000, 0.000000000000, 0.000000000000, 1.000000000000]
+core.curve.ramp<Color>(curve=curve<Color>[3 keys], position=-1.0) => out=oklch[0.950000000000, 0.050000000000, 90.000000000000, 1.000000000000]
+core.curve.ramp<Color>(curve=curve<Color>[3 keys], position=0.0) => out=oklch[0.950000000000, 0.050000000000, 90.000000000000, 1.000000000000]
+core.curve.ramp<Color>(curve=curve<Color>[3 keys], position=0.25) => out=oklch[0.825000000000, 0.107784712476, 50.234614037601, 1.000000000000]
+core.curve.ramp<Color>(curve=curve<Color>[3 keys], position=0.5) => out=oklch[0.700000000000, 0.180000000000, 40.000000000000, 1.000000000000]
+core.curve.ramp<Color>(curve=curve<Color>[3 keys], position=0.75) => out=oklch[0.500000000000, 0.086728419276, 7.197536633068, 1.000000000000]
+core.curve.ramp<Color>(curve=curve<Color>[3 keys], position=1.0) => out=oklch[0.300000000000, 0.100000000000, 290.000000000000, 1.000000000000]
+core.curve.ramp<Color>(curve=curve<Color>[3 keys], position=2.0) => out=oklch[0.300000000000, 0.100000000000, 290.000000000000, 1.000000000000]
 core.curve.ramp<Vec3>(curve=curve<Vec3>[3 keys], position=0.5) => out=vec3[0.375, 1.0, 0.0]
 core.curve.ramp<Vec3>(curve=curve<Vec3>[3 keys], position=1.5) => out=vec3[1.625, 1.0, 0.5]
 core.curve.ramp<Vec3>(curve=curve<Vec3>[3 keys], position=2.5) => out=vec3[0.375, 1.0, 0.0]
@@ -48,8 +48,8 @@ core.curve.ramp<Vec2>(curve=curve<Vec3>[3 keys], position=0.5) => error: invalid
 core.table.get_value<String>(table=table[3x2], column="name", row=1) => value="Emma", found=true
 core.table.get_value<Int>(table=table[3x2], column="pages", row=0) => value=412, found=true
 core.table.get_value<Float>(table=table[3x2], column="pages", row=1) => value=474.0, found=true
-core.table.get_value<Color>(table=table[3x2], column="tint", row=1) => value=oklch[0.5, 0.2, 300.0, 1.0], found=true
-core.table.get_value<Color>(table=table[3x2], column="tint", row=2) => value=oklch[0.0, 0.0, 0.0, 0.0], found=false
+core.table.get_value<Color>(table=table[3x2], column="tint", row=1) => value=oklch[0.500000000000, 0.200000000000, 300.000000000000, 1.000000000000], found=true
+core.table.get_value<Color>(table=table[3x2], column="tint", row=2) => value=oklch[0.000000000000, 0.000000000000, 0.000000000000, 0.000000000000], found=false
 core.table.get_value<Vec3>(table=table[3x2], column="tint", row=0) => error: invalid input 'column': column "tint" holds Color values, not Vec3
 core.table.get_value<String>(table=table[3x2], column="nope", row=0) => error: invalid input 'column': no column "nope" (columns: "name", "pages", "tint")
 core.table.get_value<Vec2>() => value=vec2[0.0, 0.0], found=false
