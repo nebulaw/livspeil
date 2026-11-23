@@ -106,6 +106,15 @@
 //! listing they read changed). A file changed in place without changing
 //! its folder is not noticed.
 //!
+//! # WebAssembly nodes
+//!
+//! `--wasm FILE` (repeatable) loads a sandboxed node package (`.wasm`, or
+//! `.wat` text) and registers its node types next to the core nodes before
+//! the document is loaded; see `livspeil_wasm_host` and
+//! `docs/wasm-nodes.md`. A package that fails to load is an error (exit 1).
+//! The support is the cargo feature `wasm` (on by default); without it,
+//! `--wasm` fails with exit code 1.
+//!
 //! # JSONL format
 //!
 //! One JSON object per printed frame, keys in this order:
@@ -145,8 +154,10 @@ use std::time::Duration;
 
 use livspeil_doc::parse;
 use livspeil_graph::{CookError, Cooker, ExternalEvent, Graph, NodeId, OUTPUT_TYPE, TickReport};
-use livspeil_node_api::{CookContext, Event, PortType, SystemHost, Value};
+use livspeil_node_api::{CookContext, Event, NodeRegistry, PortType, SystemHost, Value};
 use livspeil_nodes_core::{RefreshPolicy, StdFs, core_registry};
+#[cfg(feature = "wasm")]
+use livspeil_wasm_host::WasmHost;
 
 use crate::{read, report, usage};
 
@@ -197,6 +208,8 @@ struct Options {
     fs_root: Option<String>,
     /// `--event NODE.PORT@FRAME`, in command-line order.
     events: Vec<EventArg>,
+    /// `--wasm FILE`: node packages to register before loading.
+    wasm: Vec<String>,
     /// `--precision N|full` (default 6 decimals).
     precision: Precision,
     /// `--watch-fs`: re-list folders that changed on disk.
@@ -273,6 +286,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
         stats: false,
         fs_root: None,
         events: Vec::new(),
+        wasm: Vec::new(),
         precision: Precision::Decimals(6),
         watch_fs: false,
     };
@@ -302,7 +316,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
                 continue;
             }
             "--frames" | "--fps" | "--start" | "--every" | "--node" | "--format" | "--fs-root"
-            | "--event" | "--precision" => {}
+            | "--event" | "--precision" | "--wasm" => {}
             _ => return Err(format!("unknown option '{flag}'")),
         }
         let value = match inline.or_else(|| args.next()) {
@@ -343,6 +357,12 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
                         "invalid value '{value}' for --precision (0 to {MAX_DECIMALS}, or full)"
                     )
                 })?;
+            }
+            "--wasm" => {
+                if value.is_empty() {
+                    return Err(bad());
+                }
+                options.wasm.push(value);
             }
             "--fs-root" => {
                 if value.is_empty() {
@@ -388,7 +408,11 @@ fn cook(options: &Options) -> ExitCode {
         Ok(v) => v,
         Err(code) => return code,
     };
-    let graph = match parse(&text).and_then(|doc| doc.to_graph(Arc::new(core_registry()))) {
+    let registry = match wasm_registry(&options.wasm) {
+        Ok(registry) => registry,
+        Err(code) => return code,
+    };
+    let graph = match parse(&text).and_then(|doc| doc.to_graph(Arc::new(registry))) {
         Ok(graph) => graph,
         Err(err) => {
             report(&file, &err);
@@ -495,6 +519,35 @@ fn cook(options: &Options) -> ExitCode {
         ExitCode::from(EXIT_NODE_ERROR)
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+/// The core nodes plus those of the `--wasm` packages (M0.15).
+#[cfg(feature = "wasm")]
+fn wasm_registry(paths: &[String]) -> Result<NodeRegistry, ExitCode> {
+    let mut registry = core_registry();
+    if paths.is_empty() {
+        return Ok(registry);
+    }
+    let paths: Vec<std::path::PathBuf> = paths.iter().map(std::path::PathBuf::from).collect();
+    WasmHost::new()
+        .map_err(|err| (std::path::PathBuf::new(), err))
+        .and_then(|host| livspeil_wasm_host::register_files(&host, &mut registry, &paths))
+        .map_err(|(path, err)| {
+            eprintln!("livspeil cook: wasm package {}: {err}", path.display());
+            ExitCode::FAILURE
+        })?;
+    Ok(registry)
+}
+
+/// Without the `wasm` feature, `--wasm` is an error.
+#[cfg(not(feature = "wasm"))]
+fn wasm_registry(paths: &[String]) -> Result<NodeRegistry, ExitCode> {
+    if paths.is_empty() {
+        Ok(core_registry())
+    } else {
+        eprintln!("livspeil cook: --wasm: this build has no wasm support (cargo feature `wasm`)");
+        Err(ExitCode::FAILURE)
     }
 }
 

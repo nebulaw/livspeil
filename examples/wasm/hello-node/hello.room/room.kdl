@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: 2026 Livspeil contributors
+// SPDX-License-Identifier: CC0-1.0
+
+// WebAssembly nodes (M0.15): demo.wave.sine and demo.text.shout come from
+// the sandboxed package ../hello-node.wasm, registered on the command line:
+//
+//   livspeil cook examples/wasm/hello-node/hello.room \
+//       --wasm examples/wasm/hello-node/hello-node.wasm --frames 240 --every 30
+//
+// wave (wasm) -> label (core.text.format) -> loud (wasm)
+// wave        -> level (core.output)
+//
+// Documents do not reference packages yet; see docs/wasm-nodes.md for the
+// proposed `package` entry.
+
+room "Hello wasm" format=1 min-tier="T0" {
+  network "/" {
+    node "wave" type="demo.wave.sine@1" id="0194b1a0-0000-7000-8000-0000000000b1" {
+      input "amplitude" 2.0
+      input "frequency" 0.25
+    }
+    node "label" type="core.text.format@1" id="0194b1a0-0000-7000-8000-0000000000b2" {
+      input "template" "level {a}"
+    }
+    node "loud" type="demo.text.shout@1" id="0194b1a0-0000-7000-8000-0000000000b3"
+    node "level" type="core.output@1" id="0194b1a0-0000-7000-8000-0000000000b4" port-type="Float"
+    node "banner" type="core.output@1" id="0194b1a0-0000-7000-8000-0000000000b5" port-type="String"
+    link from="label.out" to="loud.text"
+    link from="loud.out" to="banner.value"
+    link from="wave.out" to="label.a"
+    link from="wave.out" to="level.value"
+  }
+}

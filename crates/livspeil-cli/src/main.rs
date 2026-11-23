@@ -91,6 +91,9 @@ COOK OPTIONS:
     --fs-root DIR           File root of file-system nodes such as
                             core.fs.list_dir (default: the room package
                             directory); paths outside it are refused
+    --wasm FILE             Register the node types of a sandboxed wasm
+                            package (.wasm or .wat) before loading the
+                            document (repeatable; docs/wasm-nodes.md)
     --watch-fs              Re-list folders whose files were created,
                             deleted or renamed during the run (checked
                             every frame); default: one snapshot per run

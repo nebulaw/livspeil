@@ -31,3 +31,5 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      # The CLI without wasmtime (feature `wasm` off) builds on the 1.85 MSRV.
+      - run: cargo check -p livspeil-cli --no-default-features
