@@ -1,0 +1,77 @@
+layout width=118.078125 height=68 lines=4 rtl=false
+line 0 text=0..16 "The quick brown " top=0 height=16 baseline=13 x=8.578125 width=102.84375
+  run text=0..16 ltr font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g411 x=8.578125 y=13 adv=8.390625
+    g670 x=16.96875 y=13 adv=7.6875
+    g614 x=24.65625 y=13 adv=7.578125
+    g1777 x=32.234375 y=13 adv=3.65625
+    g849 x=35.890625 y=13 adv=7.953125
+    g915 x=43.859375 y=13 adv=7.6875
+    g689 x=51.53125 y=13 adv=3.15625
+    g586 x=54.6875 y=13 adv=7.421875
+    g727 x=62.109375 y=13 adv=7.140625
+    g1777 x=69.25 y=13 adv=3.65625
+    g578 x=72.90625 y=13 adv=7.953125
+    g852 x=80.859375 y=13 adv=4.671875
+    g790 x=85.546875 y=13 adv=7.5625
+    g984 x=93.109375 y=13 adv=10.640625
+    g773 x=103.734375 y=13 adv=7.6875
+    g1777 x=111.421875 y=13 adv=3.65625
+line 1 text=16..35 "fox jumps over the " top=16 height=16 baseline=29 x=3.1875 width=113.625
+  run text=16..35 ltr font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g647 x=3.1875 y=29 adv=4.4375
+    g790 x=7.609375 y=29 adv=7.5
+    g993 x=15.125 y=29 adv=7.09375
+    g1777 x=22.21875 y=29 adv=3.65625
+    g719 x=25.875 y=29 adv=3.15625
+    g915 x=29.015625 y=29 adv=7.6875
+    g766 x=36.703125 y=29 adv=11.390625
+    g843 x=48.09375 y=29 adv=7.953125
+    g871 x=56.0625 y=29 adv=6.859375
+    g1777 x=62.921875 y=29 adv=3.65625
+    g790 x=66.578125 y=29 adv=7.546875
+    g980 x=74.109375 y=29 adv=7.046875
+    g614 x=81.171875 y=29 adv=7.578125
+    g852 x=88.75 y=29 adv=4.890625
+    g1777 x=93.640625 y=29 adv=3.65625
+    g889 x=97.296875 y=29 adv=4.25
+    g670 x=101.546875 y=29 adv=7.6875
+    g614 x=109.234375 y=29 adv=7.578125
+    g1777 x=116.8125 y=29 adv=3.65625
+line 2 text=35..52 "lazy dog. ის " top=32 height=18 baseline=46 x=22.484375 width=75.046875
+  run text=35..45 ltr font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g736 x=22.484375 y=46 adv=3.15625
+    g507 x=25.625 y=46 adv=7.296875
+    g1022 x=32.921875 y=46 adv=7.171875
+    g998 x=40.109375 y=46 adv=7.3125
+    g1777 x=47.40625 y=46 adv=3.65625
+    g597 x=51.0625 y=46 adv=7.953125
+    g790 x=59.03125 y=46 adv=7.796875
+    g658 x=66.828125 y=46 adv=7.96875
+    g1502 x=74.796875 y=46 adv=3.75
+    g1777 x=78.546875 y=46 adv=3.65625
+  run text=45..51 ltr font="Noto Sans Georgian" size=13 coords=[] color=TextPrimary
+    g127 x=82.203125 y=46 adv=7.46875
+    g159 x=89.65625 y=46 adv=7.859375
+  run text=51..52 ltr font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g1777 x=97.515625 y=46 adv=3.65625
+line 3 text=52..93 "ძალიან სწრაფია." top=50 height=18 baseline=64 x=0.953125 width=118.078125
+  run text=52..70 ltr font="Noto Sans Georgian" size=13 coords=[] color=TextPrimary
+    g131 x=0.953125 y=64 adv=7.859375
+    g92 x=8.828125 y=64 adv=7.140625
+    g139 x=15.953125 y=64 adv=14.15625
+    g127 x=30.125 y=64 adv=7.46875
+    g92 x=37.578125 y=64 adv=7.140625
+    g143 x=44.71875 y=64 adv=7.859375
+  run text=70..71 ltr font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g1777 x=52.578125 y=64 adv=3.65625
+  run text=71..92 ltr font="Noto Sans Georgian" size=13 coords=[] color=TextPrimary
+    g159 x=56.234375 y=64 adv=7.859375
+    g102 x=64.109375 y=64 adv=7.859375
+    g157 x=71.96875 y=64 adv=10.421875
+    g92 x=82.390625 y=64 adv=7.140625
+    g153 x=89.53125 y=64 adv=11.171875
+    g127 x=100.703125 y=64 adv=7.46875
+    g92 x=108.15625 y=64 adv=7.140625
+  run text=92..93 ltr font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g1502 x=115.296875 y=64 adv=3.75

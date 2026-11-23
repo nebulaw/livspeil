@@ -1,0 +1,34 @@
+layout width=183.328125 height=19 lines=1 rtl=false
+line 0 text=0..26 "Regular Bold Italic Accent" top=0 height=19 baseline=15 x=0 width=183.328125
+  run text=0..8 ltr font="Inter Variable" size=15 coords=[] color=TextPrimary
+    g384 x=0 y=15 adv=9.4375
+    g614 x=9.4375 y=15 adv=8.75
+    g658 x=18.171875 y=15 adv=9.203125
+    g915 x=27.375 y=15 adv=8.875
+    g736 x=36.25 y=15 adv=3.640625
+    g507 x=39.875 y=15 adv=8.421875
+    g852 x=48.296875 y=15 adv=5.640625
+    g1777 x=53.953125 y=15 adv=4.21875
+  run text=8..12 ltr font="Inter Variable" size=15 coords=[0, 8848] color=TextPrimary
+    g65 x=58.171875 y=15 adv=9.921875
+    g790 x=68.09375 y=15 adv=9.203125
+    g736 x=77.296875 y=15 adv=4.0625
+    g597 x=81.359375 y=15 adv=9.453125
+  run text=12..13 ltr font="Inter Variable" size=15 coords=[] color=TextPrimary
+    g1777 x=90.8125 y=15 adv=4.21875
+  run text=13..19 ltr font="Inter Variable" italic size=15 coords=[] color=TextPrimary
+    g197 x=95.03125 y=15 adv=4.25
+    g858 x=99.28125 y=15 adv=4.78125
+    g507 x=104.0625 y=15 adv=9.203125
+    g705 x=113.265625 y=15 adv=3.640625
+    g658 x=116.890625 y=15 adv=3.640625
+    g555 x=120.53125 y=15 adv=8.578125
+  run text=19..20 ltr font="Inter Variable" size=15 coords=[] color=TextPrimary
+    g1777 x=129.109375 y=15 adv=4.21875
+  run text=20..26 ltr font="Inter Variable" size=15 coords=[] color=Accent underline
+    g2 x=133.328125 y=15 adv=10.34375
+    g586 x=143.671875 y=15 adv=8.5625
+    g586 x=152.25 y=15 adv=8.5625
+    g614 x=160.8125 y=15 adv=8.75
+    g773 x=169.5625 y=15 adv=8.859375
+    g889 x=178.421875 y=15 adv=4.90625

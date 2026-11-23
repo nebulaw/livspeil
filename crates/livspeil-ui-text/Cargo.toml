@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: MPL-2.0
+
+[package]
+name = "livspeil-ui-text"
+description = "Livspeil UI text: shaping, layout, editing model and CPU glyph atlas (on Parley)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MPL-2.0"
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+# The spike is a separate workspace (see spike/Cargo.toml).
+exclude = ["spike"]
+
+[features]
+default = ["bundled-fonts"]
+# Embed the vendored fonts (Inter, Noto Sans Georgian, Noto Sans Arabic;
+# assets/fonts, OFL-1.1) so `FontSystem::bundled()` and test mode need no
+# files at run time.
+bundled-fonts = []
+
+[dependencies]
+# Text layout (shaping via HarfRust, bidi, line breaking, fontique fallback).
+parley = "0.13"
+# Glyph outlines; same version as Parley's own read-fonts so the font data
+# is parsed by one copy.
+skrifa = "0.49"
+# Coverage rasterizer for outlines (grayscale masks).
+zeno = "0.3"
+# Atlas rectangle allocator.
+etagere = "0.3"
+unicode-segmentation = "1.12"
+
+[dev-dependencies]
+livspeil-testkit = { path = "../livspeil-testkit" }
+png = "0.18"
+proptest = "1"
+
+[lints]
+workspace = true
