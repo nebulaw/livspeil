@@ -381,10 +381,10 @@ impl Graph {
             }
         }
         let subtree = self.subtree(id);
-        if let Some(p) = parent {
-            if subtree.contains(&p) {
-                return Err(GraphError::WouldNest(id));
-            }
+        if let Some(p) = parent
+            && subtree.contains(&p)
+        {
+            return Err(GraphError::WouldNest(id));
         }
         if parent.is_none() && self.node_type(id) == Some(INPUT_TYPE) {
             return Err(GraphError::NotInSubnet(id));

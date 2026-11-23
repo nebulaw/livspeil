@@ -412,10 +412,10 @@ impl NodeImpl for Gate {
 
     fn on_event(&self, call: &mut EventCall<'_>) -> Result<(), NodeError> {
         let open = bool_input(call.inputs(), 1, "open")?;
-        if let Some((_, event)) = arrived(call) {
-            if open {
-                call.emit(0, event);
-            }
+        if let Some((_, event)) = arrived(call)
+            && open
+        {
+            call.emit(0, event);
         }
         Ok(())
     }

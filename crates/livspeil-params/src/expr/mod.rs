@@ -360,14 +360,14 @@ pub fn channel_refs(source: &str) -> Result<Vec<ChannelRef>, ExprError> {
                     "out" => Some(RefKind::Output),
                     _ => None,
                 };
-                if let (Some(kind), [arg]) = (kind, args.as_slice()) {
-                    if let parser::ExprKind::Str(path) = &arg.kind {
-                        out.push(ChannelRef {
-                            path: path.clone(),
-                            span: arg.span,
-                            kind,
-                        });
-                    }
+                if let (Some(kind), [arg]) = (kind, args.as_slice())
+                    && let parser::ExprKind::Str(path) = &arg.kind
+                {
+                    out.push(ChannelRef {
+                        path: path.clone(),
+                        span: arg.span,
+                        kind,
+                    });
                 }
                 stack.extend(args.iter().rev());
             }

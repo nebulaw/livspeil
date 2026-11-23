@@ -102,10 +102,10 @@ impl Graph {
         if !self.contains(id) {
             return Err(GraphError::UnknownNode(id));
         }
-        if let Some(p) = parent {
-            if !self.contains(p) {
-                return Err(GraphError::UnknownNode(p));
-            }
+        if let Some(p) = parent
+            && !self.contains(p)
+        {
+            return Err(GraphError::UnknownNode(p));
         }
         let mut plan = RewirePlan::default();
         if self.parent(id) == parent {

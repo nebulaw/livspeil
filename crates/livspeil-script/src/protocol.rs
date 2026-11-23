@@ -105,10 +105,10 @@ impl Message {
             return Err(("a message must be a JSON object".into(), Json::Null));
         };
         let id = obj.remove("id");
-        if let Some(id) = &id {
-            if !(id.is_u64() || id.is_i64() || id.is_string()) {
-                return Err(("id must be an integer or a string".into(), Json::Null));
-            }
+        if let Some(id) = &id
+            && !(id.is_u64() || id.is_i64() || id.is_string())
+        {
+            return Err(("id must be an integer or a string".into(), Json::Null));
         }
         let params = obj.remove("params").unwrap_or(Json::Null);
         match (id, obj.remove("method")) {

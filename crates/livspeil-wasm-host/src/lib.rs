@@ -176,7 +176,7 @@ impl WasmHost {
             .wasm_relaxed_simd(false)
             .wasm_memory64(false)
             .wasm_multi_memory(false)
-            .wasm_exceptions(false)
+            // Exceptions need the `gc` feature, which is compiled out.
             .wasm_wide_arithmetic(false)
             .wasm_custom_page_sizes(false);
         let engine = Engine::new(&config).map_err(|e| LoadError::Engine(format!("{e:#}")))?;

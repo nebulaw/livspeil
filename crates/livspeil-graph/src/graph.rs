@@ -1383,11 +1383,11 @@ impl Graph {
 
     /// Forget one `from -> to` edge from the dense dependents.
     pub(crate) fn remove_dependent(&mut self, from: usize, to: usize) {
-        if let Some(list) = self.dependents.get_mut(from) {
-            if let Some(pos) = list.iter().position(|&s| s == to) {
-                list.swap_remove(pos);
-                self.deps_rev += 1;
-            }
+        if let Some(list) = self.dependents.get_mut(from)
+            && let Some(pos) = list.iter().position(|&s| s == to)
+        {
+            list.swap_remove(pos);
+            self.deps_rev += 1;
         }
     }
 
@@ -1423,11 +1423,11 @@ impl Graph {
         stack.push(start);
         while let Some(slot) = stack.pop() {
             for &dep in self.walk.dependents(slot) {
-                if let Some(dirty) = self.dirty.get_mut(dep) {
-                    if *dirty <= observed {
-                        *dirty = epoch;
-                        stack.push(dep);
-                    }
+                if let Some(dirty) = self.dirty.get_mut(dep)
+                    && *dirty <= observed
+                {
+                    *dirty = epoch;
+                    stack.push(dep);
                 }
             }
         }

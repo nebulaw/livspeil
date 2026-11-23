@@ -46,5 +46,14 @@ jobs:
           name: ui-shots-${{ matrix.os }}
           path: target/shots/
           if-no-files-found: ignore
-      # The CLI without wasmtime (feature `wasm` off) builds on the 1.85 MSRV.
+      # The CLI without wasmtime (feature `wasm` off) still builds.
       - run: cargo check -p livspeil-cli --no-default-features
+
+  msrv:
+    name: MSRV (Rust 1.95)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets

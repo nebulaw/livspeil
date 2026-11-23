@@ -18,8 +18,8 @@ path = "src/main.rs"
 
 [features]
 # `cook --wasm` (sandboxed WebAssembly node packages, wasmtime). On by
-# default; it needs Rust 1.86. `--no-default-features` builds on the
-# workspace MSRV (1.85) without wasmtime, and `--wasm` then fails.
+# default; `--no-default-features` builds a smaller CLI without wasmtime,
+# and `--wasm` then fails.
 default = ["wasm"]
 wasm = ["dep:livspeil-wasm-host"]
 
@@ -30,7 +30,7 @@ livspeil-graph = { path = "../livspeil-graph" }
 livspeil-node-api = { path = "../livspeil-node-api" }
 livspeil-nodes-core = { path = "../livspeil-nodes-core" }
 livspeil-script = { path = "../livspeil-script" }
-# Optional (feature `wasm`): needs Rust 1.86 through wasmtime.
+# Optional (feature `wasm`).
 livspeil-wasm-host = { path = "../livspeil-wasm-host", optional = true }
 serde_json = "1"
 
