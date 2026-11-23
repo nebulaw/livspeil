@@ -1,0 +1,24 @@
+frame=0 time=0.000000 banner.value="LEVEL 0.00!"
+frame=0 time=0.000000 level.value=0.000000
+frame=0 time=0.000000 stats cooked=5 reused=1
+frame=30 time=0.500000 banner.value="LEVEL 1.41!"
+frame=30 time=0.500000 level.value=1.414214
+frame=30 time=0.500000 stats cooked=5 reused=1
+frame=60 time=1.000000 banner.value="LEVEL 2.00!"
+frame=60 time=1.000000 level.value=2.000000
+frame=60 time=1.000000 stats cooked=3 reused=3
+frame=90 time=1.500000 banner.value="LEVEL 1.41!"
+frame=90 time=1.500000 level.value=1.414214
+frame=90 time=1.500000 stats cooked=5 reused=1
+frame=120 time=2.000000 banner.value="LEVEL 0.00!"
+frame=120 time=2.000000 level.value=0.000000
+frame=120 time=2.000000 stats cooked=5 reused=1
+frame=150 time=2.500000 banner.value="LEVEL -1.41!"
+frame=150 time=2.500000 level.value=-1.414214
+frame=150 time=2.500000 stats cooked=5 reused=1
+frame=180 time=3.000000 banner.value="LEVEL -2.00!"
+frame=180 time=3.000000 level.value=-2.000000
+frame=180 time=3.000000 stats cooked=3 reused=3
+frame=210 time=3.500000 banner.value="LEVEL -1.41!"
+frame=210 time=3.500000 level.value=-1.414214
+frame=210 time=3.500000 stats cooked=5 reused=1

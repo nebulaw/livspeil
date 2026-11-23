@@ -78,6 +78,9 @@ COOK OPTIONS:
     --fs-root DIR           File root of file-system nodes such as
                             core.fs.list_dir (default: the room package
                             directory); paths outside it are refused
+    --wasm FILE             Register the node types of a sandboxed wasm
+                            package (.wasm or .wat) before loading the
+                            document (repeatable; docs/wasm-nodes.md)
 
     Floats are printed with 6 decimals. Example:
         livspeil cook examples/sun-and-lamp.room --frames 600 --every 50

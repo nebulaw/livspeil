@@ -77,6 +77,13 @@
 //! when first needed; it is not refreshed during a run, so every frame
 //! sees the same files.
 //!
+//! # WebAssembly nodes
+//!
+//! `--wasm FILE` (repeatable) loads a sandboxed node package (`.wasm`, or
+//! `.wat` text) and registers its node types next to the core nodes before
+//! the document is loaded; see `livspeil_wasm_host` and
+//! `docs/wasm-nodes.md`. A package that fails to load is an error (exit 1).
+//!
 //! # JSONL format
 //!
 //! One JSON object per printed frame, keys in this order:
@@ -103,14 +110,15 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::{self, BufWriter, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
 use livspeil_doc::parse;
 use livspeil_graph::{CookError, Cooker, ExternalEvent, Graph, NodeId, OUTPUT_TYPE, TickReport};
-use livspeil_node_api::{CookContext, Event, PortType, Value};
+use livspeil_node_api::{CookContext, Event, NodeRegistry, PortType, Value};
 use livspeil_nodes_core::{StdFs, core_registry};
+use livspeil_wasm_host::WasmHost;
 
 use crate::{read, report, usage};
 
@@ -139,6 +147,8 @@ struct Options {
     fs_root: Option<String>,
     /// `--event NODE.PORT@FRAME`, in command-line order.
     events: Vec<EventArg>,
+    /// `--wasm FILE`: node packages to register before loading.
+    wasm: Vec<String>,
 }
 
 /// One `--event NODE.PORT@FRAME`.
@@ -196,6 +206,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
         stats: false,
         fs_root: None,
         events: Vec::new(),
+        wasm: Vec::new(),
     };
     let mut args = args.peekable();
     while let Some(arg) = args.next() {
@@ -219,7 +230,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
                 continue;
             }
             "--frames" | "--fps" | "--start" | "--every" | "--node" | "--format" | "--fs-root"
-            | "--event" => {}
+            | "--event" | "--wasm" => {}
             _ => return Err(format!("unknown option '{flag}'")),
         }
         let value = match inline.or_else(|| args.next()) {
@@ -257,6 +268,12 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
                 options.events.push(EventArg::parse(&value).ok_or_else(|| {
                     format!("invalid value '{value}' for --event (NODE.PORT@FRAME)")
                 })?)
+            }
+            "--wasm" => {
+                if value.is_empty() {
+                    return Err(bad());
+                }
+                options.wasm.push(value);
             }
             "--fs-root" => {
                 if value.is_empty() {
@@ -302,7 +319,11 @@ fn cook(options: &Options) -> ExitCode {
         Ok(v) => v,
         Err(code) => return code,
     };
-    let graph = match parse(&text).and_then(|doc| doc.to_graph(Arc::new(core_registry()))) {
+    let registry = match wasm_registry(&options.wasm) {
+        Ok(registry) => registry,
+        Err(code) => return code,
+    };
+    let graph = match parse(&text).and_then(|doc| doc.to_graph(Arc::new(registry))) {
         Ok(graph) => graph,
         Err(err) => {
             report(&file, &err);
@@ -388,6 +409,23 @@ fn cook(options: &Options) -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// The core nodes plus those of the `--wasm` packages (M0.15).
+fn wasm_registry(paths: &[String]) -> Result<NodeRegistry, ExitCode> {
+    let mut registry = core_registry();
+    if paths.is_empty() {
+        return Ok(registry);
+    }
+    let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+    WasmHost::new()
+        .map_err(|err| (PathBuf::new(), err))
+        .and_then(|host| livspeil_wasm_host::register_files(&host, &mut registry, &paths))
+        .map_err(|(path, err)| {
+            eprintln!("livspeil cook: wasm package {}: {err}", path.display());
+            ExitCode::FAILURE
+        })?;
+    Ok(registry)
 }
 
 fn output_failed(err: &io::Error) -> ExitCode {
