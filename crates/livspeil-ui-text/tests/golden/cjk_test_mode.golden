@@ -1,0 +1,13 @@
+layout width=57.015625 height=16 lines=1 rtl=false
+line 0 text=0..15 "Inter 日本語" top=0 height=16 baseline=13 x=0 width=57.015625
+  run text=0..6 ltr font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g197 x=0 y=13 adv=3.484375
+    g773 x=3.484375 y=13 adv=7.6875
+    g889 x=11.171875 y=13 adv=4.125
+    g614 x=15.296875 y=13 adv=7.578125
+    g852 x=22.875 y=13 adv=4.890625
+    g1777 x=27.765625 y=13 adv=3.65625
+  run text=6..15 ltr font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g0 x=31.421875 y=13 adv=8.53125
+    g0 x=39.953125 y=13 adv=8.53125
+    g0 x=48.484375 y=13 adv=8.53125

@@ -1,0 +1,16 @@
+// SPDX-FileCopyrightText: 2026 Livspeil contributors
+// SPDX-License-Identifier: CC0-1.0
+
+// Vendored fonts (Livspeil UI, crate livspeil-ui-text). Same KDL shape as a
+// Room's assets.lock, but paths are human-readable: these are repository
+// assets, not a Room package. Each `source` is the official release archive;
+// `archive-sha256` is the SHA-256 of that archive as downloaded 2026-11-23.
+assets-lock format=1 {
+  asset "inter/InterVariable.ttf" sha256="4989b125924991b90d05b2d16e0e388c48f7d5bb8b30539bbf9c755278d0ccaf" size=879708 license="OFL-1.1" source="https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip" archive-sha256="9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e" version="4.1" author="The Inter Project Authors"
+  asset "inter/InterVariable-Italic.ttf" sha256="d6f1f6a172d9e588438db9f986fd5cfad7b30f644374080a8a9d4d91e344586f" size=910252 license="OFL-1.1" source="https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip" archive-sha256="9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e" version="4.1" author="The Inter Project Authors"
+  asset "inter/OFL.txt" sha256="262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a" size=4380 license="OFL-1.1" source="https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip" note="LICENSE.txt from the archive"
+  asset "noto-sans-georgian/NotoSansGeorgian-Variable.ttf" sha256="42f4a8bf4fe0af8afd91ee3c19e81e14f1bc74ddbd9b6a59a4182f67a596adb4" size=56768 license="OFL-1.1" source="https://github.com/notofonts/georgian/releases/download/NotoSansGeorgian-v2.005/NotoSansGeorgian-v2.005.zip" archive-sha256="10e85011008108308e6feab0408242acb07804da61ede3d3ff236461ae07ab1b" version="2.005" member="NotoSansGeorgian/unhinted/slim-variable-ttf/NotoSansGeorgian[wght].ttf" author="The Noto Project Authors"
+  asset "noto-sans-georgian/OFL.txt" sha256="8c02263c5d73d40544f9ed91e30c4e947407057a3cc430d7b786189aeceff6df" size=4384 license="OFL-1.1" source="https://github.com/notofonts/georgian/releases/download/NotoSansGeorgian-v2.005/NotoSansGeorgian-v2.005.zip"
+  asset "noto-sans-arabic/NotoSansArabic-Variable.ttf" sha256="3fae4d7239d1faa55b234bda8091019a5251ff79df40d5e29367d84bed2a8138" size=239324 license="OFL-1.1" source="https://github.com/notofonts/arabic/releases/download/NotoSansArabic-v2.013/NotoSansArabic-v2.013.zip" archive-sha256="1301aceaea84c501cf2e6dcfb3182e2328c8eae5725817fcb239672bda7154f1" version="2.013" member="NotoSansArabic/unhinted/slim-variable-ttf/NotoSansArabic[wght].ttf" author="The Noto Project Authors"
+  asset "noto-sans-arabic/OFL.txt" sha256="a7a5a25eb188bf1cd96982030d53e23c33485c69b1044a562254226857ee13af" size=4382 license="OFL-1.1" source="https://github.com/notofonts/arabic/releases/download/NotoSansArabic-v2.013/NotoSansArabic-v2.013.zip"
+}

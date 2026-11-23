@@ -1,0 +1,22 @@
+layout width=81.25 height=28 lines=1 rtl=true
+line 0 text=0..20 "مرحبا Livspeil!" top=0 height=28 baseline=18 x=218.75 width=81.25
+  run text=19..20 rtl font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g1427 x=218.75 y=18 adv=3.734375
+  run text=11..19 ltr font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g281 x=222.484375 y=18 adv=7.34375
+    g689 x=229.84375 y=18 adv=3.15625
+    g980 x=232.984375 y=18 adv=7.3125
+    g871 x=240.296875 y=18 adv=6.859375
+    g843 x=247.15625 y=18 adv=7.953125
+    g614 x=255.109375 y=18 adv=7.578125
+    g689 x=262.6875 y=18 adv=3.15625
+    g736 x=265.84375 y=18 adv=3.15625
+  run text=10..11 rtl font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g1777 x=268.984375 y=18 adv=3.65625
+  run text=0..10 rtl font="Noto Sans Arabic" size=13 coords=[] color=TextPrimary
+    g9 x=272.640625 y=18 adv=3.78125
+    g314 x=277.65625 y=18.03125 adv=0
+    g16 x=276.4375 y=18 adv=4.453125
+    g27 x=280.890625 y=18 adv=7.65625
+    g31 x=288.03125 y=18 adv=4.625
+    g79 x=293.171875 y=18 adv=6.828125
