@@ -17,6 +17,25 @@
 //! so within one revision every query has one answer even if the disk
 //! changes meanwhile (true snapshot semantics).
 //!
+//! # Refresh
+//!
+//! By default a [`StdFs`] is a snapshot: it looks at the disk again only
+//! when the host calls [`StdFs::bump`]. With a [`RefreshPolicy::Watch`]
+//! policy ([`StdFs::with_refresh`]) it also watches the folders it has
+//! actually listed in the current revision: [`StdFs::refresh`], which the
+//! host calls once per tick before cooking (at most once per
+//! `min_interval`), compares a cheap [`DirStamp`] of each of them (the
+//! folder's modification time and number of entries) with the one taken
+//! when it was listed, and bumps the revision when any differs (also when
+//! a folder that was missing appears, or one disappears). Only
+//! system-reading nodes are then re-cooked, and their dependents only if
+//! the listing really changed. Calling `refresh` once per tick keeps one
+//! answer per tick. Not detected: a file changed in place without the
+//! folder's modification time changing (its size or time in the listing
+//! stays stale until the next detected change or `bump`). The clock and
+//! the stamp function can be replaced ([`StdFs::with_clock`],
+//! [`StdFs::with_stat`]) for deterministic tests.
+//!
 //! # Capability rules
 //!
 //! Nodes name folders with relative paths inside the provider's root
@@ -27,12 +46,13 @@
 //! not valid UTF-8 are left out too. Nothing is ever written.
 
 use std::collections::{BTreeMap, HashMap};
+use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, PoisonError};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use livspeil_node_api::{
     CookContext, DirEntry, FileSystem, FsError, FsPath, NodeError, NodeImpl, NodeSpec, PortType,
@@ -118,14 +138,79 @@ fn io_error(path: &FsPath, err: &io::Error) -> FsError {
 
 type Listing = Result<Vec<DirEntry>, FsError>;
 
+/// When a [`StdFs`] looks at the disk again (see "Refresh" in the
+/// [module documentation](self)).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RefreshPolicy {
+    /// Only on [`StdFs::bump`] (the default).
+    #[default]
+    Snapshot,
+    /// Also when [`StdFs::refresh`] finds that a listed folder changed;
+    /// it checks at most once per `min_interval` (zero: every call).
+    Watch { min_interval: Duration },
+}
+
+/// A cheap fingerprint of a folder, compared by [`StdFs::refresh`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DirStamp {
+    /// The folder's modification time, if the platform has one.
+    pub modified: Option<SystemTime>,
+    /// Number of entries.
+    pub entries: u64,
+}
+
+impl DirStamp {
+    /// The stamp of the folder at `path` (links followed), or `None` when
+    /// it is missing or not a folder.
+    #[must_use]
+    pub fn of(path: &Path) -> Option<Self> {
+        let meta = fs::metadata(path).ok()?;
+        if !meta.is_dir() {
+            return None;
+        }
+        let entries = fs::read_dir(path).ok()?.count();
+        Some(DirStamp {
+            modified: meta.modified().ok(),
+            entries: u64::try_from(entries).unwrap_or(u64::MAX),
+        })
+    }
+}
+
+/// Monotonic time since an arbitrary origin.
+type Clock = Arc<dyn Fn() -> Duration + Send + Sync>;
+/// The stamp of a folder (see [`DirStamp::of`]).
+type StatFn = Arc<dyn Fn(&Path) -> Option<DirStamp> + Send + Sync>;
+
+/// What [`StdFs::refresh`] watches.
+#[derive(Debug, Default)]
+struct Watched {
+    /// Clock reading of the last check.
+    last_check: Option<Duration>,
+    /// Folders listed in the current revision and their stamps then.
+    dirs: HashMap<PathBuf, Option<DirStamp>>,
+}
+
 /// The real file system below a root directory, read-only. See the
-/// [module documentation](self) for the capability rules.
-#[derive(Debug)]
+/// [module documentation](self) for the capability rules and refresh.
 pub struct StdFs {
     root: PathBuf,
     revision: AtomicU64,
     /// Listings of the revision in the key.
     cache: Mutex<(u64, HashMap<FsPath, Listing>)>,
+    policy: RefreshPolicy,
+    clock: Clock,
+    stat: StatFn,
+    watched: Mutex<Watched>,
+}
+
+impl fmt::Debug for StdFs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StdFs")
+            .field("root", &self.root)
+            .field("revision", &self.revision)
+            .field("policy", &self.policy)
+            .finish_non_exhaustive()
+    }
 }
 
 impl StdFs {
@@ -142,11 +227,90 @@ impl StdFs {
                 format!("{} is not a directory", root.display()),
             ));
         }
+        let start = Instant::now();
         Ok(StdFs {
             root,
             revision: AtomicU64::new(1),
             cache: Mutex::new((0, HashMap::new())),
+            policy: RefreshPolicy::Snapshot,
+            clock: Arc::new(move || start.elapsed()),
+            stat: Arc::new(DirStamp::of),
+            watched: Mutex::new(Watched::default()),
         })
+    }
+
+    /// Builder: use `policy` (see "Refresh" in the module docs).
+    #[must_use]
+    pub fn with_refresh(mut self, policy: RefreshPolicy) -> Self {
+        self.policy = policy;
+        self
+    }
+
+    /// Builder: read time from `clock` (monotonic, since any origin)
+    /// instead of the system's monotonic clock.
+    #[must_use]
+    pub fn with_clock(mut self, clock: impl Fn() -> Duration + Send + Sync + 'static) -> Self {
+        self.clock = Arc::new(clock);
+        self
+    }
+
+    /// Builder: fingerprint folders with `stat` instead of
+    /// [`DirStamp::of`].
+    #[must_use]
+    pub fn with_stat(
+        mut self,
+        stat: impl Fn(&Path) -> Option<DirStamp> + Send + Sync + 'static,
+    ) -> Self {
+        self.stat = Arc::new(stat);
+        self
+    }
+
+    /// The refresh policy.
+    #[must_use]
+    pub fn refresh_policy(&self) -> RefreshPolicy {
+        self.policy
+    }
+
+    /// With [`RefreshPolicy::Watch`], check the folders listed in the
+    /// current revision (unless the last check is less than
+    /// `min_interval` ago) and [`bump`](StdFs::bump) the revision if any
+    /// changed. Returns whether it bumped. Does nothing with
+    /// [`RefreshPolicy::Snapshot`]. Call it once per tick, before cooking.
+    pub fn refresh(&self) -> bool {
+        let RefreshPolicy::Watch { min_interval } = self.policy else {
+            return false;
+        };
+        let now = (self.clock)();
+        let mut watched = self.watched.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(last) = watched.last_check {
+            if now.saturating_sub(last) < min_interval {
+                return false;
+            }
+        }
+        watched.last_check = Some(now);
+        let changed = watched
+            .dirs
+            .iter()
+            .any(|(path, stamp)| (self.stat)(path) != *stamp);
+        if changed {
+            // The next listings record new stamps.
+            watched.dirs.clear();
+            self.bump();
+        }
+        changed
+    }
+
+    /// Remember the stamp of a folder about to be listed (when watching).
+    fn watch(&self, real: PathBuf) {
+        if self.policy == RefreshPolicy::Snapshot {
+            return;
+        }
+        let stamp = (self.stat)(&real);
+        self.watched
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .dirs
+            .insert(real, stamp);
     }
 
     /// The canonical root directory.
@@ -165,12 +329,20 @@ impl StdFs {
     }
 
     fn read(&self, dir: &FsPath) -> Listing {
-        let mut real = self.root.clone();
-        real.extend(dir.components());
-        let real = fs::canonicalize(&real).map_err(|e| io_error(dir, &e))?;
+        let mut joined = self.root.clone();
+        joined.extend(dir.components());
+        let real = match fs::canonicalize(&joined) {
+            Ok(real) => real,
+            Err(e) => {
+                // Watch for a missing folder to appear.
+                self.watch(joined);
+                return Err(io_error(dir, &e));
+            }
+        };
         if !self.inside(&real) {
             return Err(FsError::OutsideRoot(dir.to_string()));
         }
+        self.watch(real.clone());
         let meta = fs::metadata(&real).map_err(|e| io_error(dir, &e))?;
         if !meta.is_dir() {
             return Err(FsError::NotADirectory(dir.to_string()));
@@ -722,6 +894,112 @@ mod tests {
             assert_eq!(names, ["a.pdf", "alias.pdf", "b.pdf", "sub"]);
         }
         assert!(StdFs::new(root.join("books/a.pdf")).is_err());
+        fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn snapshot_policy_never_refreshes() {
+        let base = temp_dir("snapshot");
+        let provider = StdFs::new(&base).unwrap();
+        assert_eq!(provider.refresh_policy(), RefreshPolicy::Snapshot);
+        assert!(provider.list_dir(&FsPath::root()).unwrap().is_empty());
+        fs::write(base.join("new.txt"), b"").unwrap();
+        assert!(!provider.refresh());
+        assert!(provider.list_dir(&FsPath::root()).unwrap().is_empty());
+        fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn watch_bumps_when_listed_folders_change() {
+        let base = temp_dir("watch");
+        fs::create_dir_all(base.join("books")).unwrap();
+        fs::create_dir_all(base.join("other")).unwrap();
+        let provider = StdFs::new(&base)
+            .unwrap()
+            .with_refresh(RefreshPolicy::Watch {
+                min_interval: Duration::ZERO,
+            });
+        let books = FsPath::parse("books").unwrap();
+        let names = |p: &StdFs| -> Vec<String> {
+            let mut names: Vec<String> = p
+                .list_dir(&books)
+                .unwrap()
+                .into_iter()
+                .map(|e| e.name)
+                .collect();
+            names.sort();
+            names
+        };
+        // Nothing listed yet: nothing to watch.
+        assert!(!provider.refresh());
+        assert!(names(&provider).is_empty());
+        let revision = provider.revision();
+        assert!(!provider.refresh());
+        // A folder that was not listed does not count.
+        fs::write(base.join("other/x.txt"), b"").unwrap();
+        assert!(!provider.refresh());
+        assert_eq!(provider.revision(), revision);
+        // Created and deleted files are noticed (the entry count changes).
+        fs::write(base.join("books/a.pdf"), b"a").unwrap();
+        assert!(provider.refresh());
+        assert_eq!(provider.revision(), revision + 1);
+        assert_eq!(names(&provider), ["a.pdf"]);
+        assert!(!provider.refresh());
+        fs::remove_file(base.join("books/a.pdf")).unwrap();
+        assert!(provider.refresh());
+        assert!(names(&provider).is_empty());
+        // A missing folder is watched until it appears.
+        let later = FsPath::parse("later").unwrap();
+        assert!(matches!(
+            provider.list_dir(&later),
+            Err(FsError::NotFound(_))
+        ));
+        assert!(!provider.refresh());
+        fs::create_dir_all(base.join("later")).unwrap();
+        assert!(provider.refresh());
+        assert_eq!(provider.list_dir(&later).unwrap().len(), 0);
+        fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn watch_is_rate_limited_and_deterministic_with_injected_clock_and_stat() {
+        let base = temp_dir("inject");
+        let millis = Arc::new(AtomicU64::new(0));
+        let stamp = Arc::new(AtomicU64::new(0));
+        let (m, st) = (Arc::clone(&millis), Arc::clone(&stamp));
+        let stats = Arc::new(AtomicU64::new(0));
+        let calls = Arc::clone(&stats);
+        let provider = StdFs::new(&base)
+            .unwrap()
+            .with_refresh(RefreshPolicy::Watch {
+                min_interval: Duration::from_millis(100),
+            })
+            .with_clock(move || Duration::from_millis(m.load(Ordering::Relaxed)))
+            .with_stat(move |_| {
+                calls.fetch_add(1, Ordering::Relaxed);
+                Some(DirStamp {
+                    modified: None,
+                    entries: st.load(Ordering::Relaxed),
+                })
+            });
+        provider.list_dir(&FsPath::root()).unwrap();
+        let listed = stats.load(Ordering::Relaxed);
+        assert_eq!(listed, 1, "one stamp when listed");
+        // First check at t=0: unchanged.
+        assert!(!provider.refresh());
+        stamp.store(1, Ordering::Relaxed);
+        // t=50 ms: too soon, the folder is not even looked at.
+        millis.store(50, Ordering::Relaxed);
+        let before = stats.load(Ordering::Relaxed);
+        assert!(!provider.refresh());
+        assert_eq!(stats.load(Ordering::Relaxed), before);
+        // t=100 ms: checked, changed.
+        millis.store(100, Ordering::Relaxed);
+        assert!(provider.refresh());
+        // Nothing is watched until the next listing.
+        millis.store(300, Ordering::Relaxed);
+        stamp.store(2, Ordering::Relaxed);
+        assert!(!provider.refresh());
         fs::remove_dir_all(&base).ok();
     }
 }

@@ -83,6 +83,9 @@ COOK OPTIONS:
     --fs-root DIR           File root of file-system nodes such as
                             core.fs.list_dir (default: the room package
                             directory); paths outside it are refused
+    --watch-fs              Re-list folders whose files were created,
+                            deleted or renamed during the run (checked
+                            every frame); default: one snapshot per run
 
     Floats are printed with 6 decimals unless --precision. Example:
         livspeil cook examples/sun-and-lamp.room --frames 600 --every 50

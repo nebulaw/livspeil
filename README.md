@@ -53,6 +53,12 @@ subnets and Charms (M0.7): a "Daylight" Charm (hour in, lamp color and
 intensity out, two promoted parameters) instantiated twice with different
 parameters, printed through four `core.output` nodes.
 
+File-system nodes (`core.fs.list_dir`) see the room package (or
+`--fs-root DIR`) and nothing outside it. A run lists each folder once (a
+snapshot); with `--watch-fs` the listed folders are checked every frame and
+re-listed when files were created, deleted or renamed, re-cooking only what
+reads them.
+
 Floats are printed with six decimals so the output (and its golden files in
 `crates/livspeil-cli/tests/golden/`) is identical on macOS and Linux;
 `--precision N` picks another number of decimals and `--precision full`

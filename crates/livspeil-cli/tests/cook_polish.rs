@@ -312,3 +312,34 @@ fn skipped_frames_report_overflows() {
         )
     );
 }
+
+/// With an unchanging folder, `--watch-fs` prints what the snapshot does
+/// and re-cooks nothing after the first frame.
+#[test]
+fn watch_fs_on_a_static_folder() {
+    const SHELF: &str = r#"room "shelf" format=1 {
+  network "/" {
+    node "list" type="core.fs.list_dir@1" id="01920000-0000-7000-8000-000000000001" {
+      input "path" "books"
+    }
+    node "count" type="core.table.count@1" id="01920000-0000-7000-8000-000000000002"
+    link from="list.entries" to="count.table"
+  }
+}
+"#;
+    let room = TempRoom::new("watch", SHELF);
+    let path = room.path();
+    fs::create_dir_all(PathBuf::from(&path).join("books")).unwrap();
+    fs::write(PathBuf::from(&path).join("books/a.pdf"), b"a").unwrap();
+    let args = ["cook", path.as_str(), "--frames", "3", "--stats"];
+    let snapshot = ok(&args);
+    let mut watch_args = args.to_vec();
+    watch_args.push("--watch-fs");
+    let watched = ok(&watch_args);
+    assert_eq!(watched, snapshot);
+    assert!(
+        watched.contains("frame=2 time=0.033333 stats cooked=0 reused=2"),
+        "{watched}"
+    );
+    assert!(watched.contains("count.count=1"), "{watched}");
+}

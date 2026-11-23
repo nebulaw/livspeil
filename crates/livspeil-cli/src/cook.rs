@@ -96,9 +96,15 @@
 //! Nodes that read files (`core.fs.list_dir`) see the room package
 //! directory (the folder holding `room.kdl`) as their file root, or the
 //! directory given with `--fs-root DIR`. They cannot reach outside it
-//! (see `livspeil_nodes_core::StdFs`). The listing is a snapshot taken
-//! when first needed; it is not refreshed during a run, so every frame
-//! sees the same files.
+//! (see `livspeil_nodes_core::StdFs`). By default the listing is a
+//! snapshot taken when first needed; it is not refreshed during a run, so
+//! every frame sees the same files. With `--watch-fs`, at the start of
+//! every frame the folders listed so far are checked (modification time
+//! and number of entries; `RefreshPolicy::Watch`), and when one changed,
+//! the file-system nodes list again in that frame: created, deleted and
+//! renamed files show up, other nodes are not re-cooked (unless the
+//! listing they read changed). A file changed in place without changing
+//! its folder is not noticed.
 //!
 //! # JSONL format
 //!
@@ -135,11 +141,12 @@ use std::io::{self, BufWriter, Write};
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use livspeil_doc::parse;
 use livspeil_graph::{CookError, Cooker, ExternalEvent, Graph, NodeId, OUTPUT_TYPE, TickReport};
-use livspeil_node_api::{CookContext, Event, PortType, Value};
-use livspeil_nodes_core::{StdFs, core_registry};
+use livspeil_node_api::{CookContext, Event, PortType, SystemHost, Value};
+use livspeil_nodes_core::{RefreshPolicy, StdFs, core_registry};
 
 use crate::{read, report, usage};
 
@@ -192,6 +199,8 @@ struct Options {
     events: Vec<EventArg>,
     /// `--precision N|full` (default 6 decimals).
     precision: Precision,
+    /// `--watch-fs`: re-list folders that changed on disk.
+    watch_fs: bool,
 }
 
 /// One `--event NODE.PORT@FRAME[=VALUE]`.
@@ -265,6 +274,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
         fs_root: None,
         events: Vec::new(),
         precision: Precision::Decimals(6),
+        watch_fs: false,
     };
     let mut args = args.peekable();
     while let Some(arg) = args.next() {
@@ -280,11 +290,15 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
         };
         match flag.as_str() {
             "-h" | "--help" => return Ok(Parsed::Help),
-            "--stats" => {
+            "--stats" | "--watch-fs" => {
                 if inline.is_some() {
-                    return Err("--stats takes no value".to_owned());
+                    return Err(format!("{flag} takes no value"));
                 }
-                options.stats = true;
+                if flag == "--stats" {
+                    options.stats = true;
+                } else {
+                    options.watch_fs = true;
+                }
                 continue;
             }
             "--frames" | "--fps" | "--start" | "--every" | "--node" | "--format" | "--fs-root"
@@ -406,13 +420,21 @@ fn cook(options: &Options) -> ExitCode {
     } else {
         root
     };
-    match StdFs::new(&root) {
-        Ok(fs) => cooker.set_system(Some(Arc::new(fs))),
+    let policy = if options.watch_fs {
+        RefreshPolicy::Watch {
+            min_interval: Duration::ZERO,
+        }
+    } else {
+        RefreshPolicy::Snapshot
+    };
+    let fs = match StdFs::new(&root) {
+        Ok(fs) => Arc::new(fs.with_refresh(policy)),
         Err(err) => {
             eprintln!("livspeil cook: file root {}: {err}", root.display());
             return ExitCode::FAILURE;
         }
-    }
+    };
+    cooker.set_system(Some(Arc::clone(&fs) as Arc<dyn SystemHost>));
     let dt = 1.0 / options.fps;
     let mut node_error = false;
     let mut skipped = Skipped::default();
@@ -421,6 +443,9 @@ fn cook(options: &Options) -> ExitCode {
         #[allow(clippy::cast_precision_loss)]
         let time = options.start + frame as f64 / options.fps;
         cooker.reset_stats();
+        // Input phase: with --watch-fs, look for changed folders once per
+        // frame (a no-op for the default snapshot).
+        fs.refresh();
         let injected: Vec<ExternalEvent> = events
             .iter()
             .filter(|(f, _)| *f == frame)
@@ -1343,6 +1368,92 @@ mod tests {
             "curve(0.000000:0.000000 1.000000:1.000000)"
         );
         assert_eq!(json_value(&curve, P6), "{\"curve\":[[0.0,0.0],[1.0,1.0]]}");
+    }
+
+    /// `--watch-fs` (the refresh in the frame loop): files created and
+    /// deleted between frames show up in the next frame; frames without a
+    /// change re-cook nothing, and the unrelated node never re-cooks.
+    #[test]
+    fn watch_fs_relists_changed_folders_only() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        let dir =
+            std::env::temp_dir().join(format!("livspeil-cli-watch-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(dir.join("books")).unwrap();
+        std::fs::write(dir.join("books/a.pdf"), b"a").unwrap();
+        const ROOM: &str = r#"room "watch" format=1 {
+  network "/" {
+    node "list" type="core.fs.list_dir@1" id="01920000-0000-7000-8000-000000000001" {
+      input "path" "books"
+    }
+    node "count" type="core.table.count@1" id="01920000-0000-7000-8000-000000000002"
+    node "other" type="core.math.add@1" id="01920000-0000-7000-8000-000000000003" {
+      input "a" 1.0
+    }
+    link from="list.entries" to="count.table"
+  }
+}
+"#;
+        let graph = parse(ROOM)
+            .unwrap()
+            .to_graph(Arc::new(core_registry()))
+            .unwrap();
+        let targets = targets(&graph, &[]).unwrap();
+        assert_eq!(targets.len(), 2);
+        let fs = Arc::new(
+            StdFs::new(&dir)
+                .unwrap()
+                .with_refresh(RefreshPolicy::Watch {
+                    min_interval: Duration::ZERO,
+                }),
+        );
+        let mut cooker = Cooker::new();
+        cooker.set_system(Some(Arc::clone(&fs) as Arc<dyn SystemHost>));
+        // Per frame: (count, nodes cooked).
+        let mut frame = |n: u64| {
+            cooker.reset_stats();
+            fs.refresh();
+            cooker.tick(
+                &graph,
+                CookContext {
+                    frame: n,
+                    time: 0.0,
+                    dt: 0.0,
+                },
+                &[],
+            );
+            let outcomes: Vec<Outcome> = targets
+                .iter()
+                .map(|t| cook_target(&mut cooker, &graph, t))
+                .collect();
+            let count = match &outcomes[0] {
+                Ok(values) => values[0].clone(),
+                Err(e) => panic!("{e}"),
+            };
+            assert_eq!(outcomes[1], Ok(vec![Value::Float(1.0)]));
+            (count, cooker.stats().cooked)
+        };
+        assert_eq!(frame(0), (Value::Int(1), 3));
+        assert_eq!(frame(1), (Value::Int(1), 0));
+        std::fs::write(dir.join("books/b.pdf"), b"b").unwrap();
+        assert_eq!(frame(2), (Value::Int(2), 2), "list and count only");
+        assert_eq!(frame(3), (Value::Int(2), 0));
+        std::fs::remove_file(dir.join("books/a.pdf")).unwrap();
+        std::fs::remove_file(dir.join("books/b.pdf")).unwrap();
+        assert_eq!(frame(4), (Value::Int(0), 2));
+        // A change elsewhere is not looked at.
+        std::fs::write(dir.join("elsewhere.txt"), b"").unwrap();
+        assert_eq!(frame(5), (Value::Int(0), 0));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn watch_fs_option() {
+        assert!(!opts(&["r"]).unwrap().watch_fs);
+        assert!(opts(&["r", "--watch-fs"]).unwrap().watch_fs);
+        assert!(opts(&["r", "--watch-fs=1"]).is_err());
     }
 
     #[test]
