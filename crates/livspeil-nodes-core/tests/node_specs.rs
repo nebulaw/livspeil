@@ -794,10 +794,10 @@ fn check_header(node: &dyn NodeImpl, file: &toml::Table, problems: &mut Vec<Stri
             got => problem(format!("{key} is {got:?}, the Rust spec says {want}")),
         }
     }
-    if let Some(d) = file.get("description") {
-        if !d.is_str() {
-            problem("description must be a string".to_owned());
-        }
+    if let Some(d) = file.get("description")
+        && !d.is_str()
+    {
+        problem("description must be a string".to_owned());
     }
     check_type_vars(node, file, &mut problem);
     for (key, ports, is_input) in [
@@ -1626,10 +1626,10 @@ fn node_specs_match_the_registry_and_their_tests_pass() {
         let mut file_problems = Vec::new();
         check_header(node.as_ref(), &table, &mut file_problems);
         if file_problems.is_empty() {
-            if let Ok(hand) = hand_written(&text) {
-                if render(node.as_ref(), &hand) != text {
-                    file_problems.push(format!("not in canonical form; {HOW_TO_UPDATE}"));
-                }
+            if let Ok(hand) = hand_written(&text)
+                && render(node.as_ref(), &hand) != text
+            {
+                file_problems.push(format!("not in canonical form; {HOW_TO_UPDATE}"));
             }
         } else {
             file_problems.push(format!(

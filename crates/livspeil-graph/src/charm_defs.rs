@@ -951,12 +951,13 @@ impl Graph {
         let mut links = Vec::new();
         for l in self.links() {
             let touches = members.contains(&l.from.node) || members.contains(&l.to.node);
-            if touches && !self.internal_link(subnet, &members, l.from.node, l.to.node) {
-                if let Some(mut named) = self.named(l) {
-                    named.from = map(named.from);
-                    named.to = map(named.to);
-                    links.push(named);
-                }
+            if touches
+                && !self.internal_link(subnet, &members, l.from.node, l.to.node)
+                && let Some(mut named) = self.named(l)
+            {
+                named.from = map(named.from);
+                named.to = map(named.to);
+                links.push(named);
             }
         }
         let mut readers = Vec::new();
@@ -1104,14 +1105,15 @@ impl Graph {
         }
         for r in &readers {
             for (_, target) in &r.reads {
-                if let Some(t) = target {
-                    if members.contains(t) && gone(self, *t) {
-                        return Err(GraphError::Referenced {
-                            node: *t,
-                            by: r.node,
-                            port: r.port.clone(),
-                        });
-                    }
+                if let Some(t) = target
+                    && members.contains(t)
+                    && gone(self, *t)
+                {
+                    return Err(GraphError::Referenced {
+                        node: *t,
+                        by: r.node,
+                        port: r.port.clone(),
+                    });
                 }
             }
         }
@@ -1193,10 +1195,11 @@ impl Graph {
                 let parent = t.parent.map_or(root, map);
                 self.insert_node(Some(parent), id, &t.type_id, &t.name, t.port_type)?;
             }
-            if t.type_id == SUBNET_TYPE && self.charm(id) != t.charm.as_ref() {
-                if let Some(slot) = self.charm_slot(id) {
-                    slot.clone_from(&t.charm);
-                }
+            if t.type_id == SUBNET_TYPE
+                && self.charm(id) != t.charm.as_ref()
+                && let Some(slot) = self.charm_slot(id)
+            {
+                slot.clone_from(&t.charm);
             }
         }
         // 6. Static values and animation channels.

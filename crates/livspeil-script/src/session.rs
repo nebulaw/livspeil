@@ -621,15 +621,14 @@ impl ScriptSession {
                 Incoming::Closed => return self.on_closed(wait),
                 Incoming::Message(json) => {
                     if let Some(got) = self.on_message(scene, wait, json)? {
-                        if cancelled {
-                            if let Got::Response(_) = got {
-                                if let Wait::Response { method, .. } = wait {
-                                    return Err(ScriptError::Timeout {
-                                        method: method.to_owned(),
-                                        after: limits.request_timeout,
-                                    });
-                                }
-                            }
+                        if cancelled
+                            && let Got::Response(_) = got
+                            && let Wait::Response { method, .. } = wait
+                        {
+                            return Err(ScriptError::Timeout {
+                                method: method.to_owned(),
+                                after: limits.request_timeout,
+                            });
                         }
                         return Ok(got);
                     }

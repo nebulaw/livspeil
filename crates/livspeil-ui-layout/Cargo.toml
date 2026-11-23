@@ -13,7 +13,7 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
-taffy = { version = "0.15.1", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "block_layout"] }
+taffy = { version = "0.16.0", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "block_layout"] }
 
 [dev-dependencies]
 livspeil-testkit = { path = "../livspeil-testkit" }

@@ -291,10 +291,10 @@ fn build_network(
             continue; // A snapshot only links existing nodes.
         };
         let mut from_forms = vec![(from.parent, from.name.clone(), link.from_port.clone())];
-        if from.type_id == OUTPUT_TYPE {
-            if let Some(s) = from.parent.and_then(|s| by_id.get(&s)) {
-                from_forms.push((s.parent, s.name.clone(), from.name.clone()));
-            }
+        if from.type_id == OUTPUT_TYPE
+            && let Some(s) = from.parent.and_then(|s| by_id.get(&s))
+        {
+            from_forms.push((s.parent, s.name.clone(), from.name.clone()));
         }
         let to_form = if to.type_id == INPUT_TYPE {
             let s = to.parent.and_then(|s| by_id.get(&s));
@@ -399,16 +399,16 @@ fn instance_node(graph: &Graph, node: &NodeSnapshot, def_id: &str) -> Result<Doc
         let port = INTERFACE_PORT;
         let value = graph.input_value(id, port).ok().flatten();
         let default = find_value(&t.inputs, port);
-        if value != default {
-            if let Some(value) = value {
-                if !is_finite(value) {
-                    return Err(DocError::NonFinite {
-                        node: node.name.clone(),
-                        port: t.name.clone(),
-                    });
-                }
-                doc_node.inputs.insert(t.name.clone(), value.clone());
+        if value != default
+            && let Some(value) = value
+        {
+            if !is_finite(value) {
+                return Err(DocError::NonFinite {
+                    node: node.name.clone(),
+                    port: t.name.clone(),
+                });
             }
+            doc_node.inputs.insert(t.name.clone(), value.clone());
         }
         let expr = graph.expression(id, port).ok().flatten();
         let default = t

@@ -157,17 +157,17 @@ pub(crate) fn resolve_path(graph: &Graph, network: Option<NodeId>, path: &str) -
         return None;
     }
     let absolute = node_part.starts_with('/');
-    if network.is_none() && !absolute {
-        if let Some((name, port)) = split_path(path) {
-            if let Some(node) = graph.find_in(None, name) {
-                return Some(Resolved {
-                    node,
-                    port: port.to_owned(),
-                    segments: Vec::new(),
-                    legacy: true,
-                });
-            }
-        }
+    if network.is_none()
+        && !absolute
+        && let Some((name, port)) = split_path(path)
+        && let Some(node) = graph.find_in(None, name)
+    {
+        return Some(Resolved {
+            node,
+            port: port.to_owned(),
+            segments: Vec::new(),
+            legacy: true,
+        });
     }
     let (mut current, body, mut offset) = match node_part.strip_prefix('/') {
         Some(rest) => (None, rest, 1),
@@ -429,10 +429,10 @@ impl Graph {
         self.unindex_expression(node, index);
         let reader = self.slot_of(node);
         for t in &compiled.targets {
-            if self.ch_edges.insert((t.node, node, index)) {
-                if let Some(reader) = reader {
-                    self.add_dependent(t.slot, reader);
-                }
+            if self.ch_edges.insert((t.node, node, index))
+                && let Some(reader) = reader
+            {
+                self.add_dependent(t.slot, reader);
             }
         }
         if let Some(n) = self.node_mut(node) {
@@ -672,10 +672,10 @@ impl Graph {
         let targets: Vec<(NodeId, usize)> = e.targets.iter().map(|t| (t.node, t.slot)).collect();
         let reader = self.slot_of(node);
         for (t, slot) in targets {
-            if self.ch_edges.remove(&(t, node, index)) {
-                if let Some(reader) = reader {
-                    self.remove_dependent(slot, reader);
-                }
+            if self.ch_edges.remove(&(t, node, index))
+                && let Some(reader) = reader
+            {
+                self.remove_dependent(slot, reader);
             }
         }
     }

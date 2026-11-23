@@ -282,10 +282,10 @@ impl StdFs {
         };
         let now = (self.clock)();
         let mut watched = self.watched.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(last) = watched.last_check {
-            if now.saturating_sub(last) < min_interval {
-                return false;
-            }
+        if let Some(last) = watched.last_check
+            && now.saturating_sub(last) < min_interval
+        {
+            return false;
         }
         watched.last_check = Some(now);
         let changed = watched
