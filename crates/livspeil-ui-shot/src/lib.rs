@@ -289,9 +289,11 @@ pub fn compare(actual: &RgbaImage, expected: &RgbaImage, tol: Tolerance) -> Comp
     let mut differing = 0;
     for ((a, e), d) in actual
         .data
-        .chunks_exact(4)
-        .zip(expected.data.chunks_exact(4))
-        .zip(diff.data.chunks_exact_mut(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(expected.data.as_chunks::<4>().0)
+        .zip(diff.data.as_chunks_mut::<4>().0)
     {
         let delta = a
             .iter()

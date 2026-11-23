@@ -63,8 +63,8 @@ pub fn render_cpu(frame: &Frame) -> RgbaImage {
     let (w, h) = (frame.options.width, frame.options.height);
     let clear = frame.clear.map(quantize);
     let mut img = RgbaImage::new(w, h);
-    for px in img.data.chunks_exact_mut(4) {
-        px.copy_from_slice(&clear);
+    for px in img.data.as_chunks_mut::<4>().0 {
+        *px = clear;
     }
     let scale = frame.options.scale;
     for op in &frame.ops {
@@ -195,7 +195,7 @@ fn blur_levels(img: &RgbaImage, plan: BlurPlan) -> Level {
     let (w, h) = (img.width, img.height);
     let mut levels: Vec<Level> = Vec::with_capacity(plan.levels as usize + 1);
     let mut l0 = Level::new(w, h);
-    for (dst, src) in l0.px.iter_mut().zip(img.data.chunks_exact(4)) {
+    for (dst, src) in l0.px.iter_mut().zip(img.data.as_chunks::<4>().0) {
         *dst = [0, 1, 2, 3].map(|k| f32::from(src[k]) / 255.0);
     }
     levels.push(l0);

@@ -29,7 +29,13 @@ fn diff(a: &RgbaImage, b: &RgbaImage) -> (u8, usize) {
     assert_eq!((a.width, a.height), (b.width, b.height));
     let mut max = 0;
     let mut over = 0;
-    for (p, q) in a.data.chunks_exact(4).zip(b.data.chunks_exact(4)) {
+    for (p, q) in a
+        .data
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(b.data.as_chunks::<4>().0)
+    {
         let d = p
             .iter()
             .zip(q)
