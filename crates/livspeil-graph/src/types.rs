@@ -170,9 +170,7 @@ enum Conflict {
 
 /// `Int` and `Float` join to `Float`; other different types do not join.
 fn join(a: PortType, b: PortType) -> Option<PortType> {
-    if a == b {
-        Some(a)
-    } else if a.accepts(b) {
+    if a.accepts(b) {
         Some(a)
     } else if b.accepts(a) {
         Some(b)

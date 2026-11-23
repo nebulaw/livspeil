@@ -113,7 +113,12 @@ fn polymorphic_nodes() {
     );
 
     let lerp = "core.math.lerp@2";
-    case(&mut out, lerp, PortType::Float, &[("t", Value::Float(0.25))]);
+    case(
+        &mut out,
+        lerp,
+        PortType::Float,
+        &[("t", Value::Float(0.25))],
+    );
     case(&mut out, lerp, PortType::Vec2, &[("t", Value::Float(-1.0))]);
     case(
         &mut out,
