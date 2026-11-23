@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as Process;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use livspeil_cmd::{EntryKind, Origin};
@@ -53,8 +54,12 @@ impl TempScript {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or_default();
+        // Tests run in parallel and macOS clocks can return the same
+        // nanosecond value twice, so add a per-process counter.
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!(
-            "livspeil-script-test-{}-{nanos}",
+            "livspeil-script-test-{}-{nanos}-{n}",
             std::process::id()
         ));
         fs::create_dir_all(&dir).unwrap();

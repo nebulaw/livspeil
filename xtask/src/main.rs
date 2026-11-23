@@ -24,6 +24,12 @@ TASKS:
              Assemble examples/wasm/hello-node/hello-node.wat into the
              committed hello-node.wasm fixture (the Rust wasm targets are
              not needed), then run the wasm host tests
+    shot     Render the Livspeil UI screenshot scenes to target/shots/*.png
+             with the CPU reference rasterizer; arguments go to
+             livspeil-ui-shot, e.g. `cargo xtask shot frost-panel --gpu`
+             (--gpu also renders on the GPU and compares, --list, --out DIR).
+             Refresh goldens with
+             `UPDATE_GOLDEN=1 cargo test -p livspeil-ui-shot`
     deny     Run cargo-deny (license and advisory checks)
     reuse    Run reuse lint (SPDX compliance)
 ";
@@ -54,6 +60,7 @@ fn main() -> ExitCode {
                 ("UPDATE_GOLDEN", "1"),
             ) && run("cargo", &["test", "-p", "livspeil-wasm-host"])
         }
+        Some("shot") => shot(),
         Some("deny") => run_required("cargo", &["deny", "check"], "cargo-deny"),
         Some("reuse") => run_required("reuse", &["lint"], "reuse"),
         None | Some("help" | "-h" | "--help") => {
@@ -103,6 +110,14 @@ fn bench() -> bool {
         args.push("--");
         args.extend(extra.iter().map(String::as_str));
     }
+    run("cargo", &args)
+}
+
+/// Render UI screenshots. Arguments after `cargo xtask shot` are passed on.
+fn shot() -> bool {
+    let extra: Vec<String> = std::env::args().skip(2).collect();
+    let mut args = vec!["run", "--quiet", "-p", "livspeil-ui-shot", "--"];
+    args.extend(extra.iter().map(String::as_str));
     run("cargo", &args)
 }
 
