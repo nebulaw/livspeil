@@ -316,3 +316,23 @@ fn visual_moves_follow_bidi() {
     assert_eq!(end.index, text.len());
     let _ = Affinity::Upstream;
 }
+
+#[test]
+fn bundled_fallbacks_win_in_system_mode() {
+    // Raw Parley with system fonts picks whatever fontconfig suggests for
+    // Georgian (e.g. DejaVu Sans); FontSystem puts the bundled face first.
+    let mut fs = FontSystem::new();
+    assert!(fs.has_system_fonts());
+    let l = TextLayout::new(
+        &mut fs,
+        "თბილისი Inter",
+        &TextStyle::sized(13.0),
+        LayoutOptions::default(),
+    );
+    let fonts: Vec<String> = l.glyph_runs().iter().map(|r| r.font_family()).collect();
+    assert_eq!(
+        fonts.first().map(String::as_str),
+        Some("Noto Sans Georgian")
+    );
+    assert!(fonts.iter().any(|f| f == "Inter Variable"), "{fonts:?}");
+}

@@ -30,10 +30,11 @@ pub enum FamilySpec {
 impl FamilySpec {
     fn to_parley(&self) -> FontFamily<'static> {
         let names: Vec<FontFamilyName<'static>> = match self {
-            FamilySpec::Ui => vec![
-                FontFamilyName::Named(Cow::Borrowed(UI_FAMILY)),
-                FontFamilyName::Generic(GenericFamily::SansSerif),
-            ],
+            // No generic sans-serif after Inter: a system sans that covers
+            // more scripts (e.g. DejaVu Sans) would then win over the
+            // bundled script fallbacks. Uncovered characters go through
+            // script fallback instead.
+            FamilySpec::Ui => vec![FontFamilyName::Named(Cow::Borrowed(UI_FAMILY))],
             FamilySpec::Named(name) => vec![
                 FontFamilyName::Named(Cow::Owned(name.clone())),
                 FontFamilyName::Named(Cow::Borrowed(UI_FAMILY)),
