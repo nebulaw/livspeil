@@ -17,7 +17,7 @@ use crate::RenderError;
 use crate::color::Color;
 use crate::geom::{Affine, Rect};
 use crate::list::{
-    Backdrop, BorderWidth, CornerStyle, DisplayList, Fill, GradientStop, HighlightKind,
+    Backdrop, BorderWidth, CornerStyle, DisplayList, Fill, Glyphs, GradientStop, HighlightKind,
     MAX_GRADIENT_STOPS, Primitive, Quad, Radii, Shadow,
 };
 
@@ -32,6 +32,7 @@ pub(crate) mod kind {
     pub const QUAD: f32 = 0.0;
     pub const SHADOW: f32 = 1.0;
     pub const BACKDROP: f32 = 2.0;
+    pub const GLYPH: f32 = 3.0;
 }
 
 /// Field offsets (in floats) inside an [`Instance`]. Must match `quad.wgsl`.
@@ -54,7 +55,8 @@ pub(crate) mod field {
     pub const CLIP: usize = 28;
     /// Draw bounds `(x0, y0, x1, y1)`, local units.
     pub const BOUNDS: usize = 32;
-    /// Gradient geometry; for backdrops `(uv_scale_x, uv_scale_y, has_blur, 0)`.
+    /// Gradient geometry; for backdrops `(uv_scale_x, uv_scale_y, has_blur, 0)`;
+    /// for glyphs the atlas texel rect `(x, y, w, h)`.
     pub const GRAD: usize = 36;
     /// `(fill_kind, n_stops, 0, 0)`; fill kind 0 none, 1 solid, 2 linear, 3 radial.
     pub const FILL: usize = 40;
@@ -66,7 +68,8 @@ pub(crate) mod field {
     /// Border (or backdrop highlight) color, premultiplied sRGB.
     pub const BORDER_COLOR: usize = 64;
     /// `(border_width, 0, 0, 0)`; backdrop:
-    /// `(highlight_width, highlight_kind, saturation, grain)`.
+    /// `(highlight_width, highlight_kind, saturation, grain)`; glyphs:
+    /// `(text lightness, 1 / TEXT_GAMMA, 0, 0)`.
     pub const BORDER: usize = 68;
     /// Shadow `(dx, dy, spread, sigma)`.
     pub const SHADOW: usize = 72;
@@ -81,6 +84,9 @@ pub(crate) mod fill_kind {
     pub const LINEAR: f32 = 2.0;
     pub const RADIAL: f32 = 3.0;
 }
+
+/// Exponent of the glyph coverage remapping (see the crate docs, "Text").
+pub const TEXT_GAMMA: f32 = 1.8;
 
 /// Frame size and settings.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -123,6 +129,10 @@ pub enum Op {
         start: u32,
         /// One past the last instance.
         end: u32,
+        /// The coverage atlas glyph instances in the range sample (`None`
+        /// when the range has no glyphs). A different atlas starts a new
+        /// draw.
+        atlas: Option<u32>,
     },
     /// Blur the target under a backdrop (if `blur` is set), then composite
     /// instance `instance` with the backdrop pipeline.
@@ -264,6 +274,7 @@ struct Encoder {
     instances: Vec<Instance>,
     ops: Vec<Op>,
     pending_start: u32,
+    pending_atlas: Option<u32>,
     viewport: Rect,
 }
 
@@ -282,14 +293,16 @@ pub fn encode(list: &DisplayList, options: FrameOptions) -> Result<Frame, Render
         instances: Vec::with_capacity(list.items.len() * 2),
         ops: Vec::new(),
         pending_start: 0,
+        pending_atlas: None,
         viewport: Rect::new(0.0, 0.0, options.width as f32, options.height as f32),
     };
     for index in order {
         match &list.items[index].primitive {
             Primitive::Quad(q) => enc.quad(index, q)?,
             Primitive::Backdrop(b) => enc.backdrop(index, b)?,
-            // Typed hooks for M1.2+: text and images draw nothing yet.
-            Primitive::Glyphs(_) | Primitive::Image(_) => {}
+            Primitive::Glyphs(g) => enc.glyphs(index, g)?,
+            // Typed hook: images draw nothing yet.
+            Primitive::Image(_) => {}
         }
     }
     enc.flush();
@@ -316,9 +329,69 @@ impl Encoder {
             self.ops.push(Op::Draw {
                 start: self.pending_start,
                 end,
+                atlas: self.pending_atlas,
             });
         }
         self.pending_start = end;
+        self.pending_atlas = None;
+    }
+
+    fn glyphs(&mut self, index: usize, g: &Glyphs) -> Result<(), RenderError> {
+        if g.glyphs.is_empty() || g.color.alpha <= 0.0 {
+            return Ok(());
+        }
+        if !g.color.to_array().iter().all(|v| v.is_finite()) {
+            return Err(invalid(index, "glyph color is not finite"));
+        }
+        let color = g.color.to_srgb_premul();
+        let lightness = g.color.l.clamp(0.0, 1.0);
+        // Texels map 1:1 to pixels only without rotation or scale; then the
+        // instance covers exactly its rect. Otherwise grow it by a pixel so
+        // the bilinear edge is drawn.
+        let [a, b, c, d, _, _] = g.transform.m;
+        let exact = a == 1.0 && b == 0.0 && c == 0.0 && d == 1.0;
+        for sprite in &g.glyphs {
+            let Some((mut inst, ppu)) = self.base(
+                index,
+                sprite.rect,
+                g.transform,
+                g.clip,
+                g.opacity,
+                kind::GLYPH,
+            )?
+            else {
+                return Ok(());
+            };
+            let [tx, ty, tw, th] = sprite.texels;
+            if tw == 0 || th == 0 || sprite.rect.w <= 0.0 || sprite.rect.h <= 0.0 {
+                continue;
+            }
+            put(
+                &mut inst,
+                field::GRAD,
+                [tx as f32, ty as f32, tw as f32, th as f32],
+            );
+            put(&mut inst, field::STOPS, color);
+            put(
+                &mut inst,
+                field::BORDER,
+                [lightness, 1.0 / TEXT_GAMMA, 0.0, 0.0],
+            );
+            let local = if exact {
+                sprite.rect
+            } else {
+                sprite.rect.inflate(1.0 / ppu)
+            };
+            if !self.bounds(&mut inst, local, g.transform) {
+                continue;
+            }
+            if self.pending_atlas.is_some_and(|p| p != g.atlas) {
+                self.flush();
+            }
+            self.pending_atlas = Some(g.atlas);
+            self.instances.push(inst);
+        }
+        Ok(())
     }
 
     /// Common setup: transform, clip, opacity. `None` when the instance is
@@ -679,7 +752,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(frame.ops.len(), 2);
-        assert_eq!(frame.ops[0], Op::Draw { start: 0, end: 3 });
+        assert_eq!(
+            frame.ops[0],
+            Op::Draw {
+                start: 0,
+                end: 3,
+                atlas: None
+            }
+        );
         assert!(matches!(
             frame.ops[1],
             Op::Backdrop {
