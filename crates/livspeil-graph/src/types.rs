@@ -365,10 +365,11 @@ impl Graph {
                 .collect();
             if !outputs.is_empty() {
                 let mut targets = self.link_targets(id, &outputs);
-                if let Pending::Link { from, to } = pending {
-                    if from.node == id && outputs.contains(&from.port) {
-                        targets.push(to);
-                    }
+                if let Pending::Link { from, to } = pending
+                    && from.node == id
+                    && outputs.contains(&from.port)
+                {
+                    targets.push(to);
                 }
                 for to in targets {
                     match self.var_port(to.node, RefKind::Input, to.port) {
@@ -505,10 +506,10 @@ impl Graph {
         };
         poly.types = types;
         for (value, v) in node.values.iter_mut().zip(&poly.input_var) {
-            if *v == Some(var) {
-                if let Some(old) = value.take() {
-                    *value = Some(old.clone().coerce(ty).unwrap_or(old));
-                }
+            if *v == Some(var)
+                && let Some(old) = value.take()
+            {
+                *value = Some(old.clone().coerce(ty).unwrap_or(old));
             }
         }
         node.imp = imp;

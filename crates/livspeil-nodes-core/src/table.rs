@@ -321,13 +321,13 @@ impl NodeImpl for TableGetValue {
         };
         let name = string(inputs, 2, "column")?;
         let column = column_index(t, name, "column")?;
-        if let Some(c) = column.and_then(|c| t.columns().get(c)) {
-            if !self.ty.accepts(c.ty()) {
-                return Err(NodeError::InvalidInput {
-                    port: "column",
-                    reason: format!("column \"{name}\" holds {} values, not {}", c.ty(), self.ty),
-                });
-            }
+        if let Some(c) = column.and_then(|c| t.columns().get(c))
+            && !self.ty.accepts(c.ty())
+        {
+            return Err(NodeError::InvalidInput {
+                port: "column",
+                reason: format!("column \"{name}\" holds {} values, not {}", c.ty(), self.ty),
+            });
         }
         let cell = column
             .and_then(|c| usize::try_from(row).ok().and_then(|r| t.cell(r, c)))

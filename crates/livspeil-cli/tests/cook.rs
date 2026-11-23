@@ -171,7 +171,7 @@ fn every_prints_the_same_values_as_printing_all_frames() {
                 .unwrap()
                 .parse()
                 .unwrap();
-            frame % 50 == 0
+            frame.is_multiple_of(50)
         })
         .collect();
     assert_eq!(sampled.lines().collect::<Vec<_>>(), filtered);
