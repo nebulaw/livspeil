@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: MPL-2.0
+
+[package]
+name = "livspeil-ui-shot"
+description = "Headless screenshots of Livspeil UI scenes and a golden-image diff harness"
+version.workspace = true
+edition.workspace = true
+rust-version = "1.87"
+license = "MPL-2.0"
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+livspeil-ui-render = { path = "../livspeil-ui-render" }
+png = "0.18"
+
+[lints]
+workspace = true
