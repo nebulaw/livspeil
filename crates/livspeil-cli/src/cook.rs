@@ -519,12 +519,13 @@ fn upstream(
 /// depends on failed this frame (its value would be stale).
 fn cook_target(cooker: &mut Cooker, graph: &Graph, target: &Target) -> Outcome {
     let result = cooker.cook(graph, target.id);
-    if let Some(err) = cooker.error(target.id) {
+    // Value errors only: handler errors are reported per tick.
+    if let Some(err) = cooker.value_error(target.id) {
         return Err(describe(graph, err));
     }
     let values = result.map_err(|err| describe(graph, &err))?;
     for (name, dep) in &target.upstream {
-        if let Some(err) = cooker.error(*dep) {
+        if let Some(err) = cooker.value_error(*dep) {
             return Err(format!(
                 "upstream node '{name}' failed: {}",
                 describe(graph, err)

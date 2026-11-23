@@ -254,9 +254,17 @@ impl Cooker {
         self.stats = CookStats::default();
     }
 
-    /// The error state of a node after the last cook that visited it.
+    /// The error state of a node: its value error
+    /// ([`Cooker::value_error`]), else the error of its last event handler
+    /// call ([`Cooker::event_error`]).
     #[must_use]
     pub fn error(&self, id: NodeId) -> Option<&CookError> {
+        self.value_error(id).or_else(|| self.events.error(id))
+    }
+
+    /// The value error of a node after the last cook that visited it.
+    #[must_use]
+    pub fn value_error(&self, id: NodeId) -> Option<&CookError> {
         let slot = *self.failed.get(&id)?;
         self.entries
             .get(slot)?
