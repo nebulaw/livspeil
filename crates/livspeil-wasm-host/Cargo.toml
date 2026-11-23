@@ -6,9 +6,9 @@ name = "livspeil-wasm-host"
 description = "Sandboxed WebAssembly node packages (third-party Charms in process)"
 version.workspace = true
 edition.workspace = true
-# wasmtime 36 (LTS) needs Rust 1.86; every wasmtime that builds on 1.85
-# (<= 34) has open security advisories. See docs/wasm-nodes.md.
-rust-version = "1.86"
+# wasmtime is pinned to an LTS line (48.x, supported for two years, MSRV
+# 1.95). See docs/wasm-nodes.md.
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
@@ -19,7 +19,7 @@ livspeil-node-api = { path = "../livspeil-node-api" }
 sha2 = { version = "0.10", default-features = false }
 # Core modules only: no component model, WASI, async, GC, threads, disk
 # cache or parallel compilation. `wat` lets packages be loaded from text.
-wasmtime = { version = "=36.0.23", default-features = false, features = ["runtime", "cranelift", "std", "wat"] }
+wasmtime = { version = "=48.0.10", default-features = false, features = ["runtime", "cranelift", "std", "wat"] }
 
 [dev-dependencies]
 livspeil-doc = { path = "../livspeil-doc" }

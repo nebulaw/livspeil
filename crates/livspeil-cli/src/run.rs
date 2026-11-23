@@ -204,11 +204,11 @@ pub(crate) fn run(args: impl Iterator<Item = String>) -> ExitCode {
             ok = false;
         }
     }
-    if let Some(path) = &opts.journal {
-        if let Err(err) = append_journal(path, &scene) {
-            eprintln!("{}: cannot write journal: {err}", path.display());
-            return ExitCode::FAILURE;
-        }
+    if let Some(path) = &opts.journal
+        && let Err(err) = append_journal(path, &scene)
+    {
+        eprintln!("{}: cannot write journal: {err}", path.display());
+        return ExitCode::FAILURE;
     }
     if !ok {
         if opts.save {
@@ -216,10 +216,11 @@ pub(crate) fn run(args: impl Iterator<Item = String>) -> ExitCode {
         }
         return ExitCode::from(SCRIPT_FAILED);
     }
-    if opts.save && !scene.journal.is_empty() {
-        if let Err(code) = save(&file, &text, &doc, &scene.graph) {
-            return code;
-        }
+    if opts.save
+        && !scene.journal.is_empty()
+        && let Err(code) = save(&file, &text, &doc, &scene.graph)
+    {
+        return code;
     }
     ExitCode::SUCCESS
 }

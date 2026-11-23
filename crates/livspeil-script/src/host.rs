@@ -90,14 +90,14 @@ pub(crate) fn dispatch(
     method: &str,
     params: &Json,
 ) -> Result<Json, RemoteError> {
-    if let Some(cap) = required(method) {
-        if !state.capabilities.has(&cap) {
-            return Err(RemoteError::new(
-                codes::CAPABILITY_DENIED,
-                format!("'{method}' needs the '{cap}' capability"),
-            )
-            .with_data(json!({ "capability": cap.token(), "method": method })));
-        }
+    if let Some(cap) = required(method)
+        && !state.capabilities.has(&cap)
+    {
+        return Err(RemoteError::new(
+            codes::CAPABILITY_DENIED,
+            format!("'{method}' needs the '{cap}' capability"),
+        )
+        .with_data(json!({ "capability": cap.token(), "method": method })));
     }
     match method {
         "graph.nodes" => nodes(&scene.graph, params),
@@ -119,10 +119,10 @@ pub(crate) fn dispatch(
 /// Resolve a node reference: a UUID string naming an existing node, or a
 /// path (`/lamp/bulb` or `lamp/bulb`).
 pub(crate) fn resolve(graph: &Graph, reference: &str) -> Option<NodeId> {
-    if let Ok(id) = serde_json::from_value::<NodeId>(Json::String(reference.to_owned())) {
-        if graph.contains(id) {
-            return Some(id);
-        }
+    if let Ok(id) = serde_json::from_value::<NodeId>(Json::String(reference.to_owned()))
+        && graph.contains(id)
+    {
+        return Some(id);
     }
     graph.find_path(reference)
 }

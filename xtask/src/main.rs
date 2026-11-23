@@ -152,10 +152,10 @@ fn run_optional(program: &str, args: &[&str], tool: &str) -> bool {
 /// `<program> --version`.
 fn tool_available(program: &str, subcommand: Option<&str>) -> bool {
     let mut cmd = Command::new(program);
-    if program == "cargo" {
-        if let Some(sub) = subcommand {
-            cmd.arg(sub);
-        }
+    if program == "cargo"
+        && let Some(sub) = subcommand
+    {
+        cmd.arg(sub);
     }
     cmd.arg("--version")
         .stdout(Stdio::null())

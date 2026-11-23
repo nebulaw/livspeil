@@ -366,10 +366,8 @@ impl Cooker {
             let stale = entry
                 .as_ref()
                 .is_some_and(|e| graph.node_at(slot).is_none_or(|n| n.id != e.id));
-            if stale {
-                if let Some(e) = entry.take() {
-                    self.failed.remove(&e.id);
-                }
+            if stale && let Some(e) = entry.take() {
+                self.failed.remove(&e.id);
             }
         }
         self.upstream_len.clear();

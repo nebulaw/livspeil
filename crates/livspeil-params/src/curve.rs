@@ -255,10 +255,10 @@ pub fn sample_curve_value(curve: &Curve, position: f64) -> Result<Value, AnimErr
     };
     // On a key (or holding one): that key's color, bit for bit.
     for key in keys.iter() {
-        if let Value::Color(c) = key.value {
-            if lch_to_lab(c) == lab {
-                return Ok(key.value.clone());
-            }
+        if let Value::Color(c) = key.value
+            && lch_to_lab(c) == lab
+        {
+            return Ok(key.value.clone());
         }
     }
     Ok(Value::Color(lab_to_lch(lab)))
