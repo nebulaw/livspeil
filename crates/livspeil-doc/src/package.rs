@@ -50,9 +50,11 @@ pub fn split_prolog(text: &str) -> (&str, &str) {
 
 /// The canonical form of a whole `room.kdl` file: the prolog comment lines
 /// (trailing whitespace and surrounding blank lines removed, then one blank
-/// line) followed by [`format()`] of the parsed document. Comments anywhere
-/// else are dropped. Idempotent: `canonicalize(canonicalize(t)) ==
-/// canonicalize(t)`.
+/// line) followed by [`format()`] of the parsed document, with the
+/// comments attached to its items (`//` lines directly above a node,
+/// input, link, ... and `//` comments at the end of its line) carried over;
+/// other comments are dropped (see `comments.rs` for the exact rules).
+/// Idempotent: `canonicalize(canonicalize(t)) == canonicalize(t)`.
 ///
 /// # Errors
 /// Any error of [`parse`] or [`format()`].
@@ -61,7 +63,7 @@ pub fn canonicalize(text: &str) -> Result<String, DocError> {
     let doc = parse(text)?;
     let mut out = canonical_prolog(prolog);
     out.push_str(&format(&doc)?);
-    Ok(out)
+    Ok(crate::comments::carry(text, &out))
 }
 
 /// The canonical form of a whole `assets.lock` file: the prolog comment

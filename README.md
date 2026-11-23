@@ -30,6 +30,14 @@ cargo run -p livspeil-cli -- fmt --check examples/sun-and-lamp.room
 cargo run -p livspeil-cli -- cook examples/sun-and-lamp.room --frames 600 --every 50
 ```
 
+`fmt` rewrites `room.kdl` in canonical form (sorted nodes, inputs and
+links, two-space indent). It keeps the leading comment block and the `//`
+comments attached to items: lines directly above a node, input, link,
+network, `charm` or `meta` entry, and a comment at the end of its line;
+they move with their item. Other comments (block comments, comments inside
+`anim`/`table`/`curve` blocks or behind slashdashed items, comments not
+directly above an item) are dropped; see `crates/livspeil-doc/src/comments.rs`.
+
 `cook` drives the graph with a deterministic frame clock (frame `i` at
 `start + i/fps` seconds, `--fps 60` by default) and prints the outputs of
 the sinks: the root network's `core.output` nodes, or when it has none its
@@ -53,8 +61,16 @@ subnets and Charms (M0.7): a "Daylight" Charm (hour in, lamp color and
 intensity out, two promoted parameters) instantiated twice with different
 parameters, printed through four `core.output` nodes.
 
+File-system nodes (`core.fs.list_dir`) see the room package (or
+`--fs-root DIR`) and nothing outside it. A run lists each folder once (a
+snapshot); with `--watch-fs` the listed folders are checked every frame and
+re-listed when files were created, deleted or renamed, re-cooking only what
+reads them.
+
 Floats are printed with six decimals so the output (and its golden files in
-`crates/livspeil-cli/tests/golden/`) is identical on macOS and Linux.
+`crates/livspeil-cli/tests/golden/`) is identical on macOS and Linux;
+`--precision N` picks another number of decimals and `--precision full`
+the exact shortest round-trip form (both text and JSONL).
 `--format jsonl` prints one JSON object per frame, `--stats` adds the
 scheduler's cooked/reused counts, and `livspeil --help` documents every
 option and exit code (0 ok, 1 load error, 2 usage error, 3 node error).
@@ -73,9 +89,11 @@ counter's `count` or a latch's `out` can drive any parameter. Design:
 `crates/livspeil-graph/src/cook/events.rs`.
 
 [`examples/blink.room`](examples/blink.room/room.kdl) blinks a lamp every
-0.5 s and counts the blinks. `--event NODE.PORT@FRAME` injects an event
-(into an `Event` input, or out of an `Event` output) for testing, and
-`Event` outputs print what fired in the frame:
+0.5 s and counts the blinks. `--event NODE.PORT@FRAME[=VALUE]` injects an
+event (into an `Event` input, or out of an `Event` output) for testing,
+with an optional payload in the `room.kdl` value syntax (`=1.0`, `=3`,
+`=#true`, `='"text"'`, `='(vec3)"1 2 3"'`), and `Event` outputs print what
+fired in the frame:
 
 ```sh
 cargo run -p livspeil-cli -- cook examples/blink.room --frames 40 --fps 20 --every 10 \
@@ -88,6 +106,11 @@ frame=10 time=0.500000 count.value=2
 frame=10 time=0.500000 light.value=0.200000
 frame=10 time=0.500000 ticks.value=event(1)
 ```
+
+Event overflows and handler errors are reported for every frame: printed
+frames list them, and frames skipped by `--every` are summarized before the
+next printed frame (`frames 3..49: 2 event errors (last: timer: ...)`). A
+handler error in any frame makes the exit code 3.
 
 ### `diff`
 
