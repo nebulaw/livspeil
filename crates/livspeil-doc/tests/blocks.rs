@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Livspeil contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Table and curve input values (M0.8): canonical text, round trips,
-//! strict reading with locations, and a round-trip property.
+//! Table and curve input values (M0.8; typed curves and polymorphic
+//! nodes, M0.17): canonical text, round trips, strict reading with
+//! locations, and round-trip properties.
 
 mod common;
 
@@ -12,7 +13,7 @@ use common::{id, registry};
 use livspeil_doc::{DocError, DocNode, Document, Location, canonicalize, format, parse};
 use livspeil_node_api::{
     Curve, CurveExtrapolation, CurveInterpolation, CurveKey, CurveTangent, PortType, Table,
-    TableColumn, Value,
+    TableColumn, TypedCurveKey, TypedCurveTangent, Value,
 };
 use proptest::prelude::*;
 
@@ -216,6 +217,80 @@ fn curves_round_trip_canonically() {
 }
 
 #[test]
+fn typed_curves_round_trip_canonically() {
+    let curve = Curve::typed(vec![
+        TypedCurveKey::new(0.0, Value::Color([0.5, 0.1, 30.0, 1.0])),
+        TypedCurveKey::new(0.5, Value::Color([0.7, 0.0, 0.0, 0.5]))
+            .with_interpolation(CurveInterpolation::Bezier)
+            .with_tangent(TypedCurveTangent::Explicit {
+                incoming: Value::Color([0.0, 0.1, -0.1, 0.0]),
+                outgoing: Value::Color([1.0, 0.0, 0.0, 0.0]),
+            }),
+        TypedCurveKey::new(1.0, Value::Color([0.9, 0.2, 300.0, 1.0])),
+    ])
+    .unwrap()
+    .with_extrapolation(CurveExtrapolation::Hold, CurveExtrapolation::Loop);
+    let text = round_trip(&doc_with(
+        "core.curve.ramp@2",
+        "curve",
+        Value::Curve(Arc::new(curve)),
+    ));
+    assert_eq!(
+        input_lines(&text),
+        [
+            "input \"curve\" {",
+            "  curve post=\"loop\" {",
+            "    key 0.0 (color)\"oklch(0.5 0.1 30.0 1.0)\"",
+            "    key 0.5 (color)\"oklch(0.7 0.0 0.0 0.5)\" interp=\"bezier\" tangent=\"explicit\" in=(color)\"oklch(0.0 0.1 -0.1 0.0)\" out=(color)\"oklch(1.0 0.0 0.0 0.0)\"",
+            "    key 1.0 (color)\"oklch(0.9 0.2 300.0 1.0)\"",
+            "  }",
+            "}",
+        ]
+    );
+    let vec3 = Curve::typed(vec![
+        TypedCurveKey::new(0.0, Value::Vec3([0.0, 1.0, 2.0])),
+        TypedCurveKey::new(2.0, Value::Vec3([1.0, 1.0, 1.0])),
+    ])
+    .unwrap();
+    let text = round_trip(&doc_with(
+        "core.curve.ramp@2",
+        "curve",
+        Value::Curve(Arc::new(vec3)),
+    ));
+    assert!(text.contains("key 2.0 (vec3)\"1.0 1.0 1.0\""), "{text}");
+}
+
+#[test]
+fn polymorphic_nodes_store_only_pins() {
+    let text = format!(
+        "{HEADER}    node \"cell\" type=\"core.table.get_value@1\" id=\"01920000-0000-7000-8000-000000000001\" port-type=\"String\"\n    node \"pick\" type=\"core.logic.select@2\" id=\"01920000-0000-7000-8000-000000000002\" {{\n      input \"b\" (vec3)\"1.0 2.0 3.0\"\n    }}\n    node \"ramp\" type=\"core.curve.ramp@2\" id=\"01920000-0000-7000-8000-000000000003\"\n    node \"pick2\" type=\"core.logic.select@2\" id=\"01920000-0000-7000-8000-000000000004\"\n    link from=\"cell.value\" to=\"pick2.b\"\n    link from=\"ramp.out\" to=\"pick.a\"\n  }}\n}}\n"
+    );
+    let doc = parse(&text).unwrap_or_else(|e| panic!("{e}"));
+    let graph = doc.to_graph(registry()).unwrap_or_else(|e| panic!("{e}"));
+    let get = |name: &str| graph.find(name).unwrap();
+    assert_eq!(
+        graph.resolved_type(get("cell"), "T"),
+        Some(PortType::String)
+    );
+    assert_eq!(
+        graph.resolved_type(get("pick2"), "T"),
+        Some(PortType::String)
+    );
+    assert_eq!(graph.resolved_type(get("pick"), "T"), Some(PortType::Vec3));
+    assert_eq!(graph.resolved_type(get("ramp"), "T"), Some(PortType::Vec3));
+    let back = Document::from_graph(&graph, "r").unwrap();
+    let written = format(&back).unwrap();
+    assert_eq!(written.matches("port-type").count(), 1, "{written}");
+    assert_eq!(parse(&written).unwrap(), back);
+    // A conflicting document is rejected with the typed graph error.
+    let bad = text
+        .replace("port-type=\"String\"", "port-type=\"Int\"")
+        .replace("to=\"pick2.b\"", "to=\"pick.b\"");
+    let e = parse(&bad).unwrap().to_graph(registry()).unwrap_err();
+    assert!(e.to_string().contains("type conflict"), "{e}");
+}
+
+#[test]
 fn reader_is_lenient_where_unambiguous() {
     // Ints in Float columns and as curve numbers; any child order.
     let doc = parse(&room(
@@ -347,9 +422,15 @@ fn curve_errors_carry_locations() {
     for (head, body, at, message) in [
         (
             "",
-            "          key 0.0 (vec2)\"1 2\"",
+            "          key 0.0 (vec2)\"1 2\"\n          key 1.0 0.0",
+            loc(7, 11),
+            "input 'curve' curve: key 1: expected Vec2, found Float",
+        ),
+        (
+            "",
+            "          key 0.0 (color)\"oklch(0.5 0.1 30)\" tangent=\"explicit\" in=(vec4)\"0 0 0 0\" out=(color)\"oklch(0 0 0 0)\"",
             loc(6, 11),
-            "input 'curve' curve: key values must be numbers, found Vec2",
+            "input 'curve' curve: key 0: expected Color, found Vec4",
         ),
         (
             "",
@@ -564,8 +645,81 @@ fn curve() -> impl Strategy<Value = Curve> {
         })
 }
 
+/// Curves of `Vec2`, `Vec3`, `Vec4` or `Color` keys.
+fn typed_curve() -> impl Strategy<Value = Curve> {
+    let ty = prop::sample::select(vec![
+        PortType::Vec2,
+        PortType::Vec3,
+        PortType::Vec4,
+        PortType::Color,
+    ]);
+    ty.prop_flat_map(|ty| {
+        let interp = prop_oneof![
+            Just(CurveInterpolation::Step),
+            Just(CurveInterpolation::Linear),
+            Just(CurveInterpolation::Bezier),
+        ];
+        let tangent = prop_oneof![
+            Just(TypedCurveTangent::Auto),
+            Just(TypedCurveTangent::Flat),
+            (cell(ty), cell(ty)).prop_map(|(incoming, outgoing)| TypedCurveTangent::Explicit {
+                incoming,
+                outgoing
+            }),
+        ];
+        (
+            prop::collection::vec((0.001..10.0f64, cell(ty), interp, tangent), 1..5),
+            curve_extrapolation(),
+        )
+    })
+    .prop_map(|(keys, post)| {
+        let mut position = 0.0;
+        let keys = keys
+            .into_iter()
+            .map(|(step, value, interpolation, tangent)| {
+                position += step;
+                TypedCurveKey {
+                    position,
+                    value,
+                    interpolation,
+                    tangent,
+                }
+            })
+            .collect();
+        Curve::typed(keys)
+            .map(|c| c.with_extrapolation(CurveExtrapolation::Hold, post))
+            .unwrap_or_else(|_| Curve::identity())
+    })
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
+
+    #[test]
+    fn typed_curves_and_polymorphic_nodes_round_trip(
+        curve in typed_curve(),
+        pin in prop::sample::select(vec![None, Some(PortType::Vec2), Some(PortType::Color), Some(PortType::Float)]),
+        value in prop_oneof![cell(PortType::Vec3), cell(PortType::Int), cell(PortType::String)],
+    ) {
+        let mut doc = Document::new("poly");
+        let mut ramp = DocNode::new(id(1), "ramp", "core.curve.ramp@2");
+        ramp.port_type = pin;
+        ramp.inputs.insert("curve".into(), Value::Curve(Arc::new(curve)));
+        let mut pick = DocNode::new(id(2), "pick", "core.logic.select@2");
+        pick.inputs.insert("a".into(), value.clone());
+        doc.network.nodes.push(ramp);
+        doc.network.nodes.push(pick);
+
+        let text = format(&doc).unwrap();
+        let parsed = parse(&text).unwrap();
+        prop_assert_eq!(&parsed, &doc);
+        prop_assert_eq!(format(&parsed).unwrap(), text.clone());
+        let graph = parsed.to_graph(registry()).unwrap();
+        let again = Document::from_graph(&graph, "poly").unwrap();
+        prop_assert_eq!(&again, &doc);
+        prop_assert_eq!(graph.resolved_type(id(1), "T"), Some(pin.unwrap_or(PortType::Float)));
+        prop_assert_eq!(graph.resolved_type(id(2), "T"), Some(value.port_type()));
+    }
 
     #[test]
     fn table_and_curve_inputs_round_trip(table in table(), curve in curve(), x in finite()) {

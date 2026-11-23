@@ -10,8 +10,11 @@
 //! [`NodeError::InvalidInput`], so the scheduler keeps the last good output
 //! instead of publishing an infinity or a `NaN`.
 
-use livspeil_node_api::{CookContext, NodeError, NodeImpl, NodeSpec, PortType, Value};
+use livspeil_node_api::{
+    CookContext, NodeError, NodeImpl, NodeSpec, PortType, TypeClass, TypeVar, Value,
+};
 
+use crate::color::{lab_to_lch, lch_to_lab};
 use crate::float;
 
 /// A `Float` input port with a default value.
@@ -985,5 +988,154 @@ mod tests {
             .cook(&CookContext::default(), &[Value::Float(1.0)])
             .unwrap_err();
         assert!(matches!(err, NodeError::InvalidInput { port: "edge1", .. }));
+    }
+}
+
+/// `core.math.lerp@2`: `out = a + (b - a) * t` (not clamped) for any
+/// interpolable type: `<T: Interpolable = Float>(a: T = 0, b: T = 1,
+/// t: Float = 0.5) -> out: T`.
+///
+/// `Float` and vectors interpolate component by component (exactly like
+/// `@1` for `Float`). Colors (OKLCH plus alpha) interpolate in OKLab plus
+/// alpha, so hues take the short way round and grey ends do not drag the
+/// hue; the result has its hue in `[0, 360)` (0 below chroma `1e-9`), and
+/// `t = 0` / `t = 1` give `a` / `b` exactly. Unresolved `T` is `Float`;
+/// defaults follow the resolved type (`a` black / zero, `b` white / ones).
+#[derive(Debug)]
+pub struct Lerp2 {
+    spec: NodeSpec,
+    vars: Vec<TypeVar>,
+}
+
+impl Lerp2 {
+    #[must_use]
+    pub fn new() -> Self {
+        let spec = NodeSpec::new(
+            "core.math.lerp",
+            2,
+            "Linear interpolation between a and b (numbers, vectors, colors)",
+        );
+        Lerp2 {
+            spec: float_in(float_in(float_in(spec, "a", 0.0), "b", 1.0), "t", 0.5)
+                .output("out", PortType::Float),
+            vars: vec![
+                TypeVar::new("T", TypeClass::Interpolable, PortType::Float)
+                    .input("a")
+                    .input("b")
+                    .output("out"),
+            ],
+        }
+    }
+}
+node_boilerplate!(Lerp2);
+
+fn lerp_components<const N: usize>(a: &[f64; N], b: &[f64; N], t: f64) -> [f64; N] {
+    let mut out = [0.0; N];
+    for (o, (x, y)) in out.iter_mut().zip(a.iter().zip(b)) {
+        *o = x + (y - x) * t;
+    }
+    out
+}
+
+impl NodeImpl for Lerp2 {
+    fn spec(&self) -> &NodeSpec {
+        &self.spec
+    }
+
+    fn type_vars(&self) -> &[TypeVar] {
+        &self.vars
+    }
+
+    fn cook(&self, _ctx: &CookContext, inputs: &[Value]) -> Result<Vec<Value>, NodeError> {
+        let t = float(inputs, 2, "t")?;
+        let out = match (inputs.first(), inputs.get(1)) {
+            (Some(Value::Float(a)), Some(Value::Float(b))) => Value::Float(a + (b - a) * t),
+            (Some(Value::Vec2(a)), Some(Value::Vec2(b))) => Value::Vec2(lerp_components(a, b, t)),
+            (Some(Value::Vec3(a)), Some(Value::Vec3(b))) => Value::Vec3(lerp_components(a, b, t)),
+            (Some(Value::Vec4(a)), Some(Value::Vec4(b))) => Value::Vec4(lerp_components(a, b, t)),
+            (Some(Value::Color(a)), Some(Value::Color(b))) => Value::Color(if t == 0.0 {
+                *a
+            } else if t == 1.0 {
+                *b
+            } else {
+                lab_to_lch(lerp_components(&lch_to_lab(*a), &lch_to_lab(*b), t))
+            }),
+            (Some(a), _) if !TypeClass::Interpolable.contains(a.port_type()) => {
+                return Err(NodeError::InvalidInput {
+                    port: "a",
+                    reason: format!("cannot interpolate {}", a.port_type()),
+                });
+            }
+            (a, b) => {
+                return Err(NodeError::InvalidInput {
+                    port: "b",
+                    reason: format!(
+                        "expected the type of a ({}), got {}",
+                        a.map_or("nothing".to_owned(), |v| v.port_type().to_string()),
+                        b.map_or("nothing".to_owned(), |v| v.port_type().to_string())
+                    ),
+                });
+            }
+        };
+        Ok(vec![out])
+    }
+}
+
+#[cfg(test)]
+mod lerp2_tests {
+    use super::*;
+
+    fn lerp(a: Value, b: Value, t: f64) -> Result<Value, NodeError> {
+        Lerp2::new()
+            .cook(&CookContext::default(), &[a, b, Value::Float(t)])
+            .map(|mut v| v.remove(0))
+    }
+
+    #[test]
+    fn every_interpolable_type() {
+        assert_eq!(
+            lerp(Value::Float(0.0), Value::Float(10.0), 0.25),
+            Ok(Value::Float(2.5))
+        );
+        assert_eq!(
+            lerp(Value::Vec2([0.0, 2.0]), Value::Vec2([4.0, 4.0]), 0.5),
+            Ok(Value::Vec2([2.0, 3.0]))
+        );
+        assert_eq!(
+            lerp(Value::Vec3([0.0; 3]), Value::Vec3([1.0, 2.0, 3.0]), 2.0),
+            Ok(Value::Vec3([2.0, 4.0, 6.0]))
+        );
+        assert_eq!(
+            lerp(Value::Vec4([0.0; 4]), Value::Vec4([4.0; 4]), 0.25),
+            Ok(Value::Vec4([1.0; 4]))
+        );
+        let red = [0.6, 0.2, 30.0, 1.0];
+        let blue = [0.6, 0.2, 330.0, 0.0];
+        assert_eq!(
+            lerp(Value::Color(red), Value::Color(blue), 0.0),
+            Ok(Value::Color(red))
+        );
+        assert_eq!(
+            lerp(Value::Color(red), Value::Color(blue), 1.0),
+            Ok(Value::Color(blue))
+        );
+        let Ok(Value::Color(mid)) = lerp(Value::Color(red), Value::Color(blue), 0.5) else {
+            panic!("not a color")
+        };
+        // Short way round through hue 0, not through 180.
+        assert!(mid[2] < 1e-9 || mid[2] > 359.0, "{mid:?}");
+        assert!((mid[3] - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn mismatches_are_errors() {
+        assert!(matches!(
+            lerp(Value::Float(0.0), Value::Vec2([0.0; 2]), 0.5),
+            Err(NodeError::InvalidInput { port: "b", .. })
+        ));
+        assert!(matches!(
+            lerp(Value::Bool(true), Value::Bool(false), 0.5),
+            Err(NodeError::InvalidInput { port: "a", .. })
+        ));
     }
 }

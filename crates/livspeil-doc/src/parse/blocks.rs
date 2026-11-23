@@ -161,7 +161,8 @@ impl Reader<'_> {
     }
 
     /// `curve [pre="<x>"] [post="<x>"] { key <position> <value> ... }`, with
-    /// the keys of an `anim` block holding numbers.
+    /// the keys of an `anim` block: numbers, or all `(vec2)`, `(vec3)`,
+    /// `(vec4)` or `(color)` values (typed curves, M0.17).
     fn curve(&self, node: &KdlNode, port: &str) -> Result<Value, DocError> {
         let entries = self.entries(node)?;
         self.allow_props(&entries, &["pre", "post"])?;
@@ -203,15 +204,6 @@ impl Reader<'_> {
                 ));
             }
             let key = self.key(child)?;
-            if key.value.port_type() != PortType::Float {
-                return Err(self.err_node(
-                    child,
-                    format!(
-                        "input '{port}' curve: key values must be numbers, found {}",
-                        key.value.port_type()
-                    ),
-                ));
-            }
             keys.push(key);
             key_nodes.push(child);
         }

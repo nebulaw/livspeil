@@ -40,6 +40,17 @@
 //!   node's values and their downstream for that cooker. See
 //!   `cook/events.rs` for the design.
 //!
+//! - Polymorphic ports (M0.17): node types may declare type variables
+//!   with a constraint class (`livspeil_node_api::TypeVar`, for example
+//!   `core.logic.select@2<T: Any>`). Each instance resolves them from its
+//!   links, values, expressions and animation channels (or a type pinned
+//!   at creation, [`Graph::add_node_in`]'s `port_type`), as a pure
+//!   function of the current graph; [`Graph::node_spec`] then gives the
+//!   resolved, concrete spec and [`Graph::resolved_type`] the variables.
+//!   Conflicting edits fail with [`GraphError::TypeConflict`] or
+//!   [`GraphError::NotInClass`]; resolution changes invalidate like input
+//!   edits. See `types.rs` for the rules.
+//!
 //! - [`GraphSnapshot`] is a canonical, comparable copy of the editable state
 //!   (used by the command bus tests to prove undo and replay exact).
 //!
@@ -116,6 +127,7 @@ mod graph;
 mod network;
 mod snapshot;
 mod sources;
+mod types;
 
 pub use cook::{
     CookError, CookStats, Cooker, DEFAULT_EVENT_LIMIT, EventError, ExternalEvent, FiredEvent,

@@ -128,8 +128,19 @@
 //!   A table without columns is written `table` alone.
 //! - `curve [pre="<x>"] [post="<x>"]`: the keys of an `anim` block
 //!   (`key <position> <value>` with the same `interp=` and `tangent=`
-//!   settings) holding numbers only; positions strictly increase; no
-//!   `offset=`. Default settings are left out, as in `anim`.
+//!   settings) holding numbers, or (typed curves, M0.17) all `(vec2)`,
+//!   all `(vec3)`, all `(vec4)` or all `(color)` values, as in
+//!   `key 0.0 (color)"oklch(0.5 0.1 30.0 1.0)"`; explicit tangents
+//!   (`in=`/`out=`) have the key's type (for colors, OKLab slopes written
+//!   as `(color)` values). Positions strictly increase; no `offset=`.
+//!   Default settings are left out, as in `anim`.
+//!
+//! **Polymorphic nodes** (M0.17) need nothing in documents: their type
+//! variables resolve from the links, values, expressions and animation
+//! channels the document already holds (see `livspeil_graph`), except a
+//! type pinned on the node, written with the boundary nodes'
+//! `port-type="<Type>"` property:
+//! `node "cell" type="core.table.get_value@1" id="..." port-type="String"`.
 //! - An input has at most one static value: a positional value or one
 //!   block. Errors point at the offending `column`, `row` cell or `key`.
 //!   Canonical form: block value, then `anim`.

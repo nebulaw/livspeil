@@ -67,6 +67,37 @@ text above `[[tests]]`, such as comments, is not kept.
 | `events` | Optional event steps for event nodes, run in order from the node's initial state, the state carried from step to step: `{ input = "trigger", payload = 2.0 }` delivers an event (payload optional) to an `Event` input, `{ tick = true }` is the once-per-tick poll. A step may override `inputs` and `context` for itself. `expect` then checks the outputs cooked from the final state (`cook_with_state`); without `events` that is the initial state. |
 | `expect_events` | The events emitted by all steps, in order: `[{ output = "fired", payload = 1 }, { output = "out" }]` (payload left out: none). A payload's TOML type picks its value type (integer `Int`, float `Float`, boolean `Bool`, string `String`). May replace `expect`. |
 | `expect_error` | The cook (or an event step) must fail: `port` (an invalid-input error on that port) and/or `message` (a substring of the error text); `{}` accepts any error. |
+| `types` | Polymorphic nodes only: the resolved type of each type variable for this case, `{ T = "Vec3" }` (variables left out take their fallback). Inputs, outputs and defaults then have the resolved types. |
+
+### Polymorphic ports
+
+A polymorphic node (M0.17) declares type variables, each with a
+constraint class and a fallback, as generated `[[type_vars]]` entries;
+its ports of a variable list the class as `type` and the variable as
+`var`, and their `default` is the fallback's default:
+
+```toml
+[[type_vars]]
+name = "T"
+class = "Interpolable"   # Numeric, Vector, Interpolable or Any
+fallback = "Float"       # the type of an unresolved instance
+
+[[inputs]]
+name = "a"
+type = "Interpolable"
+var = "T"
+default = 0.0
+```
+
+Classes: `Numeric` = `Float`, `Int`, `Vec2`, `Vec3`, `Vec4`; `Vector` =
+`Vec2`, `Vec3`, `Vec4`; `Interpolable` = `Float`, `Vec2`, `Vec3`,
+`Vec4`, `Color`; `Any` = every value type except `Event`. A graph
+resolves the variables of each instance from its links, values,
+expressions and animation channels or a pinned type (documents:
+`port-type=`); see `livspeil_graph`'s `types` module. When a variable
+resolves to another type, defaults follow it: a number `x` becomes `Int`
+when whole, `[x, x, ...]` for vectors and the grey `oklch(x 0 0 1)` for
+colors; other defaults become the type's zero.
 
 ### Values
 
@@ -81,12 +112,17 @@ Values are written by port type:
 | `Vec2`, `Vec3`, `Vec4` | array of 2, 3 or 4 numbers | `[1.0, 2.0, 3.0]` |
 | `Color` | OKLCH plus alpha, `[l, c, h, alpha]` (alpha may be left out: 1.0) | `[0.7, 0.1, 250.0, 1.0]` |
 | `Table` | `{ columns = [{ name, type, values = [...] }, ...] }` | `{ columns = [{ name = "name", type = "String", values = ["a", "b"] }] }` |
-| `Curve` | `{ keys = [{ position, value, interpolation?, tangent? }, ...], pre?, post? }` | `{ keys = [{ position = 0.0, value = 0.0 }, { position = 1.0, value = 1.0 }] }` |
+| `Curve` | `{ type?, keys = [{ position, value, interpolation?, tangent? }, ...], pre?, post? }` | `{ keys = [{ position = 0.0, value = 0.0 }, { position = 1.0, value = 1.0 }] }` |
 
 Curve keys: `interpolation` is `"linear"` (default), `"step"`, `"bezier"`
 or `{ spring = { frequency = 2.0, damping = 0.3 } }`; `tangent` is
 `"auto"` (default), `"flat"` or `{ incoming = 0.0, outgoing = 4.0 }`;
 `pre` and `post` are `"hold"` (default), `"loop"` or `"ping_pong"`.
+Typed curves (M0.17) add `type = "Vec2"` (or `"Vec3"`, `"Vec4"`,
+`"Color"`; default `"Float"`), and their key values and explicit tangent
+slopes are written as values of that type, for example
+`{ type = "Color", keys = [{ position = 0.0, value = [0.5, 0.1, 30.0] }] }`
+(color tangents are OKLab-plus-alpha slopes).
 
 Large values (tables) read better as TOML sub-tables, for example
 `[[tests.inputs.table.columns]]` with `name`, `type` and `values` keys.
@@ -97,7 +133,7 @@ inputs list no default: in value cooking they carry the placeholder
 
 ## Node index
 
-50 nodes. *time* marks nodes re-cooked every frame, *system* nodes that read the host system.
+54 nodes. *time* marks nodes re-cooked every frame, *system* nodes that read the host system.
 
 | Node | Summary | Inputs | Outputs | Tests |
 |---|---|---|---|---|
@@ -105,6 +141,7 @@ inputs list no default: in value cooking they carry the placeholder
 | [`core.color.gradient@1`](#corecolorgradient1) | Three-stop OKLCH gradient (c0 at 0, c1 at p1, c2 at 1) sampled at t, mixed in OKLab | `t: Float = 0.5`<br>`c0: Color = [0.3, 0.1, 270.0, 1.0]`<br>`c1: Color = [0.7, 0.15, 45.0, 1.0]`<br>`c2: Color = [0.95, 0.05, 95.0, 1.0]`<br>`p1: Float = 0.5` | `out: Color` | 4 |
 | [`core.color.mix@1`](#corecolormix1) | Mix two OKLCH colors in OKLab space (t clamped to [0, 1]) | `a: Color = [0.8, 0.12, 60.0, 1.0]`<br>`b: Color = [0.9, 0.08, 80.0, 1.0]`<br>`t: Float = 0.5` | `out: Color` | 4 |
 | [`core.curve.ramp@1`](#corecurveramp1) | Sample a curve at a position | `curve: Curve = { keys = [{ position = 0.0, value = 0.0 }, { position = 1.0, value = 1.0 }] }`<br>`position: Float = 0.0` | `out: Float` | 5 |
+| [`core.curve.ramp@2`](#corecurveramp2) | Sample a curve of numbers, vectors or colors at a position `<T: Interpolable = Float>` | `curve: Curve = { keys = [{ position = 0.0, value = 0.0 }, { position = 1.0, value = 1.0 }] }`<br>`position: Float = 0.0` | `out: T` | 9 |
 | [`core.event.counter@1`](#coreeventcounter1) | Count trigger events; reset to 0 | `trigger: Event`<br>`reset: Event` | `count: Int` | 3 |
 | [`core.event.every@1`](#coreeventevery1) | Fire each time the clock crosses offset + k * period | `period: Float = 1.0`<br>`offset: Float = 0.0` | `fired: Event` | 4 |
 | [`core.event.gate@1`](#coreeventgate1) | Forward trigger events while open | `trigger: Event`<br>`open: Bool = true` | `out: Event` | 3 |
@@ -118,12 +155,14 @@ inputs list no default: in value cooking they carry the placeholder
 | [`core.logic.not@1`](#corelogicnot1) | Negate a | `a: Bool = false` | `out: Bool` | 2 |
 | [`core.logic.or@1`](#corelogicor1) | True when a or b (or both) is true | `a: Bool = false`<br>`b: Bool = false` | `out: Bool` | 3 |
 | [`core.logic.select@1`](#corelogicselect1) | Pick a when cond is true, else b | `cond: Bool = false`<br>`a: Float = 1.0`<br>`b: Float = 0.0` | `out: Float` | 3 |
+| [`core.logic.select@2`](#corelogicselect2) | Pick a when cond is true, else b (any type) `<T: Any = Float>` | `cond: Bool = false`<br>`a: T = 1.0`<br>`b: T = 0.0` | `out: T` | 7 |
 | [`core.math.abs@1`](#coremathabs1) | Absolute value of x | `x: Float = 0.0` | `out: Float` | 3 |
 | [`core.math.add@1`](#coremathadd1) | Add two numbers | `a: Float = 0.0`<br>`b: Float = 0.0` | `out: Float` | 3 |
 | [`core.math.clamp@1`](#coremathclamp1) | Limit x to the range [min, max] (bounds are swapped if reversed) | `x: Float = 0.0`<br>`min: Float = 0.0`<br>`max: Float = 1.0` | `out: Float` | 4 |
 | [`core.math.cos@1`](#coremathcos1) | Cosine of x (radians) | `x: Float = 0.0` | `out: Float` | 3 |
 | [`core.math.div@1`](#coremathdiv1) | Divide a by b (b must not be zero) | `a: Float = 0.0`<br>`b: Float = 1.0` | `out: Float` | 5 |
 | [`core.math.lerp@1`](#coremathlerp1) | Linear interpolation between a and b | `a: Float = 0.0`<br>`b: Float = 1.0`<br>`t: Float = 0.5` | `out: Float` | 3 |
+| [`core.math.lerp@2`](#coremathlerp2) | Linear interpolation between a and b (numbers, vectors, colors) `<T: Interpolable = Float>` | `a: T = 0.0`<br>`b: T = 1.0`<br>`t: Float = 0.5` | `out: T` | 8 |
 | [`core.math.max@1`](#coremathmax1) | The larger of a and b | `a: Float = 0.0`<br>`b: Float = 0.0` | `out: Float` | 3 |
 | [`core.math.min@1`](#coremathmin1) | The smaller of a and b | `a: Float = 0.0`<br>`b: Float = 0.0` | `out: Float` | 4 |
 | [`core.math.mul@1`](#coremathmul1) | Multiply a by b | `a: Float = 0.0`<br>`b: Float = 1.0` | `out: Float` | 4 |
@@ -142,6 +181,7 @@ inputs list no default: in value cooking they carry the placeholder
 | [`core.table.count@1`](#coretablecount1) | Number of rows and columns of a table | `table: Table = { columns = [] }` | `count: Int`<br>`columns: Int` | 3 |
 | [`core.table.filter_text@1`](#coretablefilter_text1) | Keep the rows whose text column contains a substring | `table: Table = { columns = [] }`<br>`column: String = "name"`<br>`text: String = ""`<br>`ignore_case: Bool = false` | `out: Table`<br>`count: Int` | 4 |
 | [`core.table.get@1`](#coretableget1) | One cell of a table as text and number | `table: Table = { columns = [] }`<br>`row: Int = 0`<br>`column: String = "name"` | `text: String`<br>`number: Float`<br>`found: Bool` | 6 |
+| [`core.table.get_value@1`](#coretableget_value1) | One cell of a table, typed `<T: Any = Float>` | `table: Table = { columns = [] }`<br>`row: Int = 0`<br>`column: String = "value"` | `value: T`<br>`found: Bool` | 9 |
 | [`core.table.sort@1`](#coretablesort1) | Sort the rows of a table by a column | `table: Table = { columns = [] }`<br>`column: String = "name"`<br>`ascending: Bool = true` | `out: Table` | 4 |
 | [`core.text.format@1`](#coretextformat1) | Fill {a} and {b} in a template with numbers ({{ and }} for braces) | `template: String = "{a}"`<br>`a: Float = 0.0`<br>`b: Float = 0.0`<br>`precision: Int = 2` | `out: String` | 5 |
 | [`core.time.clock@1`](#coretimeclock1) | The frame clock *(time)* | none | `frame: Int`<br>`time: Float`<br>`dt: Float` | 2 |
@@ -196,6 +236,26 @@ hold/loop/ping-pong outside the keys. A `NaN` position gives the first
 key's value, infinities the end keys' values.
 
 Spec: [`core.curve.ramp.node.toml`](../crates/livspeil-nodes-core/specs/core.curve.ramp.node.toml)
+
+### core.curve.ramp@2
+
+Sample a curve of numbers, vectors or colors at a position
+
+Type variables: `<T: Interpolable = Float>`.
+
+Samples `curve` at `position` and gives a value of type `T` (`Float`,
+`Vec2`, `Vec3`, `Vec4` or `Color`); supersedes `@1`, which stays
+registered. A curve's key type is data (the port type is always
+`Curve`), so `T` resolves from where `out` is linked or from the type
+pinned on the node (`port-type=` in documents), never from the curve.
+Keys of type `T` are sampled like an animation channel (vectors
+component by component); color curves interpolate in OKLab plus alpha
+(hue the short way round, keys returned exactly). A `Float` curve is
+broadcast: `[x, x, x]` for `Vec3`, the grey `oklch(x 0 0 1)` for colors,
+so the default identity curve works for every `T`. Any other key type is
+an invalid-input error on `curve`.
+
+Spec: [`core.curve.ramp@2.node.toml`](../crates/livspeil-nodes-core/specs/core.curve.ramp@2.node.toml)
 
 ### core.event.counter@1
 
@@ -310,9 +370,25 @@ Spec: [`core.logic.or.node.toml`](../crates/livspeil-nodes-core/specs/core.logic
 
 Pick a when cond is true, else b
 
-`out = cond ? a : b`. Float-only for now; it becomes polymorphic once the node API has constraint classes.
+`out = cond ? a : b`, Float-only. Superseded by the polymorphic
+`core.logic.select@2` (any value type); kept for existing documents.
 
 Spec: [`core.logic.select.node.toml`](../crates/livspeil-nodes-core/specs/core.logic.select.node.toml)
+
+### core.logic.select@2
+
+Pick a when cond is true, else b (any type)
+
+Type variables: `<T: Any = Float>`.
+
+`out = cond ? a : b` for any value type `T` (everything but `Event`);
+supersedes `@1`, which stays registered. `T` resolves from what is linked
+or set (a `Vec3` linked into `a`, a `String` value on `b`, a `Color`
+input fed by `out`); unresolved it is `Float` and the node is exactly
+`@1`. Defaults follow `T`: `a` is `1.0` as `[1, 1, 1]` for vectors and
+white for colors, `b` the zero value of `T`.
+
+Spec: [`core.logic.select@2.node.toml`](../crates/livspeil-nodes-core/specs/core.logic.select@2.node.toml)
 
 ### core.math.abs@1
 
@@ -367,6 +443,24 @@ Linear interpolation between a and b
 `out = a + (b - a) * t`, not clamped: `t` outside `[0, 1]` extrapolates.
 
 Spec: [`core.math.lerp.node.toml`](../crates/livspeil-nodes-core/specs/core.math.lerp.node.toml)
+
+### core.math.lerp@2
+
+Linear interpolation between a and b (numbers, vectors, colors)
+
+Type variables: `<T: Interpolable = Float>`.
+
+`out = a + (b - a) * t`, not clamped, for any interpolable type `T`
+(`Float`, `Vec2`, `Vec3`, `Vec4`, `Color`); supersedes `@1`, which stays
+registered. Vectors interpolate component by component. Colors (OKLCH
+plus alpha) interpolate in OKLab plus alpha, so the hue takes the short
+way round and a grey end does not drag it; the result's hue is in
+`[0, 360)` (0 below chroma `1e-9`), and `t = 0` / `t = 1` give `a` / `b`
+exactly. `T` resolves from what is linked or set; unresolved it is
+`Float`. Defaults follow `T`: `a` is zero (black for colors), `b` ones
+(white for colors).
+
+Spec: [`core.math.lerp@2.node.toml`](../crates/livspeil-nodes-core/specs/core.math.lerp@2.node.toml)
 
 ### core.math.max@1
 
@@ -556,6 +650,24 @@ out of range (negative or past the end) gives `found = false`, `text = ""`,
 `number = 0`; an unknown column is an invalid-input error on `column`.
 
 Spec: [`core.table.get.node.toml`](../crates/livspeil-nodes-core/specs/core.table.get.node.toml)
+
+### core.table.get_value@1
+
+One cell of a table, typed
+
+Type variables: `<T: Any = Float>`.
+
+One cell with a declared type `T` (any value type): one generic node
+rather than one getter per type. Column types are data, so `T` resolves
+from where `value` is linked or from the type pinned on the node
+(`port-type="String"` in documents), and the named column must hold `T`
+values (an `Int` column also serves `T = Float`); otherwise the cook
+fails with an invalid-input error on `column`, whether or not the row
+exists. A row out of range gives `found = false` and the zero value of
+`T`, as does a table without columns (an unconnected input); an unknown
+column of a table with columns is an error, as in `core.table.get`.
+
+Spec: [`core.table.get_value.node.toml`](../crates/livspeil-nodes-core/specs/core.table.get_value.node.toml)
 
 ### core.table.sort@1
 

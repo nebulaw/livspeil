@@ -1,0 +1,104 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.table.get_value"
+version = 1
+summary = "One cell of a table, typed"
+time_dependent = false
+reads_system = false
+description = '''
+One cell with a declared type `T` (any value type): one generic node
+rather than one getter per type. Column types are data, so `T` resolves
+from where `value` is linked or from the type pinned on the node
+(`port-type="String"` in documents), and the named column must hold `T`
+values (an `Int` column also serves `T = Float`); otherwise the cook
+fails with an invalid-input error on `column`, whether or not the row
+exists. A row out of range gives `found = false` and the zero value of
+`T`, as does a table without columns (an unconnected input); an unknown
+column of a table with columns is an error, as in `core.table.get`.
+'''
+
+[[type_vars]]
+name = "T"
+class = "Any"
+fallback = "Float"
+
+[[inputs]]
+name = "table"
+type = "Table"
+default = { columns = [] }
+
+[[inputs]]
+name = "row"
+type = "Int"
+default = 0
+
+[[inputs]]
+name = "column"
+type = "String"
+default = "value"
+
+[[outputs]]
+name = "value"
+type = "Any"
+var = "T"
+
+[[outputs]]
+name = "found"
+type = "Bool"
+
+[[tests]]
+name = "defaults"
+expect = { value = 0.0, found = false }
+
+[[tests]]
+name = "String"
+types = { T = "String" }
+inputs = { row = 1, column = "name", table = { columns = [{ name = "name", type = "String", values = ["Dune", "Emma"] }, { name = "pages", type = "Int", values = [412, 474] }] } }
+expect = { value = "Emma", found = true }
+
+[[tests]]
+name = "Int"
+types = { T = "Int" }
+inputs = { row = 1, column = "pages", table = { columns = [{ name = "name", type = "String", values = ["Dune", "Emma"] }, { name = "pages", type = "Int", values = [412, 474] }] } }
+expect = { value = 474, found = true }
+
+[[tests]]
+name = "Int columns serve Float"
+inputs = { row = 0, column = "pages", table = { columns = [{ name = "pages", type = "Int", values = [412, 474] }] } }
+expect = { value = 412.0, found = true }
+
+[[tests]]
+name = "Vec3"
+types = { T = "Vec3" }
+inputs = { row = 0, column = "pos", table = { columns = [{ name = "pos", type = "Vec3", values = [[1.0, 2.0, 3.0]] }] } }
+expect = { value = [1.0, 2.0, 3.0], found = true }
+
+[[tests]]
+name = "Bool, row out of range"
+types = { T = "Bool" }
+inputs = { row = 5, column = "read", table = { columns = [{ name = "read", type = "Bool", values = [true] }] } }
+expect = { value = false, found = false }
+
+[[tests]]
+name = "Color, negative row"
+types = { T = "Color" }
+inputs = { row = -1, column = "tint", table = { columns = [{ name = "tint", type = "Color", values = [[0.5, 0.1, 30.0, 1.0]] }] } }
+expect = { value = [0.0, 0.0, 0.0, 0.0], found = false }
+
+[[tests]]
+name = "column of another type"
+types = { T = "String" }
+inputs = { row = 9, column = "pages", table = { columns = [{ name = "pages", type = "Int", values = [412] }] } }
+expect_error = { port = "column", message = "column \"pages\" holds Int values, not String" }
+
+[[tests]]
+name = "unknown column"
+types = { T = "String" }
+inputs = { column = "nope", table = { columns = [{ name = "pages", type = "Int", values = [412] }] } }
+expect_error = { port = "column", message = "no column \"nope\"" }

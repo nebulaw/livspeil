@@ -1,0 +1,99 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.curve.ramp"
+version = 2
+summary = "Sample a curve of numbers, vectors or colors at a position"
+time_dependent = false
+reads_system = false
+description = '''
+Samples `curve` at `position` and gives a value of type `T` (`Float`,
+`Vec2`, `Vec3`, `Vec4` or `Color`); supersedes `@1`, which stays
+registered. A curve's key type is data (the port type is always
+`Curve`), so `T` resolves from where `out` is linked or from the type
+pinned on the node (`port-type=` in documents), never from the curve.
+Keys of type `T` are sampled like an animation channel (vectors
+component by component); color curves interpolate in OKLab plus alpha
+(hue the short way round, keys returned exactly). A `Float` curve is
+broadcast: `[x, x, x]` for `Vec3`, the grey `oklch(x 0 0 1)` for colors,
+so the default identity curve works for every `T`. Any other key type is
+an invalid-input error on `curve`.
+'''
+
+[[type_vars]]
+name = "T"
+class = "Interpolable"
+fallback = "Float"
+
+[[inputs]]
+name = "curve"
+type = "Curve"
+default = { keys = [{ position = 0.0, value = 0.0 }, { position = 1.0, value = 1.0 }] }
+
+[[inputs]]
+name = "position"
+type = "Float"
+default = 0.0
+
+[[outputs]]
+name = "out"
+type = "Interpolable"
+var = "T"
+
+[[tests]]
+name = "defaults: identity"
+inputs = { position = 0.25 }
+expect = { out = 0.25 }
+
+[[tests]]
+name = "Float curves broadcast"
+types = { T = "Vec3" }
+inputs = { position = 0.25 }
+expect = { out = [0.25, 0.25, 0.25] }
+
+[[tests]]
+name = "Float curve as grey"
+types = { T = "Color" }
+inputs = { position = 0.5 }
+expect = { out = [0.5, 0.0, 0.0, 1.0] }
+
+[[tests]]
+name = "Vec2 curve"
+types = { T = "Vec2" }
+inputs = { position = 0.5, curve = { type = "Vec2", keys = [{ position = 0.0, value = [0.0, 0.0] }, { position = 1.0, value = [2.0, 4.0] }] } }
+expect = { out = [1.0, 2.0] }
+
+[[tests]]
+name = "Vec3 step, ping-pong after"
+types = { T = "Vec3" }
+inputs = { position = 1.75, curve = { type = "Vec3", keys = [{ position = 0.0, value = [1.0, 1.0, 1.0], interpolation = "step" }, { position = 0.5, value = [2.0, 2.0, 2.0], interpolation = "step" }, { position = 1.0, value = [3.0, 3.0, 3.0] }], post = "ping_pong" } }
+expect = { out = [1.0, 1.0, 1.0] }
+
+[[tests]]
+name = "color curves mix in OKLab"
+types = { T = "Color" }
+inputs = { position = 0.5, curve = { type = "Color", keys = [{ position = 0.0, value = [0.7, 0.1, 40.0, 1.0] }, { position = 1.0, value = [0.7, 0.1, 80.0, 1.0] }] } }
+expect = { out = [0.7, 0.09396926207859084, 60.0, 1.0] }
+tolerance = 1e-12
+
+[[tests]]
+name = "color keys come back exactly"
+types = { T = "Color" }
+inputs = { position = 3.0, curve = { type = "Color", keys = [{ position = 0.0, value = [0.7, 0.1, 40.0, 1.0] }, { position = 1.0, value = [0.3, 0.2, 359.5, 0.25] }] } }
+expect = { out = [0.3, 0.2, 359.5, 0.25] }
+
+[[tests]]
+name = "wrong key type"
+types = { T = "Vec3" }
+inputs = { curve = { type = "Vec2", keys = [{ position = 0.0, value = [0.0, 0.0] }] } }
+expect_error = { port = "curve", message = "a Vec2 curve cannot give Vec3 values" }
+
+[[tests]]
+name = "typed curve into Float"
+inputs = { curve = { type = "Color", keys = [{ position = 0.0, value = [0.5, 0.0, 0.0] }] } }
+expect_error = { port = "curve" }
