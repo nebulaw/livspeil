@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: 2026 Livspeil contributors
+// SPDX-License-Identifier: CC0-1.0
+
+// The prolog stays as it is.
+
+room "Commented" format=1 min-tier="T1" {
+  // The root network.
+  network "/" {
+    node "sun" type="core.time.timeofday@1" id="0192f5a0-7c3e-7a10-8000-000000000001" {
+      input "offset" 6.0 expr="$T / 3600.0" { // anim block next
+        anim post="loop" {
+          key 0.0 6.0
+          key 1.0 7.0
+        }
+      }
+    }
+    // The lamp mixes two colors.
+    // (second line)
+    node "lamp" type="core.color.mix@1" id="0192f5a0-7c3e-7a10-8000-000000000002" { // trailing on a block
+      input "a" (color)"oklch(0.8 0.12 60.0 1.0)" // alpha written explicitly
+      //b comes after a
+      input "b" (color)"oklch(0.35 0.08 260.0 1.0)"
+    }
+    node "desk" type="core.subnet@1" id="0192f5a0-7c3e-7a10-8000-000000000010" {
+      // The Charm header.
+      charm "Desk" version="1.0.0" {
+        capability "time"
+      }
+      // Inside the subnet.
+      network {
+        // The input.
+        node "in" type="core.subnet.input@1" id="0192f5a0-7c3e-7a10-8000-000000000011" port-type="Float" {
+          input "value" 1.0 // default
+        }
+        node "out" type="core.output@1" id="0192f5a0-7c3e-7a10-8000-000000000012" port-type="Float" // an output
+        link from="in.value" to="out.value" // inner link
+      }
+    }
+    // Links are sorted; their comments follow them.
+    link from="sun.phase" to="lamp.t" // phase drives the mix
+  }
+  // About the meta block (moves after the network).
+  meta {
+    // lamp position
+    node "lamp" x=360.0 y=40.0
+    node "sun" x=120.0 y=40.0 // sun position
+  }
+}

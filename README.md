@@ -15,7 +15,9 @@ Status: **Phase 0 (kernel)**. This repository currently holds the headless, cros
 | `crates/livspeil-cmd` | Command bus, undo/redo, journal (M0.3) |
 | `crates/livspeil-nodes-core` | Core nodes: math, logic, vector, time, sky, color, text (M0.6), subnet and output nodes (M0.7), tables, ramps and fs (M0.8), events (M0.10) |
 | `crates/livspeil-testkit` | Golden-file harness |
-| `crates/livspeil-cli` | `livspeil` headless command line (`validate`, `fmt`, `cook`, `diff`, `assets`) |
+| `crates/livspeil-script` | Script worker host: out-of-process scripts, capabilities, limits (M0.14) |
+| `crates/livspeil-cli` | `livspeil` headless command line (`validate`, `fmt`, `cook`, `diff`, `assets`, `run`) |
+| `sdk/python` | Python SDK for scripts (MPL-2.0, standard library only) |
 | `xtask` | Project automation (`cargo xtask check`) |
 | `specs/` | Design specs |
 | `docs/` | Licensing and contribution documentation |
@@ -29,6 +31,14 @@ cargo run -p livspeil-cli -- validate examples/sun-and-lamp.room
 cargo run -p livspeil-cli -- fmt --check examples/sun-and-lamp.room
 cargo run -p livspeil-cli -- cook examples/sun-and-lamp.room --frames 600 --every 50
 ```
+
+`fmt` rewrites `room.kdl` in canonical form (sorted nodes, inputs and
+links, two-space indent). It keeps the leading comment block and the `//`
+comments attached to items: lines directly above a node, input, link,
+network, `charm` or `meta` entry, and a comment at the end of its line;
+they move with their item. Other comments (block comments, comments inside
+`anim`/`table`/`curve` blocks or behind slashdashed items, comments not
+directly above an item) are dropped; see `crates/livspeil-doc/src/comments.rs`.
 
 `cook` drives the graph with a deterministic frame clock (frame `i` at
 `start + i/fps` seconds, `--fps 60` by default) and prints the outputs of
@@ -53,8 +63,16 @@ Charms (M0.7, M0.16): a shared "Daylight" Charm definition (hour in, lamp
 color and intensity out, two promoted parameters) used by two instances
 with different parameters, printed through four `core.output` nodes.
 
+File-system nodes (`core.fs.list_dir`) see the room package (or
+`--fs-root DIR`) and nothing outside it. A run lists each folder once (a
+snapshot); with `--watch-fs` the listed folders are checked every frame and
+re-listed when files were created, deleted or renamed, re-cooking only what
+reads them.
+
 Floats are printed with six decimals so the output (and its golden files in
-`crates/livspeil-cli/tests/golden/`) is identical on macOS and Linux.
+`crates/livspeil-cli/tests/golden/`) is identical on macOS and Linux;
+`--precision N` picks another number of decimals and `--precision full`
+the exact shortest round-trip form (both text and JSONL).
 `--format jsonl` prints one JSON object per frame, `--stats` adds the
 scheduler's cooked/reused counts, and `livspeil --help` documents every
 option and exit code (0 ok, 1 load error, 2 usage error, 3 node error).
@@ -73,9 +91,11 @@ counter's `count` or a latch's `out` can drive any parameter. Design:
 `crates/livspeil-graph/src/cook/events.rs`.
 
 [`examples/blink.room`](examples/blink.room/room.kdl) blinks a lamp every
-0.5 s and counts the blinks. `--event NODE.PORT@FRAME` injects an event
-(into an `Event` input, or out of an `Event` output) for testing, and
-`Event` outputs print what fired in the frame:
+0.5 s and counts the blinks. `--event NODE.PORT@FRAME[=VALUE]` injects an
+event (into an `Event` input, or out of an `Event` output) for testing,
+with an optional payload in the `room.kdl` value syntax (`=1.0`, `=3`,
+`=#true`, `='"text"'`, `='(vec3)"1 2 3"'`), and `Event` outputs print what
+fired in the frame:
 
 ```sh
 cargo run -p livspeil-cli -- cook examples/blink.room --frames 40 --fps 20 --every 10 \
@@ -88,6 +108,11 @@ frame=10 time=0.500000 count.value=2
 frame=10 time=0.500000 light.value=0.200000
 frame=10 time=0.500000 ticks.value=event(1)
 ```
+
+Event overflows and handler errors are reported for every frame: printed
+frames list them, and frames skipped by `--every` are summarized before the
+next printed frame (`frames 3..49: 2 event errors (last: timer: ...)`). A
+handler error in any frame makes the exit code 3.
 
 ### `diff`
 
@@ -193,6 +218,54 @@ expressions (or `NONE`/`NOASSERTION`). Licenses outside the allow-list
 (CC0-1.0, CC-BY-4.0, CC-BY-SA-4.0, OFL-1.1, MIT, Apache-2.0, MPL-2.0,
 GPL-3.0-or-later, LGPL-3.0-or-later) and a missing `author` for licenses
 that require attribution are warnings; `--strict` fails on warnings too.
+
+## Scripting
+
+Scripts run **out of process** and talk to the kernel over the script
+worker protocol ([`docs/script-protocol.md`](docs/script-protocol.md)): one
+JSON object per line on the script's stdin and stdout. A script reads the
+graph with queries, cooks nodes, and changes the room only by sending
+commands to the command bus, so its edits are validated, undoable and
+journaled with origin `script`. It can do only what its **capabilities**
+allow: `graph.read`, `graph.write`, `graph.cook`, `fs.read:<dir>` (none by
+default). Python comes first, with the SDK in [`sdk/python`](sdk/python)
+(Python 3.10+, no dependencies):
+
+```python
+import livspeil
+from livspeil import SetInput
+
+session = livspeil.connect()
+with session.graph.transaction():          # one undo step
+    for node in session.graph.nodes(type="core.math.remap"):
+        session.graph.apply(SetInput(node, "out_max", node.input("out_max") * 0.8))
+```
+
+```sh
+livspeil run examples/sun-and-lamp.room examples/scripts/dim_lamps.py \
+    --grant graph.read,graph.write [--save] [--journal edits.jsonl]
+livspeil run examples/sun-and-lamp.room examples/scripts/sun_elevation.py --grant graph.cook
+livspeil run examples/blink.room examples/scripts/blink_watcher.py \
+    --grant graph.read,graph.write --ticks 40 --fps 20
+```
+
+```text
+run dim_lamps.py on "Sun and Lamp" (granted: graph.read, graph.write)
+log info: dimming 2 lamp nodes by 20%
+applied 1 command (1 undo step):
+  transaction (5 steps)
+    set_input lamp_color.c0 = oklch(0.28 0.08 260 1)
+    ...
+    set_input lamp_intensity.out_max = 0.16
+script dim_lamps.py exited with status 0
+```
+
+Scripts that call `session.listen()` react to the scene through
+`@session.on_tick` and `@session.on_event` hooks. The host enforces a
+handshake timeout, per-handler timeouts (cancel, then kill), a total run
+time and a message size limit. Capabilities scope the kernel API; they are
+not an OS sandbox yet. Exit code 4 means the script failed; the room is
+then not saved.
 
 ## Develop
 
