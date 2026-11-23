@@ -5,15 +5,18 @@
 //!
 //! Exit codes: 0 success, 1 the document is invalid (or not canonical for
 //! `fmt --check`) or could not be read or written, 2 usage error, 3 `cook`
-//! printed at least one node error. `diff` follows `git diff --exit-code`
-//! instead: 0 equal, 1 different, 2 usage error, 3 load error.
+//! printed at least one node error, 4 `run`: the script failed. `diff`
+//! follows `git diff --exit-code` instead: 0 equal, 1 different, 2 usage
+//! error, 3 load error.
 //!
 //! See the `cook` module for the cook clock, sinks and output formats, the
-//! `diff` module for the JSONL schema and `assets` for `assets.lock`.
+//! `diff` module for the JSONL schema, `assets` for `assets.lock` and `run`
+//! for scripts.
 
 mod assets;
 mod cook;
 mod diff;
+mod run;
 
 use std::fs;
 use std::path::Path;
@@ -55,6 +58,11 @@ COMMANDS:
                             Verify assets.lock against assets/ (hashes,
                             sizes, unlisted files, licenses); --strict
                             also fails on warnings
+    run <room> <script.py> [OPTIONS]
+                            Run a Python script against a room through the
+                            script worker protocol and print its logs and
+                            the commands it applied (journaled with origin
+                            \"script\"); nothing is written without --save
 
 <path> is a room package directory (Name.room/) or its room.kdl file.
 
@@ -70,16 +78,24 @@ COOK OPTIONS:
     --format text|jsonl     One line per frame and node (default), or one
                             JSON object per frame
     --stats                 Also print cooked/reused node counts per frame
-    --event NODE.PORT@FRAME Inject an event (no payload) in frame FRAME
-                            into the Event input PORT of NODE, or from its
-                            Event output PORT (repeatable); Event outputs
+    --precision N|full      Decimals of printed floats (0 to 17, default
+                            6), or full: the shortest exact form
+    --event NODE.PORT@FRAME[=VALUE]
+                            Inject an event in frame FRAME into the Event
+                            input PORT of NODE, or from its Event output
+                            PORT (repeatable); VALUE is an optional payload
+                            in room.kdl value syntax (1.0, 3, #true,
+                            \"text\", (vec3)\"1 2 3\"); Event outputs
                             print the events fired in the frame (none,
                             event, event(<payload>))
     --fs-root DIR           File root of file-system nodes such as
                             core.fs.list_dir (default: the room package
                             directory); paths outside it are refused
+    --watch-fs              Re-list folders whose files were created,
+                            deleted or renamed during the run (checked
+                            every frame); default: one snapshot per run
 
-    Floats are printed with 6 decimals. Example:
+    Floats are printed with 6 decimals unless --precision. Example:
         livspeil cook examples/sun-and-lamp.room --frames 600 --every 50
 
 DIFF OPTIONS:
@@ -97,6 +113,28 @@ DIFF OPTIONS:
         ~ node \"t\" input \"rows\" table: 2 cols x 3 rows -> 2 cols x 4 rows (2 cells changed)
         + link \"in.value\" -> \"x.a\" in \"/desk\"
 
+RUN OPTIONS:
+    --grant CAP             Grant a capability (repeatable, or comma
+                            separated): graph.read, graph.write,
+                            graph.cook, fs.read:<dir>. Default: none
+    --save                  Write the edited room back in canonical form
+                            (not done when the script fails)
+    --journal FILE          Append the applied commands to FILE as
+                            journal lines
+    --ticks N               If the script listens (on_tick/on_event), drive
+                            it for N frames (default 0), then shut it down
+    --fps F                 Frame rate of those ticks (default 60)
+    --python CMD            Interpreter (default $LIVSPEIL_PYTHON or
+                            python3); the SDK is put on PYTHONPATH
+    --timeout SECS          Total run time limit (default 60)
+    --request-timeout SECS  Limit per tick/event handler (default 5)
+
+    The script runs in the room package directory, out of process; it can
+    change the room only through commands, so each is validated and
+    undoable. Example:
+        livspeil run examples/sun-and-lamp.room examples/scripts/dim_lamps.py \\
+            --grant graph.read,graph.write
+
 ASSET LICENSES:
     license= is an SPDX expression. Allowed: CC0-1.0, CC-BY-4.0,
     CC-BY-SA-4.0, OFL-1.1, MIT, Apache-2.0, MPL-2.0, GPL-3.0-or-later,
@@ -112,6 +150,7 @@ EXIT CODES:
     1 invalid or non-canonical document, asset errors, or an I/O error
     2 usage error (including an unknown --node name)
     3 cook: at least one printed value is a node error
+    4 run: the script failed (crash, timeout, protocol error)
 
     diff (like git diff --exit-code): 0 no differences, 1 differences,
     2 usage error, 3 a document cannot be read or parsed
@@ -156,6 +195,7 @@ fn run(args: Vec<String>) -> ExitCode {
         Some("cook") => cook::run(args),
         Some("diff") => diff::run(args),
         Some("assets") => assets::run(args),
+        Some("run") => run::run(args),
         Some(other) => usage(&format!("unknown command or option '{other}'")),
     }
 }

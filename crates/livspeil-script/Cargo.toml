@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "livspeil-script"
+description = "Script worker host: out-of-process scripts over a JSON Lines protocol, with capabilities"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+livspeil-cmd = { path = "../livspeil-cmd" }
+livspeil-graph = { path = "../livspeil-graph", features = ["serde"] }
+livspeil-node-api = { path = "../livspeil-node-api", features = ["serde"] }
+livspeil-nodes-core = { path = "../livspeil-nodes-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[dev-dependencies]
+livspeil-doc = { path = "../livspeil-doc" }
+
+[lints]
+workspace = true

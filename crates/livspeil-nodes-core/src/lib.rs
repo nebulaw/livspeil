@@ -69,7 +69,7 @@ pub use curve::{Ramp, Ramp2};
 pub use event::{
     Counter, EventSelect, Every, Gate, Latch, MAX_CROSSINGS_PER_TICK, OnChange, Toggle, crossings,
 };
-pub use fs::{ListDir, MemFs, StdFs, glob_match};
+pub use fs::{DirStamp, ListDir, MemFs, RefreshPolicy, StdFs, glob_match};
 pub use table::{TableColumnNode, TableCount, TableFilterText, TableGet, TableGetValue, TableSort};
 
 pub use vector::{Compose3, Decompose3, Dot3, Length3, Normalize3, dot3, length3, normalize3};
