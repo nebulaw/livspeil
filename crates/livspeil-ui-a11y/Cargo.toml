@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: MPL-2.0
+
+[package]
+name = "livspeil-ui-a11y"
+description = "Livspeil UI accessibility: incremental AccessKit trees from the UI core and action routing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MPL-2.0"
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+accesskit = "0.25.2"
+livspeil-ui-core = { path = "../livspeil-ui-core" }
+livspeil-ui-layout = { path = "../livspeil-ui-layout" }
+
+[dev-dependencies]
+livspeil-testkit = { path = "../livspeil-testkit" }
+proptest = { version = "1", default-features = false, features = ["std"] }
+
+[lints]
+workspace = true
