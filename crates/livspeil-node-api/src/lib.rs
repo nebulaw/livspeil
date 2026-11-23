@@ -9,8 +9,7 @@
 //! `specs/livspeil-kernel-spec-v0.md`, sections 2, 4 and 9.
 //!
 //! Milestone M0.2 scope: concrete port types, [`Value`], [`NodeSpec`],
-//! [`NodeImpl`] and [`NodeRegistry`]. Polymorphic constraint classes
-//! (`Numeric`, `VectorLike`) arrive later. Node specs are mirrored as
+//! [`NodeImpl`] and [`NodeRegistry`]. Node specs are mirrored as
 //! `*.node.toml` files in `livspeil-nodes-core/specs/`.
 //!
 //! Milestone M0.8 adds [`Value::Table`] ([`Table`], typed column-oriented
@@ -27,6 +26,13 @@
 //! [`NodeImpl::initial_state`] and [`NodeImpl::cook_with_state`]); see the
 //! [`event`] module for the model.
 //!
+//! Milestone M0.17 adds polymorphic ports: constraint classes
+//! ([`TypeClass`]: `Numeric`, `Vector`, `Interpolable`, `Any`) and type
+//! variables ([`TypeVar`], declared by [`NodeImpl::type_vars`]) that the
+//! graph resolves per node instance ([`instantiate`]); and typed curves
+//! (`Vec2`, `Vec3`, `Vec4` and `Color` keys, [`TypedCurveKey`]). See the
+//! [`types`] and [`curve`] modules.
+//!
 //! Cargo feature `serde` (off by default) derives `Serialize` and
 //! `Deserialize` for [`PortType`] and [`Value`]. It adds derives only, so
 //! node authors who do not need it pay nothing. Values use serde's default
@@ -40,13 +46,18 @@ pub mod curve;
 pub mod event;
 pub mod system;
 pub mod table;
+pub mod types;
 
 pub use curve::{
     Curve, CurveError, CurveExtrapolation, CurveInterpolation, CurveKey, CurveTangent,
+    TypedCurveKey, TypedCurveTangent,
 };
 pub use event::{Event, EventCall, EventTrigger};
 pub use system::{DirEntry, FileSystem, FsError, FsPath, SystemContext, SystemHost};
 pub use table::{Table, TableColumn, TableError};
+pub use types::{
+    TypeClass, TypeError, TypeVar, instantiate, resolve_spec, resolved_default, validate_type_vars,
+};
 
 /// Value types that can flow through node ports (kernel spec, section 4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -73,7 +84,7 @@ pub enum PortType {
     Material,
     Scene,
     Window,
-    /// A float curve (ramp); see [`Curve`].
+    /// A curve (ramp) of `Float`, vector or color values; see [`Curve`].
     Curve,
 }
 
@@ -162,7 +173,7 @@ pub enum Value {
     String(String),
     /// A typed, column-oriented table; cheap to clone.
     Table(Table),
-    /// A float curve; cheap to clone.
+    /// A curve; cheap to clone.
     Curve(Arc<Curve>),
     /// What an `Event` port carries in value cooking: nothing. Events
     /// themselves travel through the events phase (see [`event`]).
@@ -376,6 +387,25 @@ impl std::error::Error for NodeError {}
 pub trait NodeImpl: Send + Sync + fmt::Debug {
     /// The static description of this node type.
     fn spec(&self) -> &NodeSpec;
+
+    /// The type variables of a polymorphic node (see the [`types`]
+    /// module); their ports are declared in [`NodeImpl::spec`] with each
+    /// variable's fallback type. Default: none (a concrete node).
+    fn type_vars(&self) -> &[TypeVar] {
+        &[]
+    }
+
+    /// The node's own instance with its type variables resolved to
+    /// `types` (one per [`NodeImpl::type_vars`] entry, each in its class),
+    /// for nodes whose `cook` must know the resolved types. The instance's
+    /// spec must have the resolved port types ([`resolve_spec`]) and it
+    /// should declare no type variables. Default: `None`, and
+    /// [`instantiate`] wraps the node instead. Call [`instantiate`] rather
+    /// than this method.
+    fn with_types(&self, types: &[PortType]) -> Option<Arc<dyn NodeImpl>> {
+        let _ = types;
+        None
+    }
 
     /// Compute the outputs. `inputs` has one value per input port, already
     /// coerced to the port type; the result must have one value per output
@@ -621,7 +651,21 @@ mod tests {
         ])
         .unwrap()
         .with_extrapolation(CurveExtrapolation::Loop, CurveExtrapolation::Hold);
-        for value in [Value::Table(table), Value::Curve(Arc::new(curve))] {
+        let color = Curve::typed(vec![
+            TypedCurveKey::new(0.0, Value::Color([0.5, 0.1, 30.0, 1.0])),
+            TypedCurveKey::new(1.0, Value::Color([0.7, 0.2, 300.0, 1.0])).with_tangent(
+                TypedCurveTangent::Explicit {
+                    incoming: Value::Color([0.0; 4]),
+                    outgoing: Value::Color([1.0; 4]),
+                },
+            ),
+        ])
+        .unwrap();
+        for value in [
+            Value::Table(table),
+            Value::Curve(Arc::new(curve)),
+            Value::Curve(Arc::new(color)),
+        ] {
             let json = serde_json::to_string(&value).unwrap();
             let back: Value = serde_json::from_str(&json).unwrap();
             assert_eq!(back, value, "{json}");
@@ -631,6 +675,8 @@ mod tests {
         assert!(serde_json::from_str::<Value>(bad_table).is_err());
         let bad_curve = r#"{"Curve":{"keys":[]}}"#;
         assert!(serde_json::from_str::<Value>(bad_curve).is_err());
+        let mixed = r#"{"Curve":{"typed":[{"position":0.0,"value":{"Vec2":[0.0,0.0]}},{"position":1.0,"value":{"Float":1.0}}]}}"#;
+        assert!(serde_json::from_str::<Value>(mixed).is_err());
     }
 
     #[test]
