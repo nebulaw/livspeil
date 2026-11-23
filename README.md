@@ -30,6 +30,14 @@ cargo run -p livspeil-cli -- fmt --check examples/sun-and-lamp.room
 cargo run -p livspeil-cli -- cook examples/sun-and-lamp.room --frames 600 --every 50
 ```
 
+`fmt` rewrites `room.kdl` in canonical form (sorted nodes, inputs and
+links, two-space indent). It keeps the leading comment block and the `//`
+comments attached to items: lines directly above a node, input, link,
+network, `charm` or `meta` entry, and a comment at the end of its line;
+they move with their item. Other comments (block comments, comments inside
+`anim`/`table`/`curve` blocks or behind slashdashed items, comments not
+directly above an item) are dropped; see `crates/livspeil-doc/src/comments.rs`.
+
 `cook` drives the graph with a deterministic frame clock (frame `i` at
 `start + i/fps` seconds, `--fps 60` by default) and prints the outputs of
 the sinks: the root network's `core.output` nodes, or when it has none its
