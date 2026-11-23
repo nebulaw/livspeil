@@ -1,0 +1,10 @@
+window 0,0 400x300
+  demo 0,0 232x300
+    count 16,16 200x17 "Count: 0"
+    button:Increment 16,45 200x32
+      label 84,53 64x17 "Increment"
+    toggle 16,89 36x20
+      thumb 18,91 16x16
+    slider 16,121 200x20
+      track 16,129 200x4
+      thumb 16,123 16x16 translate=92,0
