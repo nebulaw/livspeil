@@ -1,0 +1,41 @@
+layout width=160.859375 height=28 lines=1 rtl=false
+line 0 text=0..41 "Hello مرحبا بالعالم 123 world" top=0 height=28 baseline=18 x=0 width=160.859375
+  run text=0..6 ltr font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g161 x=0 y=18 adv=9.65625
+    g614 x=9.65625 y=18 adv=7.578125
+    g736 x=17.234375 y=18 adv=3.15625
+    g736 x=20.390625 y=18 adv=3.15625
+    g790 x=23.53125 y=18 adv=7.796875
+    g1777 x=31.328125 y=18 adv=3.65625
+  run text=32..35 ltr font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g1342 x=34.984375 y=18 adv=5.28125
+    g1343 x=40.28125 y=18 adv=7.921875
+    g1345 x=48.203125 y=18 adv=8.03125
+  run text=31..32 rtl font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g1777 x=56.234375 y=18 adv=3.65625
+  run text=17..31 rtl font="Noto Sans Arabic" size=13 coords=[] color=TextPrimary
+    g77 x=59.890625 y=18 adv=7.3125
+    g72 x=67.203125 y=18 adv=3.375
+    g9 x=70.578125 y=18 adv=3.78125
+    g48 x=74.359375 y=18 adv=6.765625
+    g72 x=81.125 y=18 adv=3.375
+    g9 x=84.515625 y=18 adv=3.78125
+    g314 x=88.703125 y=18.03125 adv=0
+    g19 x=88.296875 y=18 adv=3.5
+  run text=16..17 rtl font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g1777 x=91.796875 y=18 adv=3.65625
+  run text=6..16 rtl font="Noto Sans Arabic" size=13 coords=[] color=TextPrimary
+    g9 x=95.453125 y=18 adv=3.78125
+    g314 x=100.453125 y=18.03125 adv=0
+    g16 x=99.234375 y=18 adv=4.453125
+    g27 x=103.6875 y=18 adv=7.65625
+    g31 x=110.828125 y=18 adv=4.625
+    g79 x=115.96875 y=18 adv=6.828125
+  run text=35..36 ltr font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g1777 x=122.796875 y=18 adv=3.65625
+  run text=36..41 ltr font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g984 x=126.453125 y=18 adv=10.40625
+    g790 x=136.859375 y=18 adv=7.796875
+    g852 x=144.65625 y=18 adv=5.09375
+    g736 x=149.75 y=18 adv=3.15625
+    g597 x=152.90625 y=18 adv=7.953125

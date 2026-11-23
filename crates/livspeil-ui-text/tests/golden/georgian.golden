@@ -1,0 +1,32 @@
+layout width=182.625 height=18 lines=1 rtl=false
+line 0 text=0..57 "გამარჯობა, თბილისი! Hello" top=0 height=18 baseline=14 x=0 width=182.625
+  run text=0..27 ltr font="Noto Sans Georgian" size=13 coords=[] color=TextPrimary
+    g110 x=0 y=14 adv=7.484375
+    g92 x=7.484375 y=14 adv=7.140625
+    g141 x=14.625 y=14 adv=7.859375
+    g92 x=22.484375 y=14 adv=7.140625
+    g157 x=29.625 y=14 adv=10.296875
+    g129 x=39.921875 y=14 adv=7.375
+    g147 x=47.296875 y=14 adv=10.453125
+    g94 x=57.75 y=14 adv=7.875
+    g92 x=65.625 y=14 adv=7.140625
+  run text=27..29 ltr font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g1501 x=72.765625 y=14 adv=3.75
+    g1777 x=76.5 y=14 adv=3.65625
+  run text=29..50 ltr font="Noto Sans Georgian" size=13 coords=[] color=TextPrimary
+    g164 x=80.15625 y=14 adv=11.453125
+    g94 x=91.609375 y=14 adv=7.875
+    g127 x=99.5 y=14 adv=7.46875
+    g139 x=106.953125 y=14 adv=14.15625
+    g127 x=121.109375 y=14 adv=7.46875
+    g159 x=128.578125 y=14 adv=7.859375
+    g127 x=136.4375 y=14 adv=7.46875
+  run text=50..52 ltr font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g1427 x=143.90625 y=14 adv=3.734375
+    g1777 x=147.640625 y=14 adv=3.65625
+  run text=52..57 ltr font="Inter Variable" size=13 coords=[] color=TextPrimary
+    g161 x=151.296875 y=14 adv=9.65625
+    g614 x=160.953125 y=14 adv=7.578125
+    g736 x=168.53125 y=14 adv=3.15625
+    g736 x=171.6875 y=14 adv=3.15625
+    g790 x=174.828125 y=14 adv=7.796875
