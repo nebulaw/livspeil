@@ -29,7 +29,8 @@
 //! ```
 //!
 //! - **Header**: `room "<name>" format=<int> min-tier="T<n>"`; the only
-//!   top-level node. `format` is required; `min-tier` defaults to `T0`.
+//!   top-level node. It holds an optional `charms` block (see below), the
+//!   network and an optional `meta` block, in that order. `format` is required; `min-tier` defaults to `T0`.
 //! - **Network**: exactly one in the room, `network "/"` (subnets nest
 //!   theirs, see below). It holds
 //!   `node "<name>" type="<id@version>" id="<uuid>"` entries, each with
@@ -201,10 +202,64 @@
 //! - `charm`, `network` in a non-subnet node and unknown port types are
 //!   errors with line and column.
 //!
-//! Each instance of a Charm is a full copy (its own ids); shared Charm
-//! definitions come later. Still **format 1**: subnets are purely
-//! additive, since a nested network, `charm` and `port-type=` were rejected
-//! before, so every older file reads and writes back identically.
+//! Still **format 1**: subnets are purely additive, since a nested
+//! network, `charm` and `port-type=` were rejected before, so every older
+//! file reads and writes back identically.
+//!
+//! # Shared Charm definitions (M0.16)
+//!
+//! A Charm can be defined once in the room's `charms` block (written
+//! first, before `network "/"`; definitions sorted by id) and used by any
+//! number of instances (`core.charm@1` nodes):
+//!
+//! ```kdl
+//! charms {
+//!   def "daylight" version="1.0.0" name="Daylight" icon="sun" min-tier="T1" {
+//!     capability "time"
+//!     network {
+//!       node "hour" type="core.subnet.input@1" id="0193a6c0-1d2e-7b40-8000-000000000011" port-type="Float" {
+//!         input "value" 12.0
+//!       }
+//!       node "level" type="core.math.smoothstep@1" id="0193a6c0-1d2e-7b40-8000-000000000012"
+//!       node "intensity" type="core.output@1" id="0193a6c0-1d2e-7b40-8000-000000000013" port-type="Float"
+//!       link from="hour.value" to="level.x"
+//!       link from="level.out" to="intensity.value"
+//!     }
+//!   }
+//! }
+//! network "/" {
+//!   node "desk" type="core.charm@1" id="0193a6c0-1d2e-7b40-8000-000000000020" def="daylight@1.0.0"
+//!   node "porch" type="core.charm@1" id="0193a6c0-1d2e-7b40-8000-000000000021" def="daylight@1.0.0" {
+//!     input "hour" 18.0
+//!   }
+//!   link from="desk.intensity" to="out.value"
+//! }
+//! ```
+//!
+//! - `def "<id>" version="<v>" [name=".."] [icon=".."] [min-tier="T<n>"]`
+//!   with `capability` children, then its `network` (like a subnet's).
+//!   `name` defaults to the id and is left out when equal to it. Node ids
+//!   inside a definition are local to it; the graph derives each
+//!   instance's node ids from the instance id and the local id
+//!   (`livspeil_graph::instance_node_id`), so they are never written.
+//! - A definition is self-contained: its links and `ch()`/`out()` paths
+//!   stay inside it, and it cannot contain instances (yet).
+//! - An instance is `node "<name>" type="core.charm@1" id=".."
+//!   def="<id>@<version>"`; it has no `charm` or `network` block. Its
+//!   `input "<port>"` lines name *interface inputs* of the definition and
+//!   hold only the sources (value, expression, animation) that differ
+//!   from the definition's defaults (the overrides); everything else
+//!   follows the definition. Instances cannot change anything else
+//!   inside: edit the definition, or detach the instance into a subnet.
+//! - Links name an instance's ports like a subnet's (`desk.intensity`).
+//! - Errors with line and column: an unknown definition, a version that
+//!   is not the definition's, `def=` on another node type or missing on an
+//!   instance, an input the definition's interface lacks, duplicate
+//!   definitions, instances inside a definition, and every graph error
+//!   inside a definition's network.
+//!
+//! Still **format 1**: purely additive (`charms` and `def=` were rejected
+//! before), so every older file reads and writes back identically.
 //!
 //! **Names are references**: links, `ch()` paths and meta positions name
 //! nodes by name. [`livspeil_graph::Graph::rename`] rewrites `ch()` paths
@@ -250,8 +305,8 @@ pub use diff::{Change, DocDiff, Op, Subject, diff};
 pub use error::{DocError, Location};
 pub use format::format;
 pub use model::{
-    CURRENT_FORMAT, DocAnim, DocExpr, DocLink, DocNode, Document, Meta, Network, ParseTierError,
-    ROOT_NETWORK, SourceLoc, Tier,
+    CURRENT_FORMAT, DocAnim, DocCharmDef, DocDefRef, DocExpr, DocLink, DocNode, Document, Meta,
+    Network, ParseTierError, ROOT_NETWORK, SourceLoc, Tier,
 };
 pub use package::{
     AddMode, AddedAsset, ROOM_FILE, add_asset, add_asset_with, canonicalize,

@@ -57,11 +57,17 @@ impl CharmMeta {
 }
 
 /// Per-subnet bookkeeping.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct Subnet {
     /// Names of the nodes in the subnet's network.
     pub(crate) names: BTreeMap<String, NodeId>,
     pub(crate) charm: Option<CharmMeta>,
+}
+
+/// Whether nodes of type `qualified_id` hold a network: subnets and Charm
+/// instances.
+pub(crate) fn is_container_type(qualified_id: &str) -> bool {
+    qualified_id == SUBNET_TYPE || qualified_id == crate::charm_defs::CHARM_TYPE
 }
 
 /// Whether `qualified_id` is one of the port-polymorphic boundary types.
@@ -268,6 +274,10 @@ impl Graph {
         if !self.contains(subnet) {
             return Err(GraphError::UnknownNode(subnet));
         }
+        if self.is_instance(subnet) {
+            return Err(GraphError::InInstance(subnet));
+        }
+        self.check_structure_editable(subnet)?;
         let slot = self
             .charm_slot(subnet)
             .ok_or(GraphError::NotASubnet(subnet))?;
@@ -360,6 +370,8 @@ impl Graph {
         if old_parent == parent {
             return Ok(Vec::new());
         }
+        self.check_structure_editable(id)?;
+        self.check_network_editable(parent)?;
         if let Some(p) = parent {
             if !self.contains(p) {
                 return Err(GraphError::UnknownNode(p));
@@ -475,6 +487,7 @@ impl Graph {
         name: &str,
     ) -> Result<NodeId, GraphError> {
         let (_, ty) = self.input_port(node, port)?;
+        self.check_structure_editable(node)?;
         let subnet = self.parent(node).ok_or(GraphError::NotInSubnet(node))?;
         if self.link_source(node, port)?.is_some() {
             return Err(GraphError::InputOccupied {
@@ -503,6 +516,7 @@ impl Graph {
     /// # Errors
     /// Fails for an unknown node or port.
     pub fn unpromote(&mut self, node: NodeId, port: &str) -> Result<Option<NodeId>, GraphError> {
+        self.check_structure_editable(node)?;
         let Some((iface, _)) = self.link_source(node, port)? else {
             return Ok(None);
         };

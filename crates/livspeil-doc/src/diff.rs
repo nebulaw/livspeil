@@ -46,6 +46,14 @@
 //! removed or retyped) and row changes ([`Subject::TableRow`], by index,
 //! the row's cells as `room.kdl` writes them).
 //!
+//! # Charm definitions (M0.16)
+//!
+//! Definitions of the `charms` block are matched by id; each added,
+//! removed or changed one is one [`Subject::Definition`] change with a
+//! summary (its contents are not diffed node by node). An instance that
+//! switches definition or version is a [`Subject::InstanceDef`] change;
+//! its overridden inputs are diffed like any node's inputs.
+//!
 //! # Charms
 //!
 //! A `charm` block that appears or disappears is one [`Subject::Charm`]
@@ -63,7 +71,7 @@ use livspeil_node_api::{Table, Value};
 use livspeil_params::{AnimChannel, Extrapolation, Interpolation, Keyframe, Tangent};
 
 use crate::anim::{extrapolation_name, interpolation_name};
-use crate::model::{DocLink, DocNode, Document, Network, ROOT_NETWORK};
+use crate::model::{DocCharmDef, DocLink, DocNode, Document, Network, ROOT_NETWORK};
 use crate::value::{format_float, format_value, quote};
 
 /// At most this many changed cells, a table change lists its column and
@@ -212,6 +220,13 @@ pub enum Subject {
     /// A node's editor position (meta), by its meta key (the node's path);
     /// `old`/`new` are `x y`.
     Position { node: String, id: Option<NodeId> },
+    /// A Charm definition of the `charms` block (M0.16), by id; `old`/`new`
+    /// are summaries (`version="1.0.0" 7 nodes`, plus `(contents
+    /// changed)` when only the contents differ).
+    Definition(String),
+    /// The definition a Charm instance uses; `old`/`new` are the quoted
+    /// `id@version`.
+    InstanceDef(NodeRef),
 }
 
 impl Subject {
@@ -242,6 +257,8 @@ impl Subject {
             Subject::CurveKey { .. } => "curve-key",
             Subject::Link { .. } => "link",
             Subject::Position { .. } => "position",
+            Subject::Definition(_) => "definition",
+            Subject::InstanceDef(_) => "instance-def",
         }
     }
 
@@ -266,7 +283,8 @@ impl Subject {
             | Subject::TableColumn { node, .. }
             | Subject::TableRow { node, .. }
             | Subject::CurveSetting { node, .. }
-            | Subject::CurveKey { node, .. } => Some(node),
+            | Subject::CurveKey { node, .. }
+            | Subject::InstanceDef(node) => Some(node),
             _ => None,
         }
     }
@@ -422,6 +440,8 @@ impl fmt::Display for Change {
                 return Ok(());
             }
             Subject::Position { node, .. } => write!(f, "meta node {} position", quote(node))?,
+            Subject::Definition(id) => write!(f, "def {}", quote(id))?,
+            Subject::InstanceDef(node) => write!(f, "node {} def", at(node))?,
         }
         write_values(f, self)
     }
@@ -554,6 +574,8 @@ pub fn diff(old: &Document, new: &Document) -> DocDiff {
         quote(&new.min_tier.to_string()),
     ));
 
+    definitions(&mut out, old, new);
+
     let old_tree = Tree::new(old);
     let new_tree = Tree::new(new);
     let ids: BTreeSet<NodeId> = old_tree
@@ -612,6 +634,56 @@ pub fn diff(old: &Document, new: &Document) -> DocDiff {
     DocDiff { changes: out }
 }
 
+/// Charm definitions by id: added, removed or changed (summaries).
+fn definitions(out: &mut Vec<Change>, old: &Document, new: &Document) {
+    let index = |doc: &Document| -> BTreeMap<String, DocCharmDef> {
+        doc.charms
+            .iter()
+            .map(|d| (d.id.clone(), d.clone()))
+            .collect()
+    };
+    let (a, b) = (index(old), index(new));
+    let ids: BTreeSet<&String> = a.keys().chain(b.keys()).collect();
+    let summary = |d: &DocCharmDef| {
+        let nodes = d.network.walk().len();
+        format!(
+            "version={} {}",
+            quote(&d.version),
+            plural(nodes, "node", "nodes")
+        )
+    };
+    for id in ids {
+        match (a.get(id), b.get(id)) {
+            (Some(x), None) => out.push(Change::new(
+                Op::Removed,
+                Subject::Definition(id.clone()),
+                Some(summary(x)),
+                None,
+            )),
+            (None, Some(y)) => out.push(Change::new(
+                Op::Added,
+                Subject::Definition(id.clone()),
+                None,
+                Some(summary(y)),
+            )),
+            (Some(x), Some(y)) if x != y => {
+                let (mut sx, mut sy) = (summary(x), summary(y));
+                if sx == sy {
+                    sx.push_str(" (contents changed)");
+                    sy.push_str(" (contents changed)");
+                }
+                out.push(Change::new(
+                    Op::Changed,
+                    Subject::Definition(id.clone()),
+                    Some(sx),
+                    Some(sy),
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Canonical text of a value; `Table` and `Curve` values (written as
 /// blocks) as summaries. Values the format cannot store yet (which a
 /// parsed document never holds) fall back to their debug form.
@@ -629,6 +701,16 @@ fn value_text(value: &Value) -> String {
 /// `port-type`, Charm and input sources of a node present in both (or
 /// added: `a` is then an empty node).
 fn node_details(out: &mut Vec<Change>, node: &NodeRef, a: &DocNode, b: &DocNode) {
+    let def_text = |n: &DocNode| {
+        n.def
+            .as_ref()
+            .map(|d| quote(&format!("{}@{}", d.id, d.version)))
+    };
+    out.extend(Change::opt(
+        Subject::InstanceDef(node.clone()),
+        def_text(a),
+        def_text(b),
+    ));
     out.extend(Change::opt(
         Subject::PortType(node.clone()),
         a.port_type.map(|t| quote(t.name())),

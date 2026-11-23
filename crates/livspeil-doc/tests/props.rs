@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Property: graph -> document -> text -> document -> graph is lossless,
-//! including nested subnets, interface ports and Charm metadata.
+//! including nested subnets, interface ports and Charm metadata, and
+//! (M0.16) shared Charm definitions made from the subnets, their
+//! instances, overridden instance inputs and detached instances.
 
 mod common;
 
 use common::{id, registry};
 use livspeil_doc::{Document, canonicalize, format, parse};
-use livspeil_graph::{CharmMeta, Graph, NodeId, SUBNET_TYPE};
+use livspeil_graph::{CharmMeta, Graph, NodeId, PortDirection, SUBNET_TYPE};
 use livspeil_node_api::{PortType, Value};
 use livspeil_params::expr::quote as expr_quote;
 use livspeil_params::{AnimChannel, Extrapolation, Interpolation, Keyframe, Tangent};
@@ -56,6 +58,10 @@ struct Script {
     /// (node index, channel); applied to the first input of the channel's
     /// type, if the node has one.
     anims: Vec<(usize, AnimChannel)>,
+    /// Charm operations (M0.16): (kind, seed, value): 0 make a definition
+    /// from a subnet, 1 instantiate one, 2 override an instance input,
+    /// 3 detach an instance.
+    charms: Vec<(u8, u128, Value)>,
 }
 
 /// Expression templates; `{p}` is a quoted `ch()` path.
@@ -185,14 +191,24 @@ fn script() -> impl Strategy<Value = Script> {
         0..8,
     );
     let anims = prop::collection::vec((0..6usize, channel()), 0..4);
-    (subnets, nodes, inputs, links, exprs, anims).prop_map(
-        |(subnets, nodes, inputs, links, exprs, anims)| Script {
+    let charms = prop::collection::vec(
+        (
+            0..4u8,
+            any::<u128>(),
+            prop::sample::select(common::ALL_TYPES.to_vec()),
+        )
+            .prop_flat_map(|(k, raw, (_, ty))| (Just(k), Just(raw), value(ty))),
+        0..8,
+    );
+    (subnets, nodes, inputs, links, exprs, anims, charms).prop_map(
+        |(subnets, nodes, inputs, links, exprs, anims, charms)| Script {
             subnets,
             nodes,
             inputs,
             links,
             exprs,
             anims,
+            charms,
         },
     )
 }
@@ -292,6 +308,70 @@ fn build(script: &Script) -> Graph {
         let spec = graph.node_spec(node).unwrap().clone();
         if let Some(port) = spec.inputs.iter().find(|p| p.ty == channel.value_type()) {
             let _ = graph.set_animation(node, port.name, channel.clone());
+        }
+    }
+    let mut defs: Vec<String> = Vec::new();
+    let mut instances: Vec<NodeId> = Vec::new();
+    for (k, (kind, raw, value)) in script.charms.iter().enumerate() {
+        match kind {
+            0 => {
+                let subnet = nets[1 + (*raw as usize) % (nets.len() - 1)];
+                let def = format!("d{k}");
+                if let Some(s) = subnet {
+                    // Give the definition a parameter with a default.
+                    let input = id(raw.wrapping_mul(31) >> 8);
+                    let p = format!("p{k}");
+                    let kind = livspeil_graph::INPUT_TYPE;
+                    if graph
+                        .add_node_in(Some(s), input, kind, &p, Some(PortType::Float))
+                        .is_ok()
+                    {
+                        let _ = graph.set_input(input, "value", Value::Float(1.5));
+                    }
+                    if graph
+                        .make_definition(s, &def, &format!("1.{}", raw % 3))
+                        .is_ok()
+                    {
+                        defs.push(def);
+                        instances.push(s);
+                    }
+                }
+            }
+            1 if !defs.is_empty() => {
+                let def = &defs[(*raw as usize) % defs.len()];
+                let parent = nets[(*raw as usize >> 4) % nets.len()];
+                let n = id(*raw >> 8);
+                if graph.instantiate(parent, n, &format!("i{k}"), def).is_ok() {
+                    instances.push(n);
+                }
+            }
+            2 if !instances.is_empty() => {
+                let inst = instances[(*raw as usize) % instances.len()];
+                let ports = graph.interface(inst, PortDirection::Input);
+                if let Some(&port) = ports.get((*raw as usize >> 4) % ports.len().max(1)) {
+                    if graph.set_input(port, "value", value.clone()).is_err() {
+                        let fallback = match graph.port_type(port) {
+                            Some(PortType::Float) => Value::Float((raw % 100) as f64 / 4.0),
+                            Some(PortType::Int) => Value::Int((raw % 100) as i64),
+                            Some(PortType::Bool) => Value::Bool(raw % 2 == 0),
+                            Some(ty) => match Value::zero(ty) {
+                                Some(v) => v,
+                                None => continue,
+                            },
+                            None => continue,
+                        };
+                        let _ = graph.set_input(port, "value", fallback);
+                    }
+                    if raw % 3 == 0 && graph.port_type(port) == Some(PortType::Float) {
+                        let _ = graph.set_expression(port, "value", "$T * 0.5");
+                    }
+                }
+            }
+            3 if !instances.is_empty() => {
+                let inst = instances[(*raw as usize) % instances.len()];
+                let _ = graph.detach(inst);
+            }
+            _ => {}
         }
     }
     graph

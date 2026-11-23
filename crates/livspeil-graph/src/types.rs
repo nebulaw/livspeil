@@ -82,6 +82,7 @@ use crate::graph::{Endpoint, Graph, GraphError, NodeId};
 use crate::sources::InputRef;
 
 /// The type variables of a polymorphic node instance.
+#[derive(Clone)]
 pub(crate) struct Poly {
     /// The registered (unresolved) node type.
     pub(crate) base: Arc<dyn NodeImpl>,

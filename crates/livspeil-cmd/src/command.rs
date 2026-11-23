@@ -4,8 +4,8 @@
 //! Commands, their inverses and the changes they report.
 
 use livspeil_graph::{
-    CharmMeta, Graph, GraphError, INPUT_TYPE, INTERFACE_PORT, NamedLink, NodeId, OUTPUT_TYPE,
-    PortDirection, SUBNET_TYPE,
+    CharmDef, CharmMeta, Graph, GraphError, INPUT_TYPE, INTERFACE_PORT, NamedLink, NodeId,
+    OUTPUT_TYPE, PortDirection, SUBNET_TYPE,
 };
 use livspeil_node_api::{PortType, Value};
 use livspeil_params::AnimChannel;
@@ -136,6 +136,52 @@ pub enum Command {
         #[serde(default)]
         charm: Option<CharmMeta>,
     },
+    /// Add a Charm definition to the library (M0.16); see
+    /// `livspeil_graph::Graph::add_definition`.
+    AddDefinition { def: CharmDef },
+    /// Remove an unused Charm definition.
+    RemoveDefinition { id: String },
+    /// Replace definition `def.id` (typically with a new version) and
+    /// re-synchronize every instance; see
+    /// `livspeil_graph::Graph::update_definition`. The inverse restores
+    /// the previous definition, every instance input's exact sources,
+    /// dropped links and re-rendered expressions.
+    UpdateDefinition { def: CharmDef },
+    /// Add an instance `id` called `name` of definition `def` to the
+    /// network of `parent`.
+    Instantiate {
+        id: NodeId,
+        #[serde(default)]
+        parent: Option<NodeId>,
+        name: String,
+        def: String,
+    },
+    /// Turn an instance into a plain, editable subnet.
+    Detach { instance: NodeId },
+    /// Turn a subnet that `Detach` left (unchanged) back into an instance
+    /// of `def`.
+    Attach { subnet: NodeId, def: String },
+    /// Convert plain subnet `subnet` into definition `def` at `version`
+    /// and an instance of it (same id, name and place, data flow
+    /// unchanged); see `livspeil_graph::Graph::make_definition`. Applies
+    /// as a transaction of primitive edits, so the inverse restores the
+    /// subnet exactly (ids included).
+    MakeDefinition {
+        subnet: NodeId,
+        def: String,
+        version: String,
+    },
+    /// Like `MoveNode`, but links that would cross networks are rewired
+    /// through new interface ports with ids derived from `seed`; see
+    /// `livspeil_graph::Graph::move_node_rewired`. Applies as a
+    /// transaction (unlinks, move, new ports, links), so the inverse
+    /// restores the exact previous structure.
+    MoveNodeRewired {
+        node: NodeId,
+        #[serde(default)]
+        parent: Option<NodeId>,
+        seed: NodeId,
+    },
 }
 
 /// A change to the document, reported by every applied command so a UI can
@@ -184,6 +230,32 @@ pub enum DocChange {
     /// A subnet's Charm metadata was set or removed.
     CharmChanged {
         subnet: NodeId,
+    },
+    /// A Charm definition was added.
+    DefinitionAdded {
+        id: String,
+    },
+    /// A Charm definition was removed.
+    DefinitionRemoved {
+        id: String,
+    },
+    /// A Charm definition was replaced; followed by `InstanceUpdated` for
+    /// each instance, `Unlinked` for links into removed interface ports
+    /// and `ExpressionChanged` for re-rendered expressions.
+    DefinitionChanged {
+        id: String,
+    },
+    /// An instance's contents were re-synchronized with its definition.
+    InstanceUpdated {
+        instance: NodeId,
+    },
+    /// An instance became a plain subnet (`Detach`).
+    InstanceDetached {
+        node: NodeId,
+    },
+    /// A subnet became an instance again (`Attach`).
+    InstanceAttached {
+        node: NodeId,
     },
 }
 
@@ -238,6 +310,11 @@ impl Command {
     pub(crate) fn has_non_finite(&self) -> bool {
         match self {
             Command::SetInput { value, .. } => !value_is_finite(value),
+            Command::AddDefinition { def } | Command::UpdateDefinition { def } => def
+                .nodes
+                .iter()
+                .flat_map(|n| &n.inputs)
+                .any(|(_, v)| !value_is_finite(v)),
             Command::Transaction(steps) => steps.iter().any(Command::has_non_finite),
             _ => false,
         }
@@ -538,6 +615,107 @@ impl Command {
                     charm: previous,
                 })
             }
+            Command::AddDefinition { def } => {
+                graph.add_definition(def.clone())?;
+                changes.push(DocChange::DefinitionAdded { id: def.id.clone() });
+                Ok(Command::RemoveDefinition { id: def.id.clone() })
+            }
+            Command::RemoveDefinition { id } => {
+                let def = graph.remove_definition(id)?;
+                changes.push(DocChange::DefinitionRemoved { id: id.clone() });
+                Ok(Command::AddDefinition { def })
+            }
+            Command::UpdateDefinition { def } => update_definition(graph, def, changes),
+            Command::Instantiate {
+                id,
+                parent,
+                name,
+                def,
+            } => {
+                graph.instantiate(*parent, *id, name, def)?;
+                changes.push(DocChange::NodeAdded { id: *id });
+                Ok(Command::DeleteNode { id: *id })
+            }
+            Command::Detach { instance } => {
+                let def = graph.detach(*instance)?;
+                changes.push(DocChange::InstanceDetached { node: *instance });
+                Ok(Command::Attach {
+                    subnet: *instance,
+                    def,
+                })
+            }
+            Command::Attach { subnet, def } => {
+                graph.attach(*subnet, def)?;
+                changes.push(DocChange::InstanceAttached { node: *subnet });
+                Ok(Command::Detach { instance: *subnet })
+            }
+            Command::MakeDefinition {
+                subnet,
+                def,
+                version,
+            } => {
+                if graph.instance_holding(*subnet).is_some() {
+                    return Err(GraphError::InInstance(*subnet).into());
+                }
+                let plan = graph.conversion_plan(*subnet, def, version)?;
+                let mut steps: Vec<Command> = plan
+                    .readers
+                    .iter()
+                    .map(|(node, port, _)| Command::ClearExpression {
+                        node: *node,
+                        port: port.clone(),
+                    })
+                    .collect();
+                steps.push(Command::DeleteNode { id: *subnet });
+                steps.push(Command::AddDefinition { def: plan.def });
+                steps.push(Command::Instantiate {
+                    id: *subnet,
+                    parent: plan.parent,
+                    name: plan.name,
+                    def: def.clone(),
+                });
+                steps.extend(plan.overrides.into_iter().map(|(node, source)| {
+                    Command::SetExpression {
+                        node,
+                        port: INTERFACE_PORT.to_owned(),
+                        source,
+                    }
+                }));
+                steps.extend(plan.links.iter().map(link_command));
+                steps.extend(
+                    plan.readers
+                        .into_iter()
+                        .map(|(node, port, source)| Command::SetExpression { node, port, source }),
+                );
+                Command::Transaction(steps).apply_into(graph, changes)
+            }
+            Command::MoveNodeRewired { node, parent, seed } => {
+                let plan = graph.plan_rewired_move(*node, *parent, *seed)?;
+                let mut steps: Vec<Command> = plan
+                    .unlink
+                    .iter()
+                    .map(|l| Command::Unlink {
+                        to: l.to,
+                        to_port: l.to_port.clone(),
+                    })
+                    .collect();
+                steps.push(Command::MoveNode {
+                    node: *node,
+                    parent: *parent,
+                });
+                steps.extend(plan.ports.into_iter().map(|p| Command::AddInterfacePort {
+                    id: p.id,
+                    subnet: p.subnet,
+                    direction: p.direction,
+                    name: p.name,
+                    port_type: p.port_type,
+                }));
+                steps.extend(plan.link.iter().map(link_command));
+                if steps.len() == 1 {
+                    return steps.remove(0).apply_into(graph, changes);
+                }
+                Command::Transaction(steps).apply_into(graph, changes)
+            }
             Command::Transaction(steps) => {
                 let mark = changes.len();
                 let mut inverses = Vec::with_capacity(steps.len());
@@ -609,6 +787,124 @@ fn subtree(graph: &Graph, node: NodeId) -> Vec<NodeId> {
     out
 }
 
+/// `node` and everything inside it, descendants first, without the
+/// contents of Charm instances (an instance is deleted as a whole).
+fn subtree_to_instances(graph: &Graph, node: NodeId) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    let mut stack = vec![(node, false)];
+    while let Some((n, expanded)) = stack.pop() {
+        if expanded {
+            out.push(n);
+            continue;
+        }
+        stack.push((n, true));
+        if graph.is_subnet(n) && !graph.is_instance(n) {
+            stack.extend(graph.children(Some(n)).into_iter().map(|c| (c, false)));
+        }
+    }
+    out
+}
+
+/// The sources of `node`'s input `port` as commands that restore them
+/// exactly: (static value, animation, expression).
+fn restore_sources(
+    graph: &Graph,
+    node: NodeId,
+    port: &str,
+) -> Result<(Command, Command, Command), CmdError> {
+    Ok((
+        restore_input(node, port, graph.input_value(node, port)?.cloned()),
+        restore_animation(node, port, graph.animation(node, port)?.cloned()),
+        restore_expression(node, port, graph.expression(node, port)?.map(str::to_owned)),
+    ))
+}
+
+/// Replace a definition; the inverse restores the previous definition and
+/// then the exact sources of every instance input, the dropped links and
+/// the re-rendered expressions.
+fn update_definition(
+    graph: &mut Graph,
+    def: &CharmDef,
+    changes: &mut Vec<DocChange>,
+) -> Result<Command, CmdError> {
+    let old = graph
+        .definition(&def.id)
+        .cloned()
+        .ok_or_else(|| GraphError::UnknownDefinition(def.id.clone()))?;
+    let mut values = Vec::new();
+    let mut expressions = Vec::new();
+    for instance in graph.instances_of(&def.id) {
+        for port in graph.interface(instance, PortDirection::Input) {
+            let (value, anim, expr) = restore_sources(graph, port, INTERFACE_PORT)?;
+            values.push(value);
+            values.push(anim);
+            expressions.push(expr);
+        }
+    }
+    let report = graph.update_definition(def.clone())?;
+    changes.push(DocChange::DefinitionChanged { id: def.id.clone() });
+    changes.extend(
+        report
+            .instances
+            .iter()
+            .map(|&instance| DocChange::InstanceUpdated { instance }),
+    );
+    changes.extend(report.unlinked.iter().cloned().map(DocChange::Unlinked));
+    let mut inverse = vec![Command::UpdateDefinition { def: old }];
+    inverse.extend(values);
+    inverse.extend(report.unlinked.iter().map(link_command));
+    inverse.extend(expressions);
+    for (node, port, source) in report.rewritten {
+        changes.push(DocChange::ExpressionChanged {
+            node,
+            port: port.clone(),
+        });
+        inverse.push(Command::SetExpression { node, port, source });
+    }
+    Ok(Command::Transaction(inverse))
+}
+
+/// Delete a Charm instance; the inverse instantiates it again and restores
+/// the exact sources of its interface inputs and the links around it.
+fn delete_instance(
+    graph: &mut Graph,
+    id: NodeId,
+    changes: &mut Vec<DocChange>,
+) -> Result<Command, CmdError> {
+    let (Some(name), Some(def)) = (graph.node_name(id), graph.instance_def(id)) else {
+        return Err(GraphError::UnknownNode(id).into());
+    };
+    let mut restore = vec![Command::Instantiate {
+        id,
+        parent: graph.parent(id),
+        name: name.to_owned(),
+        def: def.to_owned(),
+    }];
+    let mut expressions = Vec::new();
+    let mut links = Vec::new();
+    for port in graph.interface(id, PortDirection::Input) {
+        let (value, anim, expr) = restore_sources(graph, port, INTERFACE_PORT)?;
+        restore.push(value);
+        restore.push(anim);
+        expressions.push(expr);
+        links.extend(graph.incoming_links(port));
+    }
+    for port in graph.interface(id, PortDirection::Output) {
+        links.extend(
+            graph
+                .outgoing_links(port)
+                .into_iter()
+                .filter(|l| graph.instance_holding(l.to) != Some(id)),
+        );
+    }
+    restore.extend(links.iter().map(link_command));
+    restore.extend(expressions);
+    graph.remove_node(id)?;
+    changes.extend(links.into_iter().map(DocChange::Unlinked));
+    changes.push(DocChange::NodeRemoved { id });
+    Ok(Command::Transaction(restore))
+}
+
 /// Delete a node. A non-empty subnet becomes a transaction: clear every
 /// expression inside (they may read each other), delete the children,
 /// then the subnet, so the inverse restores everything exactly.
@@ -617,16 +913,32 @@ fn delete_node(
     id: NodeId,
     changes: &mut Vec<DocChange>,
 ) -> Result<Command, CmdError> {
+    if graph.is_instance(id) {
+        return delete_instance(graph, id, changes);
+    }
     if graph.is_subnet(id) && !graph.children(Some(id)).is_empty() {
-        let nodes = subtree(graph, id);
+        if graph.instance_holding(id).is_some() {
+            return Err(GraphError::InInstance(id).into());
+        }
+        let nodes = subtree_to_instances(graph, id);
         let mut steps: Vec<Command> = nodes
             .iter()
             .flat_map(|&n| {
-                graph
-                    .expressions(n)
-                    .map(|(port, _)| Command::ClearExpression {
-                        node: n,
-                        port: port.to_owned(),
+                let sources = if graph.is_instance(n) {
+                    graph.interface(n, PortDirection::Input)
+                } else {
+                    vec![n]
+                };
+                sources
+                    .into_iter()
+                    .flat_map(|s| {
+                        graph
+                            .expressions(s)
+                            .map(|(port, _)| Command::ClearExpression {
+                                node: s,
+                                port: port.to_owned(),
+                            })
+                            .collect::<Vec<_>>()
                     })
                     .collect::<Vec<_>>()
             })

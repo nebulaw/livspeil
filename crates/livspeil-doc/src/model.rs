@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
 
-use livspeil_graph::{CharmMeta, NodeId, SUBNET_TYPE};
+use livspeil_graph::{CHARM_TYPE, CharmMeta, NodeId, SUBNET_TYPE};
 use livspeil_node_api::{PortType, Value};
 use livspeil_params::AnimChannel;
 
@@ -75,6 +75,9 @@ pub struct Document {
     pub format: u32,
     /// Minimum hardware tier.
     pub min_tier: Tier,
+    /// Shared Charm definitions (`charms` block, M0.16), sorted by id in
+    /// canonical form.
+    pub charms: Vec<DocCharmDef>,
     /// The root network (`network "/"`).
     pub network: Network,
     /// Editor-only data; not needed to cook.
@@ -89,6 +92,7 @@ impl Document {
             name: name.into(),
             format: CURRENT_FORMAT,
             min_tier: Tier::default(),
+            charms: Vec::new(),
             network: Network::default(),
             meta: Meta::default(),
         }
@@ -161,6 +165,46 @@ pub struct DocNode {
     /// The network inside a subnet (nested `network` block). Always `Some`
     /// for subnets built by [`Document::from_graph`].
     pub network: Option<Network>,
+    /// The definition a Charm instance (`core.charm@1`) uses, written
+    /// `def="id@version"` (M0.16). An instance's `inputs`, `expressions`
+    /// and `animations` are keyed by interface input name and hold only
+    /// the sources that differ from the definition's defaults.
+    pub def: Option<DocDefRef>,
+    pub at: SourceLoc,
+}
+
+/// A reference from an instance to a Charm definition: `def="id@version"`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocDefRef {
+    pub id: String,
+    pub version: String,
+    /// Location of the `def=` property.
+    pub at: SourceLoc,
+}
+
+impl DocDefRef {
+    #[must_use]
+    pub fn new(id: impl Into<String>, version: impl Into<String>) -> Self {
+        DocDefRef {
+            id: id.into(),
+            version: version.into(),
+            at: SourceLoc::default(),
+        }
+    }
+}
+
+/// A shared Charm definition in the `charms` block (M0.16):
+/// `def "id" version=".." [name=".."] [icon=".."] [min-tier=".."]` with
+/// `capability` children and its `network`. Node ids inside are
+/// definition-local.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocCharmDef {
+    pub id: String,
+    pub version: String,
+    /// Display name, icon, capabilities and minimum tier; `meta.version`
+    /// is unused (always `None`).
+    pub meta: CharmMeta,
+    pub network: Network,
     pub at: SourceLoc,
 }
 
@@ -178,8 +222,15 @@ impl DocNode {
             port_type: None,
             charm: None,
             network: None,
+            def: None,
             at: SourceLoc::default(),
         }
+    }
+
+    /// Whether the node is a Charm instance (`core.charm@1`).
+    #[must_use]
+    pub fn is_instance(&self) -> bool {
+        self.type_id == CHARM_TYPE
     }
 
     /// Whether the node is a subnet (`core.subnet@1`).

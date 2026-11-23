@@ -15,6 +15,8 @@ use crate::value::{format_float, format_value, is_finite, quote};
 
 // Block values (`table`, `curve`) inside `input` (M0.8).
 mod blocks;
+// Shared Charm definitions (`charms`; M0.16).
+mod charms;
 
 const INDENT: &str = "  ";
 
@@ -30,7 +32,11 @@ const INDENT: &str = "  ";
 /// A subnet node lists its inputs, then its `charm` block (properties in the
 /// order `version`, `icon`, `min-tier`; `min-tier` left out at `T0`), then
 /// its nested `network` (written bare when empty); boundary nodes carry
-/// `port-type=` after `id=`.
+/// `port-type=` after `id=`. The `charms` block (M0.16) comes first in
+/// the room, definitions sorted by id, each as `def` with `version`,
+/// `name` (left out when equal to the id), `icon`, `min-tier` (left out at
+/// `T0`), then its `capability` lines and its `network`; instances carry
+/// `def="id@version"` after `id=` (and `port-type=`).
 /// Comments are not part of the model and are not written.
 ///
 /// # Errors
@@ -50,6 +56,7 @@ pub fn format(doc: &Document) -> Result<String, DocError> {
         quote(&doc.min_tier.to_string())
     );
 
+    charms::write_charms(&mut out, &doc.charms)?;
     let _ = write!(out, "{INDENT}network {}", quote(ROOT_NETWORK));
     write_network(&mut out, &network, 1)?;
 
@@ -97,6 +104,13 @@ fn write_network(out: &mut String, network: &Network, depth: usize) -> Result<()
         );
         if let Some(ty) = node.port_type {
             let _ = write!(out, " port-type={}", quote(ty.name()));
+        }
+        if let Some(def) = &node.def {
+            let _ = write!(
+                out,
+                " def={}",
+                quote(&format!("{}@{}", def.id, def.version))
+            );
         }
         let ports: Vec<&str> = node.ports().collect();
         if ports.is_empty() && node.charm.is_none() && node.network.is_none() {

@@ -9,15 +9,20 @@
 //! 4. a failed command leaves the snapshot unchanged.
 //!
 //! The commands include subnets (ids 9 and 10), interface ports (ids 11
-//! to 14), moves between networks, promotion and Charm metadata.
+//! to 14), moves between networks, promotion and Charm metadata, and
+//! (M0.16) Charm definitions (`d`, `e`), instances (ids 15 and 16), edits
+//! on their contents (mostly refused), definition updates, detaching,
+//! making definitions from subnets and rewired moves.
 
 mod common;
 
 use std::io::Cursor;
 
-use common::{FLAG, NUM, graph, id};
+use common::{D_GAIN, D_IN, D_NUM, D_OUT, FLAG, NUM, definition, graph, id};
 use livspeil_cmd::{Command, GroupId, History, JournalWriter, Origin, replay};
-use livspeil_graph::{CharmMeta, GraphSnapshot, NodeId, PortDirection};
+use livspeil_graph::{
+    CharmDef, CharmMeta, GraphSnapshot, INPUT_TYPE, NodeId, PortDirection, instance_node_id,
+};
 use livspeil_node_api::{PortType, Value};
 use livspeil_params::{AnimChannel, Extrapolation, Interpolation, Keyframe};
 use proptest::prelude::*;
@@ -40,8 +45,107 @@ const ORIGINS: [Origin; 5] = [
     Origin::Collab,
 ];
 
+const INSTANCE_IDS: [u128; 2] = [15, 16];
+const LOCALS: [u128; 4] = [D_IN, D_GAIN, D_NUM, D_OUT];
+
 fn any_id() -> impl Strategy<Value = NodeId> {
-    (1..=14u128).prop_map(id)
+    prop_oneof![
+        6 => (1..=16u128).prop_map(id),
+        1 => inner_id(),
+    ]
+}
+
+fn instance_id() -> impl Strategy<Value = NodeId> {
+    prop::sample::select(INSTANCE_IDS.to_vec()).prop_map(id)
+}
+
+/// A node inside instance 15 or 16 (or inside subnet 9 after it became
+/// an instance), by definition-local id.
+fn inner_id() -> impl Strategy<Value = NodeId> {
+    (
+        prop::sample::select(vec![15u128, 16, 9]),
+        prop::sample::select(LOCALS.to_vec()),
+    )
+        .prop_map(|(i, l)| instance_node_id(id(i), id(l)))
+}
+
+/// Definitions `d` (four versions) and `e`.
+fn def() -> impl Strategy<Value = CharmDef> {
+    prop_oneof![
+        3 => (0u8..3, 1.0..4.0f64).prop_map(|(variant, gain)| {
+            definition("d", &format!("{variant}.0"), gain.round(), variant)
+        }),
+        1 => Just(definition("e", "1", 2.0, 0)),
+    ]
+}
+
+/// Commands on Charm definitions and instances (M0.16).
+fn charms() -> impl Strategy<Value = Command> {
+    let def_id = || {
+        prop_oneof![
+            4 => Just("d".to_owned()),
+            1 => owned(&["e", "nope"]),
+        ]
+    };
+    prop_oneof![
+        2 => def().prop_map(|def| Command::AddDefinition { def }),
+        1 => def_id().prop_map(|id| Command::RemoveDefinition { id }),
+        3 => def().prop_map(|def| Command::UpdateDefinition { def }),
+        6 => (instance_id(), network(), owned(&NAMES), def_id()).prop_map(
+            |(id, parent, name, def)| Command::Instantiate { id, parent, name, def }
+        ),
+        2 => instance_id().prop_map(|instance| Command::Detach { instance }),
+        2 => (prop_oneof![instance_id(), subnet_id()], def_id())
+            .prop_map(|(subnet, def)| Command::Attach { subnet, def }),
+        2 => (subnet_id(), owned(&["m", "d"]))
+            .prop_map(|(subnet, def)| Command::MakeDefinition {
+                subnet,
+                def,
+                version: "1".to_owned(),
+            }),
+        3 => (any_id(), network(), (100..104u128).prop_map(id))
+            .prop_map(|(node, parent, seed)| Command::MoveNodeRewired { node, parent, seed }),
+        2 => (num_id(), network(), (100..104u128).prop_map(id))
+            .prop_map(|(node, parent, seed)| Command::MoveNodeRewired { node, parent, seed }),
+        3 => (instance_id(), prop::sample::select(vec![D_IN, D_GAIN]), value()).prop_map(
+            |(i, l, value)| Command::SetInput {
+                node: instance_node_id(i, id(l)),
+                port: "value".to_owned(),
+                value,
+            }
+        ),
+        1 => (instance_id(), prop::sample::select(vec![D_IN, D_GAIN])).prop_map(|(i, l)| {
+            Command::ClearInput {
+                node: instance_node_id(i, id(l)),
+                port: "value".to_owned(),
+            }
+        }),
+        2 => (instance_id(), prop::sample::select(vec![D_IN, D_GAIN]), source()).prop_map(
+            |(i, l, source)| Command::SetExpression {
+                node: instance_node_id(i, id(l)),
+                port: "value".to_owned(),
+                source,
+            }
+        ),
+        3 => (num_id(), instance_id(), prop::sample::select(vec![D_IN, D_GAIN])).prop_map(
+            |(from, i, l)| Command::Link {
+                from,
+                from_port: "out".to_owned(),
+                to: instance_node_id(i, id(l)),
+                to_port: "value".to_owned(),
+            }
+        ),
+        2 => (instance_id(), num_id(), owned(&["a", "b"])).prop_map(|(i, to, to_port)| {
+            Command::Link {
+                from: instance_node_id(i, id(D_OUT)),
+                from_port: "value".to_owned(),
+                to,
+                to_port,
+            }
+        }),
+        1 => (inner_id(), owned(&INPUTS), value())
+            .prop_map(|(node, port, value)| Command::SetInput { node, port, value }),
+    ]
 }
 
 fn subnet_id() -> impl Strategy<Value = NodeId> {
@@ -276,6 +380,7 @@ fn simple_command() -> impl Strategy<Value = Command> {
         1 => (any_id(), owned(&INPUTS))
             .prop_map(|(node, port)| Command::ClearAnimation { node, port }),
         5 => structure(),
+        5 => charms(),
     ]
 }
 
@@ -440,6 +545,15 @@ fn seed() -> Command {
             to: id(2),
             to_port: "a".to_owned(),
         },
+        Command::AddDefinition {
+            def: definition("d", "0.0", 2.0, 0),
+        },
+        Command::Instantiate {
+            id: id(15),
+            parent: None,
+            name: "inst".to_owned(),
+            def: "d".to_owned(),
+        },
     ])
 }
 
@@ -452,9 +566,34 @@ fn check_replay(bytes: &[u8], expected: &GraphSnapshot, count: usize) -> Result<
     Ok(())
 }
 
-/// A transaction that builds `snapshot` from an empty graph.
+/// A transaction that builds `snapshot` from an empty graph. Instances
+/// are instantiated; of their contents only the interface inputs' sources
+/// and the links around them are set.
 fn rebuild(snapshot: &GraphSnapshot) -> Command {
-    let mut steps = Vec::new();
+    let mut steps: Vec<Command> = snapshot
+        .definitions
+        .iter()
+        .map(|def| Command::AddDefinition { def: def.clone() })
+        .collect();
+    let by_id: std::collections::BTreeMap<NodeId, &livspeil_graph::NodeSnapshot> =
+        snapshot.nodes.iter().map(|n| (n.id, n)).collect();
+    // The instance whose contents hold a node.
+    let holder = |n: NodeId| {
+        let mut current = by_id.get(&n).and_then(|n| n.parent);
+        while let Some(p) = current {
+            let node = by_id.get(&p)?;
+            if node.def.is_some() {
+                return Some(p);
+            }
+            current = node.parent;
+        }
+        None
+    };
+    let inner = |n: NodeId| holder(n).is_some();
+    let editable = |n: &livspeil_graph::NodeSnapshot| match holder(n.id) {
+        None => true,
+        Some(i) => n.parent == Some(i) && n.type_id == INPUT_TYPE,
+    };
     // Parents before children.
     let mut pending: Vec<_> = snapshot.nodes.iter().collect();
     let mut created = std::collections::BTreeSet::new();
@@ -465,6 +604,27 @@ fn rebuild(snapshot: &GraphSnapshot) -> Command {
                 return true;
             }
             created.insert(node.id);
+            if let Some(def) = &node.def {
+                steps.push(Command::Instantiate {
+                    id: node.id,
+                    parent: node.parent,
+                    name: node.name.clone(),
+                    def: def.clone(),
+                });
+                return false;
+            }
+            if inner(node.id) {
+                if editable(node) {
+                    for (port, value) in &node.inputs {
+                        steps.push(Command::SetInput {
+                            node: node.id,
+                            port: port.clone(),
+                            value: value.clone(),
+                        });
+                    }
+                }
+                return false;
+            }
             steps.push(Command::CreateNodeIn {
                 id: node.id,
                 parent: node.parent,
@@ -490,6 +650,9 @@ fn rebuild(snapshot: &GraphSnapshot) -> Command {
         assert!(pending.len() < before, "snapshot parents form a tree");
     }
     for link in &snapshot.links {
+        if inner(link.to) && !by_id.get(&link.to).is_some_and(|n| editable(n)) {
+            continue;
+        }
         steps.push(Command::Link {
             from: link.from,
             from_port: link.from_port.clone(),
@@ -498,7 +661,7 @@ fn rebuild(snapshot: &GraphSnapshot) -> Command {
         });
     }
     // Sources last: ch() may read any node.
-    for node in &snapshot.nodes {
+    for node in snapshot.nodes.iter().filter(|n| editable(n)) {
         for (port, source) in &node.expressions {
             steps.push(Command::SetExpression {
                 node: node.id,

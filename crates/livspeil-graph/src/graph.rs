@@ -13,6 +13,7 @@ use livspeil_params::AnimChannel;
 use livspeil_params::expr::{ExprError, RefKind};
 use uuid::Uuid;
 
+use crate::charm_defs::{self, CharmDef};
 use crate::network::{self, CharmMeta, Subnet};
 use crate::snapshot::{GraphSnapshot, NamedLink, NodeSnapshot};
 use crate::sources::{Expression, InputRef};
@@ -155,6 +156,23 @@ pub enum GraphError {
     NotPolymorphic(String),
     /// The subnet cannot be moved into itself or one of its descendants.
     WouldNest(NodeId),
+    // Charm definitions (M0.16, see `charm_defs.rs`).
+    /// The node is a Charm instance, or inside one: its contents and
+    /// metadata come from the definition. Only the values, expressions and
+    /// animation channels of the instance's interface inputs (and links
+    /// into them from outside) are per-instance; edit the definition or
+    /// detach the instance.
+    InInstance(NodeId),
+    /// No Charm definition with this id.
+    UnknownDefinition(String),
+    /// A Charm definition with this id already exists.
+    DuplicateDefinition(String),
+    /// The definition cannot be removed while `instance` uses it.
+    DefinitionInUse { def: String, instance: NodeId },
+    /// The definition (or the subnet it is made from) is not valid.
+    InvalidDefinition { def: String, reason: String },
+    /// The node is not a Charm instance.
+    NotAnInstance(NodeId),
     /// The edit would leave type variable `var` of `node` (and the
     /// variables linked to it) without a type: it must be `expected` but
     /// would also need to be `found` (M0.17; see the `types` module).
@@ -224,6 +242,21 @@ impl fmt::Display for GraphError {
             GraphError::WouldNest(id) => {
                 write!(f, "subnet {id} cannot be moved into itself")
             }
+            GraphError::InInstance(id) => write!(
+                f,
+                "node {id} is (inside) a Charm instance; edit the definition or detach the instance"
+            ),
+            GraphError::UnknownDefinition(def) => write!(f, "no Charm definition '{def}'"),
+            GraphError::DuplicateDefinition(def) => {
+                write!(f, "a Charm definition '{def}' already exists")
+            }
+            GraphError::DefinitionInUse { def, instance } => {
+                write!(f, "Charm definition '{def}' is used by instance {instance}")
+            }
+            GraphError::InvalidDefinition { def, reason } => {
+                write!(f, "invalid Charm definition '{def}': {reason}")
+            }
+            GraphError::NotAnInstance(id) => write!(f, "node {id} is not a Charm instance"),
             GraphError::TypeConflict {
                 node,
                 var,
@@ -259,6 +292,7 @@ impl fmt::Display for GraphError {
 
 impl std::error::Error for GraphError {}
 
+#[derive(Clone)]
 pub(crate) struct Node {
     pub(crate) id: NodeId,
     pub(crate) name: String,
@@ -336,7 +370,7 @@ impl fmt::Debug for Node {
 /// `dependents` in compressed sparse row form: the dependents of slot `s`
 /// are `targets[offsets[s]..offsets[s + 1]]`. Contiguous, so the downstream
 /// walk does not chase one heap allocation per node.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct DependentsIndex {
     /// The `deps_rev` this copy was built for.
     built_for: Option<u64>,
@@ -431,6 +465,10 @@ pub struct Graph {
     topo_rev: u64,
     /// Scratch stack for the downstream walk.
     mark_stack: Vec<usize>,
+    /// Charm definitions by id (M0.16, see `charm_defs.rs`).
+    pub(crate) defs: BTreeMap<String, CharmDef>,
+    /// Charm instances and the definition each one uses.
+    pub(crate) instances: BTreeMap<NodeId, String>,
 }
 
 impl Graph {
@@ -456,7 +494,41 @@ impl Graph {
             observed: AtomicU64::new(0),
             topo_rev: 0,
             mark_stack: Vec::new(),
+            defs: BTreeMap::new(),
+            instances: BTreeMap::new(),
         }
+    }
+
+    /// An exact copy (same instance id, epochs and slots), used to roll
+    /// back composite edits (Charm definition updates, rewired moves).
+    pub(crate) fn duplicate(&self) -> Graph {
+        Graph {
+            id: self.id,
+            registry: Arc::clone(&self.registry),
+            slots: self.slots.clone(),
+            free: self.free.clone(),
+            index: self.index.clone(),
+            links: self.links.clone(),
+            outgoing: self.outgoing.clone(),
+            names: self.names.clone(),
+            subnets: self.subnets.clone(),
+            ch_edges: self.ch_edges.clone(),
+            rev_counter: self.rev_counter,
+            dirty: self.dirty.clone(),
+            dependents: self.dependents.clone(),
+            deps_rev: self.deps_rev,
+            walk: self.walk.clone(),
+            observed: AtomicU64::new(self.observed.load(Ordering::Relaxed)),
+            topo_rev: self.topo_rev,
+            mark_stack: Vec::new(),
+            defs: self.defs.clone(),
+            instances: self.instances.clone(),
+        }
+    }
+
+    /// The registry nodes are instantiated from.
+    pub(crate) fn registry(&self) -> &Arc<NodeRegistry> {
+        &self.registry
     }
 
     /// Identity of this graph instance (lets a cooker detect a different
@@ -508,7 +580,27 @@ impl Graph {
     /// [`GraphError::NotInClass`] for a pin outside the variable's class
     /// and [`GraphError::InvalidTypeVars`] for a node type whose type
     /// variables do not fit its spec.
+    ///
+    /// Charm instances (`core.charm@1`) are created with
+    /// [`Graph::instantiate`], not here, and nothing can be added inside
+    /// one ([`GraphError::InInstance`]).
     pub fn add_node_in(
+        &mut self,
+        parent: Option<NodeId>,
+        id: NodeId,
+        qualified_id: &str,
+        name: &str,
+        port_type: Option<PortType>,
+    ) -> Result<NodeId, GraphError> {
+        if qualified_id == charm_defs::CHARM_TYPE {
+            return Err(GraphError::NotAnInstance(id));
+        }
+        self.check_network_editable(parent)?;
+        self.insert_node(parent, id, qualified_id, name, port_type)
+    }
+
+    /// [`Graph::add_node_in`] without the Charm instance checks.
+    pub(crate) fn insert_node(
         &mut self,
         parent: Option<NodeId>,
         id: NodeId,
@@ -524,7 +616,7 @@ impl Graph {
                 return Err(GraphError::NotASubnet(p));
             }
         }
-        let is_subnet = qualified_id == network::SUBNET_TYPE;
+        let is_subnet = network::is_container_type(qualified_id);
         let boundary = network::is_boundary_type(qualified_id);
         network::check_name(
             name,
@@ -632,6 +724,12 @@ impl Graph {
         if !self.index.contains_key(&id) {
             return Err(GraphError::UnknownNode(id));
         }
+        self.check_structure_editable(id)?;
+        self.remove_subtree(id)
+    }
+
+    /// [`Graph::remove_node`] without the Charm instance checks.
+    pub(crate) fn remove_subtree(&mut self, id: NodeId) -> Result<(), GraphError> {
         let subtree = self.subtree(id);
         let mut retype = self.poly_neighbors(&subtree);
         retype.retain(|n| !subtree.contains(n));
@@ -718,6 +816,7 @@ impl Graph {
         let node = self.slots[slot].take().ok_or(GraphError::UnknownNode(id))?;
         self.remove_name(node.parent, &node.name);
         self.subnets.remove(&id);
+        self.instances.remove(&id);
         self.dependents[slot].clear();
         self.deps_rev += 1;
         self.free.push(slot);
@@ -732,6 +831,7 @@ impl Graph {
     /// Fails for an unknown node or port, or a value of the wrong type.
     pub fn set_input(&mut self, node: NodeId, port: &str, value: Value) -> Result<(), GraphError> {
         let (index, ty) = self.input_port(node, port)?;
+        self.check_sources_editable(node)?;
         let found = value.port_type();
         let poly = self.check_poly_source(node, index, SourceKind::Value, found)?;
         let ty = poly.unwrap_or(ty);
@@ -753,10 +853,15 @@ impl Graph {
     ///
     /// # Errors
     /// Fails for an unknown node or port.
+    ///
+    /// On an interface input of a Charm instance this restores the
+    /// definition's value instead (see [`Graph::instantiate`]).
     pub fn clear_input(&mut self, node: NodeId, port: &str) -> Result<(), GraphError> {
         let (index, _) = self.input_port(node, port)?;
+        self.check_sources_editable(node)?;
+        let reset = self.instance_default_value(node, port);
         if let Some(n) = self.node_mut(node) {
-            n.values[index] = None;
+            n.values[index] = reset;
         }
         self.bump(node);
         if self.var_port(node, RefKind::Input, index).is_some() {
@@ -794,6 +899,7 @@ impl Graph {
     ) -> Result<(), GraphError> {
         let (out_index, out_ty) = self.output_port(from, from_port)?;
         let (in_index, in_ty) = self.input_port(to, to_port)?;
+        self.check_sources_editable(to)?;
         let from_end = Endpoint {
             node: from,
             port: out_index,
@@ -865,6 +971,7 @@ impl Graph {
     /// Fails for an unknown node or port.
     pub fn unlink(&mut self, to: NodeId, to_port: &str) -> Result<bool, GraphError> {
         let (index, ty) = self.input_port(to, to_port)?;
+        self.check_sources_editable(to)?;
         let Some(src) = self.links.remove(&(to, index)) else {
             return Ok(false);
         };
@@ -910,6 +1017,8 @@ impl Graph {
         if current.name == name {
             return Ok(name.to_owned());
         }
+        self.check_structure_editable(id)?;
+        let current = self.node(id).ok_or(GraphError::UnknownNode(id))?;
         let parent = current.parent;
         let port = parent.is_some() && network::is_boundary_type(&current.type_id);
         network::check_name(name, parent.is_some() || self.is_subnet(id), port)?;
@@ -1056,10 +1165,15 @@ impl Graph {
                 parent: n.parent,
                 port_type: n.port_type,
                 charm: self.subnets.get(&id).and_then(|s| s.charm.clone()),
+                def: self.instances.get(&id).cloned(),
             })
             .collect();
         let links = self.links().filter_map(|l| self.named(l)).collect();
-        GraphSnapshot { nodes, links }
+        GraphSnapshot {
+            nodes,
+            links,
+            definitions: self.defs.values().cloned().collect(),
+        }
     }
 
     /// Number of nodes.
@@ -1114,7 +1228,7 @@ impl Graph {
         }
     }
 
-    fn insert_name(&mut self, network: Option<NodeId>, name: &str, id: NodeId) {
+    pub(crate) fn insert_name(&mut self, network: Option<NodeId>, name: &str, id: NodeId) {
         match network {
             None => {
                 self.names.insert(name.to_owned(), id);
@@ -1127,7 +1241,7 @@ impl Graph {
         }
     }
 
-    fn remove_name(&mut self, network: Option<NodeId>, name: &str) {
+    pub(crate) fn remove_name(&mut self, network: Option<NodeId>, name: &str) {
         match network {
             None => {
                 self.names.remove(name);

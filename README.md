@@ -59,9 +59,9 @@ frame=300 time=5.000000 sun.direction=vec3(-0.917409 0.264725 -0.297121) sun.ele
 ```
 
 [`examples/charm-demo.room`](examples/charm-demo.room/room.kdl) shows
-subnets and Charms (M0.7): a "Daylight" Charm (hour in, lamp color and
-intensity out, two promoted parameters) instantiated twice with different
-parameters, printed through four `core.output` nodes.
+Charms (M0.7, M0.16): a shared "Daylight" Charm definition (hour in, lamp
+color and intensity out, two promoted parameters) used by two instances
+with different parameters, printed through four `core.output` nodes.
 
 File-system nodes (`core.fs.list_dir`) see the room package (or
 `--fs-root DIR`) and nothing outside it. A run lists each folder once (a
