@@ -12,7 +12,8 @@ summary = "Pick a when cond is true, else b"
 time_dependent = false
 reads_system = false
 description = '''
-`out = cond ? a : b`. Float-only for now; it becomes polymorphic once the node API has constraint classes.
+`out = cond ? a : b`, Float-only. Superseded by the polymorphic
+`core.logic.select@2` (any value type); kept for existing documents.
 '''
 
 [[inputs]]

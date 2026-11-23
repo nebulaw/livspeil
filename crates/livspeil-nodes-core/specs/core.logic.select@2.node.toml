@@ -1,0 +1,86 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.logic.select"
+version = 2
+summary = "Pick a when cond is true, else b (any type)"
+time_dependent = false
+reads_system = false
+description = '''
+`out = cond ? a : b` for any value type `T` (everything but `Event`);
+supersedes `@1`, which stays registered. `T` resolves from what is linked
+or set (a `Vec3` linked into `a`, a `String` value on `b`, a `Color`
+input fed by `out`); unresolved it is `Float` and the node is exactly
+`@1`. Defaults follow `T`: `a` is `1.0` as `[1, 1, 1]` for vectors and
+white for colors, `b` the zero value of `T`.
+'''
+
+[[type_vars]]
+name = "T"
+class = "Any"
+fallback = "Float"
+
+[[inputs]]
+name = "cond"
+type = "Bool"
+default = false
+
+[[inputs]]
+name = "a"
+type = "Any"
+var = "T"
+default = 1.0
+
+[[inputs]]
+name = "b"
+type = "Any"
+var = "T"
+default = 0.0
+
+[[outputs]]
+name = "out"
+type = "Any"
+var = "T"
+
+[[tests]]
+name = "defaults"
+expect = { out = 0.0 }
+
+[[tests]]
+inputs = { cond = true, a = 2.0, b = -3.0 }
+expect = { out = 2.0 }
+
+[[tests]]
+name = "Vec3"
+types = { T = "Vec3" }
+inputs = { cond = true, a = [1.0, 2.0, 3.0] }
+expect = { out = [1.0, 2.0, 3.0] }
+
+[[tests]]
+name = "String"
+types = { T = "String" }
+inputs = { cond = false, a = "yes", b = "no" }
+expect = { out = "no" }
+
+[[tests]]
+name = "Color default a is white"
+types = { T = "Color" }
+inputs = { cond = true }
+expect = { out = [1.0, 0.0, 0.0, 1.0] }
+
+[[tests]]
+name = "Int"
+types = { T = "Int" }
+inputs = { cond = true, a = 7 }
+expect = { out = 7 }
+
+[[tests]]
+name = "Table"
+types = { T = "Table" }
+inputs = { cond = true, a = { columns = [{ name = "n", type = "Int", values = [1, 2] }] } }
+expect = { out = { columns = [{ name = "n", type = "Int", values = [1, 2] }] } }
