@@ -1,0 +1,8 @@
+root 0,0 800x600
+  sidebar 0,0 200x600
+    row 8,8 184x32
+    row 8,44 184x32
+    row 8,80 184x32
+  content 200,0 600x600
+    button 251,286 98x28
+      label 6,6 86x16

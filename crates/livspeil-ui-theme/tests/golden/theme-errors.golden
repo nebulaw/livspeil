@@ -1,0 +1,9 @@
+unknown-key: theme.toml:1:1: unknown field `colour`, expected one of `scheme`, `density`, `tier`, `reduce_transparency`, `spacing`, `type_sizes`, `icon_sizes`, `radii`, `elevation`, `colors`, `metrics`
+scheme: theme.toml:1:10: unknown scheme `sepia` (dark, light)
+spacing-length: theme.toml:1:11: expected 7 values, got 3
+negative-radius: theme.toml:2:6: size must be between 0 and 1000, got -2
+color-role: theme.toml:2:1: unknown color role `primary` (known: surface.0, surface.1, surface.2, surface.3, text.primary, text.secondary, text.tertiary, accent, danger, warning, success, focus-ring)
+color-value: theme.toml:2:10: color component out of range (L and A in 0..1, C >= 0)
+shadow: theme.toml:2:7: shadow layer `0 x 4`: expected numbers `x y blur [spread] [/ alpha]`
+elevation-name: theme.toml:2:1: unknown elevation `e9` (e1..e4)
+tier: theme.toml:1:8: unknown tier `t3` (t0, t1, t2)

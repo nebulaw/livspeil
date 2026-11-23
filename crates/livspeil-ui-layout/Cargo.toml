@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: MPL-2.0
+
+[package]
+name = "livspeil-ui-layout"
+description = "Livspeil UI layout: geometry, Taffy integration, dock and infinite-canvas layouts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MPL-2.0"
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+taffy = { version = "0.15.1", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "block_layout"] }
+
+[dev-dependencies]
+livspeil-testkit = { path = "../livspeil-testkit" }
+
+[lints]
+workspace = true

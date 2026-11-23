@@ -1,0 +1,30 @@
+# initial
+Left 0,0 240x800
+Right 900,0 300x800
+Bottom 240,620 660x180
+center 240,0 660x620
+splitter Left 239,0 1x800 hit 235,0 9x800
+splitter Right 900,0 1x800 hit 896,0 9x800
+splitter Bottom 240,620 660x1 hit 240,616 660x9
+# left dragged to max
+Left 0,0 780x800
+Right 900,0 300x800
+Bottom 780,620 120x180
+center 780,0 120x620
+splitter Left 779,0 1x800 hit 775,0 9x800
+splitter Right 900,0 1x800 hit 896,0 9x800
+splitter Bottom 780,620 120x1 hit 780,616 120x9
+# right and bottom dragged
+Left 0,0 380x800
+Right 800,0 400x800
+Bottom 380,700 420x100
+center 380,0 420x700
+splitter Left 379,0 1x800 hit 375,0 9x800
+splitter Right 800,0 1x800 hit 796,0 9x800
+splitter Bottom 380,700 420x1 hit 380,696 420x9
+# left hidden
+Right 800,0 400x800
+Bottom 0,700 800x100
+center 0,0 800x700
+splitter Right 800,0 1x800 hit 796,0 9x800
+splitter Bottom 0,700 800x1 hit 0,696 800x9
