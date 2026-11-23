@@ -6,7 +6,8 @@
 //! - [`expr`]: the expression language (M0.5a).
 //! - [`anim`]: keyframed animation channels (M0.5b).
 //! - [`curve`]: sampling of `Curve` values through animation channels
-//!   (M0.8). `Table` and `Curve` values are not expression types: `ch()`
+//!   (M0.8; typed curves with OKLab color interpolation, M0.17). `Table`
+//!   and `Curve` values are not expression types: `ch()`
 //!   on such an input is a compile-time type error.
 //!
 //! How a graph input picks its value (link, expression, animation channel,
@@ -22,4 +23,4 @@ pub mod curve;
 pub mod expr;
 
 pub use anim::{AnimChannel, AnimError, Extrapolation, Interpolation, Keyframe, Tangent};
-pub use curve::{ToCurveError, sample_curve};
+pub use curve::{ToCurveError, sample_curve, sample_curve_value};

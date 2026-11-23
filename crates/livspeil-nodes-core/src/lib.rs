@@ -4,7 +4,7 @@
 //! The built-in core nodes (milestones M0.2, M0.6 to M0.8 and M0.10).
 //!
 //! See `specs/livspeil-kernel-spec-v0.md`, sections 8 and 9. Every node is
-//! version 1 and deterministic (event nodes keep runtime state, held by
+//! deterministic (event nodes keep runtime state, held by
 //! the cooker); each has unit tests and golden cases under
 //! `tests/golden/`. Specs are built in Rust and mirrored by
 //! `specs/<id>.node.toml` files (checked by `tests/node_specs.rs`,
@@ -38,21 +38,22 @@
 //!   their value outputs), `gate`, `select`; see the `event` module and
 //!   `livspeil_node_api::event`.
 //!
-//! # Deferred
-//!
-//! These need port types or value machinery the node API does not have yet
-//! and arrive with it:
-//!
-//! - variable-length color gradients (color curves).
+//! - **polymorphic** (M0.17; type variables with constraint classes, see
+//!   `livspeil_node_api::types`): `core.logic.select@2` (`T: Any`),
+//!   `core.math.lerp@2` (`T: Interpolable`, colors in OKLab),
+//!   `core.curve.ramp@2` (`T: Interpolable`, typed curves) and
+//!   `core.table.get_value@1` (`T: Any`, typed cells). The `@1` versions
+//!   of select, lerp and ramp stay registered unchanged. Variable-length
+//!   color gradients are color curves sampled by `core.curve.ramp@2`.
 
 use std::sync::Arc;
 
 mod logic;
 mod math;
 
-pub use logic::{And, Compare, Not, Or, Select};
+pub use logic::{And, Compare, Not, Or, Select, Select2};
 pub use math::{
-    Abs, Clamp, Cos, Div, Max, Min, Mul, Pow, Remap, Round, Sin, Smoothstep, Sub, Wrap,
+    Abs, Clamp, Cos, Div, Lerp2, Max, Min, Mul, Pow, Remap, Round, Sin, Smoothstep, Sub, Wrap,
 };
 mod color;
 mod curve;
@@ -65,12 +66,12 @@ mod text;
 mod time;
 mod vector;
 
-pub use curve::Ramp;
+pub use curve::{Ramp, Ramp2};
 pub use event::{
     Counter, EventSelect, Every, Gate, Latch, MAX_CROSSINGS_PER_TICK, OnChange, Toggle, crossings,
 };
 pub use fs::{DirStamp, ListDir, MemFs, RefreshPolicy, StdFs, glob_match};
-pub use table::{TableColumnNode, TableCount, TableFilterText, TableGet, TableSort};
+pub use table::{TableColumnNode, TableCount, TableFilterText, TableGet, TableGetValue, TableSort};
 
 pub use vector::{Compose3, Decompose3, Dot3, Length3, Normalize3, dot3, length3, normalize3};
 
@@ -146,6 +147,10 @@ pub fn register_all(registry: &mut NodeRegistry) -> Result<(), RegistryError> {
     registry.register(Arc::new(Latch::new()))?;
     registry.register(Arc::new(Gate::new()))?;
     registry.register(Arc::new(EventSelect::new()))?;
+    registry.register(Arc::new(Select2::new()))?;
+    registry.register(Arc::new(Lerp2::new()))?;
+    registry.register(Arc::new(Ramp2::new()))?;
+    registry.register(Arc::new(TableGetValue::new()))?;
     Ok(())
 }
 
@@ -358,6 +363,10 @@ mod tests {
             "core.event.latch@1",
             "core.event.gate@1",
             "core.event.select@1",
+            "core.logic.select@2",
+            "core.math.lerp@2",
+            "core.curve.ramp@2",
+            "core.table.get_value@1",
         ] {
             assert!(reg.get(id).is_some(), "{id} is not registered");
         }
@@ -421,6 +430,7 @@ mod tests {
         let reg = core_registry();
         for id in reg.ids() {
             let node = reg.get(id).unwrap();
+            livspeil_node_api::validate_type_vars(node.spec(), node.type_vars()).unwrap();
             let spec = node.spec();
             let inputs: Vec<Value> = spec
                 .inputs
@@ -433,5 +443,33 @@ mod tests {
                 assert_eq!(value.port_type(), port.ty, "{id}.{}", port.name);
             }
         }
+    }
+
+    #[test]
+    fn polymorphic_instances_cook_their_defaults() {
+        let reg = core_registry();
+        let mut instances = 0;
+        for id in reg.ids() {
+            let node = reg.get(id).unwrap();
+            let [var] = node.type_vars() else {
+                assert!(node.type_vars().is_empty(), "{id}");
+                continue;
+            };
+            for ty in var.class.members() {
+                let inst = livspeil_node_api::instantiate(node, &[ty]).unwrap();
+                let spec = inst.spec();
+                let inputs: Vec<Value> = spec
+                    .inputs
+                    .iter()
+                    .map(|p| p.default.clone().unwrap())
+                    .collect();
+                let outputs = inst.cook(&ctx(), &inputs).unwrap();
+                for (value, port) in outputs.iter().zip(&spec.outputs) {
+                    assert_eq!(value.port_type(), port.ty, "{id}<{ty}>.{}", port.name);
+                }
+                instances += 1;
+            }
+        }
+        assert_eq!(instances, 10 + 5 + 5 + 10);
     }
 }

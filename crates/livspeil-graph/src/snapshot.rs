@@ -38,7 +38,7 @@ pub struct NodeSnapshot {
     #[cfg_attr(feature = "serde", serde(default))]
     pub parent: Option<NodeId>,
     /// Declared port type of a boundary node (`core.subnet.input@1`,
-    /// `core.output@1`).
+    /// `core.output@1`), or the pinned type of a polymorphic node (M0.17).
     #[cfg_attr(feature = "serde", serde(default))]
     pub port_type: Option<PortType>,
     /// Charm metadata of a subnet (of a Charm instance: its definition's,

@@ -87,6 +87,7 @@ use livspeil_params::AnimChannel;
 use livspeil_params::expr::{self, Channel, Env, Program, RefKind};
 
 use crate::graph::{Graph, GraphError, NodeId};
+use crate::types::SourceKind;
 
 /// A port of a node, by port index: the target of a `ch()` reference (an
 /// input, [`RefKind::Input`]) or of an `out()` reference (an output,
@@ -291,6 +292,11 @@ pub(crate) fn compile(
         targets: RefCell::new(Vec::new()),
     };
     let program = expr::compile(source, &env).map_err(|e| GraphError::Expression(Box::new(e)))?;
+    let targets = env.targets.borrow();
+    for target in targets.iter() {
+        graph.check_poly_read(target)?;
+    }
+    drop(targets);
     Ok(Expression {
         source: source.to_owned(),
         program,
@@ -405,7 +411,8 @@ impl Graph {
         self.check_sources_editable(node)?;
         let compiled = compile(self, self.parent(node), source)?;
         let found = compiled.program.result_type();
-        if !ty.accepts(found) {
+        let poly = self.check_poly_source(node, index, SourceKind::Expr, found)?;
+        if poly.is_none() && !ty.accepts(found) {
             return Err(GraphError::TypeMismatch {
                 expected: ty,
                 found,
@@ -435,6 +442,9 @@ impl Graph {
             self.structure_changed();
         }
         self.bump(node);
+        if poly.is_some() {
+            self.refresh_types([node]);
+        }
         Ok(())
     }
 
@@ -462,6 +472,9 @@ impl Graph {
                 self.structure_changed();
             }
             self.bump(node);
+            if self.poly(node).is_some() {
+                self.refresh_types([node]);
+            }
         }
         Ok(())
     }
@@ -506,7 +519,8 @@ impl Graph {
         let (index, ty) = self.input_port(node, port)?;
         self.check_sources_editable(node)?;
         let found = channel.value_type();
-        if !ty.accepts(found) {
+        let poly = self.check_poly_source(node, index, SourceKind::Anim, found)?;
+        if poly.is_none() && !ty.accepts(found) {
             return Err(GraphError::TypeMismatch {
                 expected: ty,
                 found,
@@ -520,6 +534,9 @@ impl Graph {
             self.structure_changed();
         }
         self.bump(node);
+        if poly.is_some() {
+            self.refresh_types([node]);
+        }
         Ok(())
     }
 
@@ -545,6 +562,9 @@ impl Graph {
                 self.structure_changed();
             }
             self.bump(node);
+            if self.poly(node).is_some() {
+                self.refresh_types([node]);
+            }
         }
         Ok(())
     }

@@ -152,3 +152,43 @@ pub fn graph() -> Graph {
 pub fn float(v: f64) -> Value {
     Value::Float(v)
 }
+
+/// A new graph built from `g`'s snapshot in document order (nodes, values,
+/// animation channels, links, expressions), for graphs without subnets.
+/// Polymorphic resolution is a function of the state, so the rebuilt
+/// graph must resolve every type variable the same way.
+pub fn rebuild(g: &Graph) -> Graph {
+    let snap = g.snapshot();
+    let mut out = Graph::new(registry());
+    for n in &snap.nodes {
+        out.add_node_in(n.parent, n.id, &n.type_id, &n.name, n.port_type)
+            .expect("node");
+    }
+    for n in &snap.nodes {
+        for (port, value) in &n.inputs {
+            out.set_input(n.id, port, value.clone()).expect("value");
+        }
+        for (port, channel) in &n.animations {
+            out.set_animation(n.id, port, channel.clone())
+                .expect("animation");
+        }
+    }
+    for l in &snap.links {
+        out.link(l.from, &l.from_port, l.to, &l.to_port)
+            .expect("link");
+    }
+    for n in &snap.nodes {
+        for (port, source) in &n.expressions {
+            out.set_expression(n.id, port, source).expect("expression");
+        }
+    }
+    assert_eq!(out.snapshot(), snap);
+    out
+}
+
+/// Every node's resolved type variables, in id order.
+pub fn resolutions(g: &Graph) -> Vec<Vec<PortType>> {
+    g.node_ids()
+        .map(|id| g.resolved_types(id).to_vec())
+        .collect()
+}

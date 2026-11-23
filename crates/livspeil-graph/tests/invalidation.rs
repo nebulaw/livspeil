@@ -3,11 +3,12 @@
 
 //! Push-based invalidation: what an edit, a removal, a rename or a clock
 //! change marks dirty, several cookers on one graph, and a randomized
-//! differential test (long-lived cookers against fresh ones).
+//! differential test (long-lived cookers against fresh ones, with
+//! polymorphic nodes whose resolution changes with the edits).
 
 mod common;
 
-use common::{float, graph};
+use common::{float, graph, rebuild, resolutions};
 use livspeil_graph::{CookError, CookStats, Cooker, Graph, NodeId};
 use livspeil_node_api::{CookContext, Value};
 use livspeil_params::{AnimChannel, Keyframe};
@@ -15,6 +16,8 @@ use livspeil_params::{AnimChannel, Keyframe};
 const ADD: &str = "core.math.add@1";
 const CLOCK: &str = "core.time.clock@1";
 const LERP: &str = "core.math.lerp@1";
+const LERP2: &str = "core.math.lerp@2";
+const SELECT2: &str = "core.logic.select@2";
 
 fn out(cooker: &mut Cooker, g: &Graph, id: NodeId) -> f64 {
     cooker
@@ -311,7 +314,10 @@ impl Rng {
 /// Property: two long-lived cookers that each cook random subsets of the
 /// nodes after random edits (including node removal and re-adding, which
 /// reuses slots, clock changes, and `ch()`/`out()` expressions) always
-/// agree with a fresh cooker.
+/// agree with a fresh cooker. Polymorphic nodes (`lerp@2`, `select@2`)
+/// get `Vec2` and `Int` values too, so their resolution changes (and
+/// invalidates) as edits come and go; after every edit, rebuilding the
+/// graph from scratch must resolve every type variable the same way.
 #[test]
 fn long_lived_cookers_match_fresh_cookers() {
     const PORTS: [&str; 2] = ["a", "b"];
@@ -328,13 +334,14 @@ fn long_lived_cookers_match_fresh_cookers() {
         "out(\"../{m}/time\") + out(\"{n}/frame\") * 0.25",
         "out(\"{n}/out\") > 1 ? out(\"{m}/out\") : 2",
     ];
+    let mut retyped = 0;
     for seed in 1..=300u64 {
         let mut rng = Rng(seed.wrapping_mul(0x2545_F491_4F6C_DD1D) | 1);
         let mut g = graph();
         let mut counter = 0;
         let mut ids: Vec<NodeId> = Vec::new();
         for _ in 0..7 {
-            let ty = [ADD, ADD, LERP, CLOCK][rng.below(4)];
+            let ty = [ADD, ADD, LERP, CLOCK, LERP2, SELECT2][rng.below(6)];
             ids.push(g.add_node(ty, &format!("x{counter}")).unwrap());
             counter += 1;
         }
@@ -348,7 +355,15 @@ fn long_lived_cookers_match_fresh_cookers() {
                     .to_owned()
             };
             let _ = match rng.below(12) {
-                0 | 1 => g.set_input(node, port, float(rng.below(100) as f64 / 10.0)),
+                0 | 1 => {
+                    let x = rng.below(100) as f64 / 10.0;
+                    let value = match rng.below(5) {
+                        0 => Value::Vec2([x, 1.0]),
+                        1 => Value::Int(rng.below(5) as i64),
+                        _ => float(x),
+                    };
+                    g.set_input(node, port, value)
+                }
                 2 => g.clear_input(node, port),
                 3 | 4 => {
                     let template = exprs[rng.below(exprs.len())];
@@ -386,13 +401,24 @@ fn long_lived_cookers_match_fresh_cookers() {
                     // a new one, which reuses the slot.
                     let idx = rng.below(ids.len());
                     if g.remove_node(ids[idx]).is_ok() {
-                        let ty = [ADD, LERP, CLOCK][rng.below(3)];
+                        let ty = [ADD, LERP, CLOCK, LERP2, SELECT2][rng.below(5)];
                         ids[idx] = g.add_node(ty, &format!("x{counter}")).unwrap();
                         counter += 1;
                     }
                     Ok(())
                 }
             };
+            let types = resolutions(&g);
+            assert_eq!(
+                resolutions(&rebuild(&g)),
+                types,
+                "seed {seed} step {step}: resolution depends on edit order"
+            );
+            retyped += types
+                .iter()
+                .flatten()
+                .filter(|t| **t != livspeil_node_api::PortType::Float)
+                .count();
             let which = rng.below(2);
             if rng.below(3) == 0 {
                 let frame = rng.below(4) as u64;
@@ -432,4 +458,6 @@ fn long_lived_cookers_match_fresh_cookers() {
             }
         }
     }
+    // Polymorphic nodes did get other types than their fallback.
+    assert!(retyped > 1000, "{retyped}");
 }

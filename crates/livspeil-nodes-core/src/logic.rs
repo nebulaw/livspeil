@@ -3,13 +3,15 @@
 
 //! Logic nodes (milestone M0.6a): selection, comparison and boolean algebra.
 //!
-//! Two temporary restrictions, both lifted by later milestones:
-//! - `core.logic.select` is `Float`-only until polymorphic constraint
-//!   classes exist in the node API.
+//! - `core.logic.select@1` is `Float`-only; `core.logic.select@2` (M0.17)
+//!   is polymorphic, `T: Any`, and supersedes it (`@1` stays registered
+//!   so existing documents load unchanged).
 //! - `core.logic.compare` takes its operator as a `String` input; it becomes
 //!   an `Enum` parameter once parameters land (M0.5).
 
-use livspeil_node_api::{CookContext, NodeError, NodeImpl, NodeSpec, PortType, Value};
+use livspeil_node_api::{
+    CookContext, NodeError, NodeImpl, NodeSpec, PortType, TypeClass, TypeVar, Value,
+};
 
 use crate::{float, string};
 
@@ -39,8 +41,8 @@ macro_rules! node_boilerplate {
 
 /// `core.logic.select@1`: `out = if cond { a } else { b }`.
 ///
-/// `Float`-only for now; it becomes polymorphic once the node API has
-/// constraint classes.
+/// `Float`-only; superseded by the polymorphic [`Select2`]
+/// (`core.logic.select@2`).
 #[derive(Debug)]
 pub struct Select {
     spec: NodeSpec,
@@ -59,6 +61,64 @@ impl Select {
     }
 }
 node_boilerplate!(Select);
+
+/// `core.logic.select@2`: `out = if cond { a } else { b }` for any value
+/// type: `<T: Any = Float>(cond: Bool, a: T = 1, b: T = 0) -> out: T`.
+///
+/// `T` resolves per instance from what is linked or set (see
+/// `livspeil_node_api::types`); unresolved it is `Float` and the node
+/// behaves exactly like `@1`. Defaults follow the resolved type (`1.0`
+/// becomes `[1, 1, 1]` for `Vec3`, the grey `oklch(1 0 0)` for colors,
+/// the empty string, `false`, the empty table, the constant curve 0).
+#[derive(Debug)]
+pub struct Select2 {
+    spec: NodeSpec,
+    vars: Vec<TypeVar>,
+}
+
+impl Select2 {
+    #[must_use]
+    pub fn new() -> Self {
+        let spec = NodeSpec::new(
+            "core.logic.select",
+            2,
+            "Pick a when cond is true, else b (any type)",
+        );
+        Select2 {
+            spec: bool_in(spec, "cond", false)
+                .input("a", PortType::Float, Some(Value::Float(1.0)))
+                .input("b", PortType::Float, Some(Value::Float(0.0)))
+                .output("out", PortType::Float),
+            vars: vec![
+                TypeVar::new("T", TypeClass::Any, PortType::Float)
+                    .input("a")
+                    .input("b")
+                    .output("out"),
+            ],
+        }
+    }
+}
+node_boilerplate!(Select2);
+
+impl NodeImpl for Select2 {
+    fn spec(&self) -> &NodeSpec {
+        &self.spec
+    }
+
+    fn type_vars(&self) -> &[TypeVar] {
+        &self.vars
+    }
+
+    fn cook(&self, _ctx: &CookContext, inputs: &[Value]) -> Result<Vec<Value>, NodeError> {
+        let cond = boolean(inputs, 0, "cond")?;
+        let (port, index) = if cond { ("a", 1) } else { ("b", 2) };
+        let value = inputs.get(index).ok_or_else(|| NodeError::InvalidInput {
+            port,
+            reason: "missing input".to_owned(),
+        })?;
+        Ok(vec![value.clone()])
+    }
+}
 
 impl NodeImpl for Select {
     fn spec(&self) -> &NodeSpec {
@@ -272,6 +332,28 @@ mod tests {
                 Value::String(op.to_owned()),
             ],
         )
+    }
+
+    #[test]
+    fn select2_picks_any_type() {
+        let s = Select2::new();
+        let ctx = CookContext::default();
+        for (a, b) in [
+            (Value::Float(1.0), Value::Float(2.0)),
+            (Value::Vec3([1.0; 3]), Value::Vec3([2.0; 3])),
+            (Value::String("a".into()), Value::String("b".into())),
+            (Value::Color([0.5, 0.1, 30.0, 1.0]), Value::Color([0.0; 4])),
+        ] {
+            let pick = |c| {
+                s.cook(&ctx, &[Value::Bool(c), a.clone(), b.clone()])
+                    .unwrap()
+            };
+            assert_eq!(pick(true), vec![a.clone()]);
+            assert_eq!(pick(false), vec![b.clone()]);
+        }
+        assert!(s.cook(&ctx, &[Value::Float(1.0)]).is_err());
+        assert!(s.cook(&ctx, &[Value::Bool(true)]).is_err());
+        assert_eq!(s.type_vars().len(), 1);
     }
 
     #[test]

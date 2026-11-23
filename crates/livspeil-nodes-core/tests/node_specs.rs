@@ -8,8 +8,9 @@
 //! than 1). The file is the node's documentation and test table:
 //!
 //! - its header (`id`, `version`, `summary`, `time_dependent`,
-//!   `reads_system`, `[[inputs]]`, `[[outputs]]`) is generated from the
-//!   Rust [`NodeSpec`] and must match it exactly;
+//!   `reads_system`, `[[type_vars]]`, `[[inputs]]`, `[[outputs]]`) is
+//!   generated from the Rust [`NodeSpec`] (and the node's type variables)
+//!   and must match it exactly;
 //! - `description` and every `[[tests]]` entry are hand-written and kept
 //!   when the file is regenerated.
 //!
@@ -31,7 +32,7 @@ use std::sync::Arc;
 use livspeil_node_api::{
     CookContext, Curve, CurveExtrapolation, CurveInterpolation, CurveKey, CurveTangent, Event,
     EventCall, EventTrigger, NodeError, NodeImpl, NodeSpec, PortType, SystemContext, Table,
-    TableColumn, Value,
+    TableColumn, TypeClass, TypeVar, TypedCurveKey, TypedCurveTangent, Value, instantiate,
 };
 use livspeil_nodes_core::{MemFs, core_registry};
 
@@ -51,20 +52,23 @@ const FILE_HEADER: &str = "\
 # `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
 ";
 
-const TOP_KEYS: [&str; 9] = [
+const TOP_KEYS: [&str; 10] = [
     "id",
     "version",
     "summary",
     "description",
     "time_dependent",
     "reads_system",
+    "type_vars",
     "inputs",
     "outputs",
     "tests",
 ];
-const PORT_KEYS: [&str; 4] = ["name", "type", "default", "default_debug"];
-const TEST_KEYS: [&str; 10] = [
+const PORT_KEYS: [&str; 5] = ["name", "type", "var", "default", "default_debug"];
+const VAR_KEYS: [&str; 3] = ["name", "class", "fallback"];
+const TEST_KEYS: [&str; 11] = [
     "name",
+    "types",
     "inputs",
     "context",
     "fs",
@@ -171,6 +175,9 @@ fn extrapolation_name(e: CurveExtrapolation) -> &'static str {
 }
 
 fn encode_curve(curve: &Curve) -> String {
+    if curve.value_type() != PortType::Float {
+        return encode_typed_curve(curve);
+    }
     let keys: Vec<String> = curve
         .keys()
         .iter()
@@ -204,6 +211,57 @@ fn encode_curve(curve: &Curve) -> String {
         })
         .collect();
     let mut out = format!("{{ keys = [{}]", keys.join(", "));
+    if curve.pre() != CurveExtrapolation::Hold {
+        let _ = write!(out, ", pre = \"{}\"", extrapolation_name(curve.pre()));
+    }
+    if curve.post() != CurveExtrapolation::Hold {
+        let _ = write!(out, ", post = \"{}\"", extrapolation_name(curve.post()));
+    }
+    out.push_str(" }");
+    out
+}
+
+/// A curve of vector or color keys: `{ type = "Vec3", keys = [...] }`
+/// with array values and tangents.
+fn encode_typed_curve(curve: &Curve) -> String {
+    let text = |v: &Value| encode(v).unwrap_or_default();
+    let keys: Vec<String> = curve
+        .typed_keys()
+        .iter()
+        .map(|k| {
+            let mut key = format!(
+                "{{ position = {}, value = {}",
+                float_text(k.position),
+                text(&k.value)
+            );
+            if k.interpolation != CurveInterpolation::Linear {
+                let _ = write!(
+                    key,
+                    ", interpolation = {}",
+                    interpolation_name(k.interpolation)
+                );
+            }
+            match &k.tangent {
+                TypedCurveTangent::Auto => {}
+                TypedCurveTangent::Flat => key.push_str(", tangent = \"flat\""),
+                TypedCurveTangent::Explicit { incoming, outgoing } => {
+                    let _ = write!(
+                        key,
+                        ", tangent = {{ incoming = {}, outgoing = {} }}",
+                        text(incoming),
+                        text(outgoing)
+                    );
+                }
+            }
+            key.push_str(" }");
+            key
+        })
+        .collect();
+    let mut out = format!(
+        "{{ type = {}, keys = [{}]",
+        quote(curve.value_type().name()),
+        keys.join(", ")
+    );
     if curve.pre() != CurveExtrapolation::Hold {
         let _ = write!(out, ", pre = \"{}\"", extrapolation_name(curve.pre()));
     }
@@ -404,9 +462,83 @@ fn decode_extrapolation(v: Option<&toml::Value>) -> Result<CurveExtrapolation, S
     }
 }
 
+/// A curve key type: `Float` (default), `Vec2`, `Vec3`, `Vec4` or
+/// `Color`.
+fn curve_type(t: &toml::Table) -> Result<PortType, String> {
+    match t.get("type") {
+        None => Ok(PortType::Float),
+        Some(v) => {
+            let ty = port_type(v.as_str().ok_or("a curve type must be a string")?)?;
+            if matches!(
+                ty,
+                PortType::Float
+                    | PortType::Vec2
+                    | PortType::Vec3
+                    | PortType::Vec4
+                    | PortType::Color
+            ) {
+                Ok(ty)
+            } else {
+                Err(format!("curves cannot hold {ty} keys"))
+            }
+        }
+    }
+}
+
+fn decode_typed_tangent(v: &toml::Value, ty: PortType) -> Result<TypedCurveTangent, String> {
+    match v {
+        toml::Value::String(s) if s == "auto" => Ok(TypedCurveTangent::Auto),
+        toml::Value::String(s) if s == "flat" => Ok(TypedCurveTangent::Flat),
+        toml::Value::Table(t) => {
+            check_keys(t, &["incoming", "outgoing"], "a tangent")?;
+            let get = |k: &str| {
+                t.get(k)
+                    .ok_or_else(|| format!("tangent.{k} is missing"))
+                    .and_then(|v| decode(ty, v))
+            };
+            Ok(TypedCurveTangent::Explicit {
+                incoming: get("incoming")?,
+                outgoing: get("outgoing")?,
+            })
+        }
+        _ => Err("tangent must be \"auto\", \"flat\" or { incoming, outgoing }".to_owned()),
+    }
+}
+
 fn decode_curve(v: &toml::Value) -> Result<Curve, String> {
     let t = table_of(v, "a Curve value")?;
-    check_keys(t, &["keys", "pre", "post"], "a Curve value")?;
+    check_keys(t, &["type", "keys", "pre", "post"], "a Curve value")?;
+    let ty = curve_type(t)?;
+    if ty != PortType::Float {
+        let Some(toml::Value::Array(keys)) = t.get("keys") else {
+            return Err("a Curve value needs keys = [...]".to_owned());
+        };
+        let mut out = Vec::new();
+        for key in keys {
+            let k = table_of(key, "a curve key")?;
+            check_keys(
+                k,
+                &["position", "value", "interpolation", "tangent"],
+                "a curve key",
+            )?;
+            let position = number(k.get("position").ok_or("curve key position is missing")?)?;
+            let value = decode(ty, k.get("value").ok_or("curve key value is missing")?)?;
+            let mut key = TypedCurveKey::new(position, value);
+            if let Some(i) = k.get("interpolation") {
+                key = key.with_interpolation(decode_interpolation(i)?);
+            }
+            if let Some(tangent) = k.get("tangent") {
+                key = key.with_tangent(decode_typed_tangent(tangent, ty)?);
+            }
+            out.push(key);
+        }
+        return Ok(Curve::typed(out)
+            .map_err(|e| e.to_string())?
+            .with_extrapolation(
+                decode_extrapolation(t.get("pre"))?,
+                decode_extrapolation(t.get("post"))?,
+            ));
+    }
     let Some(toml::Value::Array(keys)) = t.get("keys") else {
         return Err("a Curve value needs keys = [...]".to_owned());
     };
@@ -551,6 +683,28 @@ fn multiline(text: &str) -> String {
     }
 }
 
+/// The type variable typing a port, if any.
+fn port_var<'a>(node: &'a dyn NodeImpl, port: &str, input: bool) -> Option<&'a TypeVar> {
+    node.type_vars().iter().find(|v| {
+        let ports = if input { &v.inputs } else { &v.outputs };
+        ports.contains(&port)
+    })
+}
+
+/// `type = "<Type>"`, or `type = "<Class>"` and `var = "<Var>"` for a
+/// polymorphic port.
+fn write_port_type(out: &mut String, node: &dyn NodeImpl, port: &str, input: bool, ty: PortType) {
+    match port_var(node, port, input) {
+        Some(var) => {
+            let _ = writeln!(out, "type = {}", quote(var.class.name()));
+            let _ = writeln!(out, "var = {}", quote(var.name));
+        }
+        None => {
+            let _ = writeln!(out, "type = {}", quote(ty.name()));
+        }
+    }
+}
+
 /// The canonical text of a node's spec file.
 fn render(node: &dyn NodeImpl, hand: &HandWritten) -> String {
     let spec = node.spec();
@@ -570,10 +724,16 @@ fn render(node: &dyn NodeImpl, hand: &HandWritten) -> String {
     if spec.outputs.is_empty() {
         let _ = writeln!(out, "outputs = []");
     }
+    for var in node.type_vars() {
+        let _ = writeln!(out, "\n[[type_vars]]");
+        let _ = writeln!(out, "name = {}", quote(var.name));
+        let _ = writeln!(out, "class = {}", quote(var.class.name()));
+        let _ = writeln!(out, "fallback = {}", quote(var.fallback.name()));
+    }
     for port in &spec.inputs {
         let _ = writeln!(out, "\n[[inputs]]");
         let _ = writeln!(out, "name = {}", quote(port.name));
-        let _ = writeln!(out, "type = {}", quote(port.ty.name()));
+        write_port_type(&mut out, node, port.name, true, port.ty);
         if let Some(default) = port.default.as_ref().filter(|_| !event_placeholder(port)) {
             match encode(default) {
                 Some(text) => {
@@ -588,7 +748,7 @@ fn render(node: &dyn NodeImpl, hand: &HandWritten) -> String {
     for port in &spec.outputs {
         let _ = writeln!(out, "\n[[outputs]]");
         let _ = writeln!(out, "name = {}", quote(port.name));
-        let _ = writeln!(out, "type = {}", quote(port.ty.name()));
+        write_port_type(&mut out, node, port.name, false, port.ty);
     }
     if !hand.tests.is_empty() {
         let _ = writeln!(out, "\n{}", hand.tests);
@@ -639,6 +799,7 @@ fn check_header(node: &dyn NodeImpl, file: &toml::Table, problems: &mut Vec<Stri
             problem("description must be a string".to_owned());
         }
     }
+    check_type_vars(node, file, &mut problem);
     for (key, ports, is_input) in [
         ("inputs", &spec.inputs, true),
         ("outputs", &spec.outputs, false),
@@ -676,13 +837,36 @@ fn check_header(node: &dyn NodeImpl, file: &toml::Table, problems: &mut Vec<Stri
                 )),
                 Err(e) => problem(e),
             }
-            match str_field(entry, "type", &what).and_then(port_type) {
-                Ok(ty) if ty == port.ty => {}
-                Ok(ty) => problem(format!(
-                    "{what} ({}) type is {ty}, the Rust spec says {}",
-                    port.name, port.ty
+            let var = port_var(node, port.name, is_input);
+            let listed_var = entry
+                .get("var")
+                .map(|v| v.as_str().unwrap_or("<not a string>"));
+            match (var, listed_var) {
+                (None, None) => match str_field(entry, "type", &what).and_then(port_type) {
+                    Ok(ty) if ty == port.ty => {}
+                    Ok(ty) => problem(format!(
+                        "{what} ({}) type is {ty}, the Rust spec says {}",
+                        port.name, port.ty
+                    )),
+                    Err(e) => problem(e),
+                },
+                (Some(var), Some(listed)) if listed == var.name => {
+                    match str_field(entry, "type", &what) {
+                        Ok(class) if class == var.class.name() => {}
+                        Ok(class) => problem(format!(
+                            "{what} ({}) type is {class:?}, the Rust spec says {:?} (class of {})",
+                            port.name,
+                            var.class.name(),
+                            var.name
+                        )),
+                        Err(e) => problem(e),
+                    }
+                }
+                (var, listed) => problem(format!(
+                    "{what} ({}) var is {listed:?}, the Rust spec says {:?}",
+                    port.name,
+                    var.map(|v| v.name)
                 )),
-                Err(e) => problem(e),
             }
             let default = entry.get("default");
             let debug = entry.get("default_debug");
@@ -718,6 +902,77 @@ fn check_header(node: &dyn NodeImpl, file: &toml::Table, problems: &mut Vec<Stri
             }
         }
     }
+}
+
+/// Compare the file's `[[type_vars]]` with the node's type variables.
+fn check_type_vars(node: &dyn NodeImpl, file: &toml::Table, problem: &mut dyn FnMut(String)) {
+    let empty = Vec::new();
+    let listed = match file.get("type_vars") {
+        None => &empty,
+        Some(toml::Value::Array(a)) => a,
+        Some(_) => return problem("type_vars must be an array of tables".to_owned()),
+    };
+    let vars = node.type_vars();
+    if listed.len() != vars.len() {
+        problem(format!(
+            "type_vars: the file lists {} type variables, the Rust spec {}",
+            listed.len(),
+            vars.len()
+        ));
+    }
+    for (i, (entry, var)) in listed.iter().zip(vars).enumerate() {
+        let what = format!("type_vars[{i}]");
+        let Some(entry) = entry.as_table() else {
+            problem(format!("{what} must be a table"));
+            continue;
+        };
+        if let Err(e) = check_keys(entry, &VAR_KEYS, &what) {
+            problem(e);
+        }
+        let want = [
+            ("name", var.name),
+            ("class", var.class.name()),
+            ("fallback", var.fallback.name()),
+        ];
+        for (key, want) in want {
+            match str_field(entry, key, &what) {
+                Ok(got) if got == want => {}
+                Ok(got) => problem(format!(
+                    "{what}.{key} is {got:?}, the Rust spec says {want:?}"
+                )),
+                Err(e) => problem(e),
+            }
+        }
+        if TypeClass::from_name(var.class.name()) != Some(var.class) {
+            problem(format!("{what}: unknown class {}", var.class));
+        }
+    }
+}
+
+/// The instance of `node` a test case runs: `types = { T = "Vec3" }`
+/// resolves its type variables (others keep their fallback).
+fn test_instance(
+    node: &Arc<dyn NodeImpl>,
+    types: Option<&toml::Value>,
+) -> Result<Arc<dyn NodeImpl>, String> {
+    let Some(types) = types else {
+        return Ok(Arc::clone(node));
+    };
+    let given = table_of(types, "types")?;
+    let vars = node.type_vars();
+    for name in given.keys() {
+        if !vars.iter().any(|v| v.name == name) {
+            return Err(format!("types: the node has no type variable {name:?}"));
+        }
+    }
+    let resolved = vars
+        .iter()
+        .map(|v| match given.get(v.name) {
+            Some(t) => port_type(t.as_str().ok_or("types values must be type names")?),
+            None => Ok(v.fallback),
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    instantiate(node, &resolved).map_err(|e| format!("types: {e}"))
 }
 
 fn host_fs(fs: &toml::Value) -> Result<MemFs, String> {
@@ -779,10 +1034,12 @@ fn context(v: Option<&toml::Value>) -> Result<CookContext, String> {
 }
 
 /// Run one `[[tests]]` case. Returns the reason it failed.
-fn run_case(node: &dyn NodeImpl, case: &toml::Value) -> Result<(), String> {
-    let spec = node.spec();
+fn run_case(node: &Arc<dyn NodeImpl>, case: &toml::Value) -> Result<(), String> {
     let case = table_of(case, "a [[tests]] entry")?;
     check_keys(case, &TEST_KEYS, "[[tests]]")?;
+    let instance = test_instance(node, case.get("types"))?;
+    let node = instance.as_ref();
+    let spec = node.spec();
     if let Some(name) = case.get("name") {
         name.as_str().ok_or("name must be a string")?;
     }
@@ -1113,6 +1370,37 @@ text above `[[tests]]`, such as comments, is not kept.
 | `events` | Optional event steps for event nodes, run in order from the node's initial state, the state carried from step to step: `{ input = "trigger", payload = 2.0 }` delivers an event (payload optional) to an `Event` input, `{ tick = true }` is the once-per-tick poll. A step may override `inputs` and `context` for itself. `expect` then checks the outputs cooked from the final state (`cook_with_state`); without `events` that is the initial state. |
 | `expect_events` | The events emitted by all steps, in order: `[{ output = "fired", payload = 1 }, { output = "out" }]` (payload left out: none). A payload's TOML type picks its value type (integer `Int`, float `Float`, boolean `Bool`, string `String`). May replace `expect`. |
 | `expect_error` | The cook (or an event step) must fail: `port` (an invalid-input error on that port) and/or `message` (a substring of the error text); `{}` accepts any error. |
+| `types` | Polymorphic nodes only: the resolved type of each type variable for this case, `{ T = "Vec3" }` (variables left out take their fallback). Inputs, outputs and defaults then have the resolved types. |
+
+### Polymorphic ports
+
+A polymorphic node (M0.17) declares type variables, each with a
+constraint class and a fallback, as generated `[[type_vars]]` entries;
+its ports of a variable list the class as `type` and the variable as
+`var`, and their `default` is the fallback's default:
+
+```toml
+[[type_vars]]
+name = "T"
+class = "Interpolable"   # Numeric, Vector, Interpolable or Any
+fallback = "Float"       # the type of an unresolved instance
+
+[[inputs]]
+name = "a"
+type = "Interpolable"
+var = "T"
+default = 0.0
+```
+
+Classes: `Numeric` = `Float`, `Int`, `Vec2`, `Vec3`, `Vec4`; `Vector` =
+`Vec2`, `Vec3`, `Vec4`; `Interpolable` = `Float`, `Vec2`, `Vec3`,
+`Vec4`, `Color`; `Any` = every value type except `Event`. A graph
+resolves the variables of each instance from its links, values,
+expressions and animation channels or a pinned type (documents:
+`port-type=`); see `livspeil_graph`'s `types` module. When a variable
+resolves to another type, defaults follow it: a number `x` becomes `Int`
+when whole, `[x, x, ...]` for vectors and the grey `oklch(x 0 0 1)` for
+colors; other defaults become the type's zero.
 
 ### Values
 
@@ -1127,12 +1415,17 @@ Values are written by port type:
 | `Vec2`, `Vec3`, `Vec4` | array of 2, 3 or 4 numbers | `[1.0, 2.0, 3.0]` |
 | `Color` | OKLCH plus alpha, `[l, c, h, alpha]` (alpha may be left out: 1.0) | `[0.7, 0.1, 250.0, 1.0]` |
 | `Table` | `{ columns = [{ name, type, values = [...] }, ...] }` | `{ columns = [{ name = "name", type = "String", values = ["a", "b"] }] }` |
-| `Curve` | `{ keys = [{ position, value, interpolation?, tangent? }, ...], pre?, post? }` | `{ keys = [{ position = 0.0, value = 0.0 }, { position = 1.0, value = 1.0 }] }` |
+| `Curve` | `{ type?, keys = [{ position, value, interpolation?, tangent? }, ...], pre?, post? }` | `{ keys = [{ position = 0.0, value = 0.0 }, { position = 1.0, value = 1.0 }] }` |
 
 Curve keys: `interpolation` is `"linear"` (default), `"step"`, `"bezier"`
 or `{ spring = { frequency = 2.0, damping = 0.3 } }`; `tangent` is
 `"auto"` (default), `"flat"` or `{ incoming = 0.0, outgoing = 4.0 }`;
 `pre` and `post` are `"hold"` (default), `"loop"` or `"ping_pong"`.
+Typed curves (M0.17) add `type = "Vec2"` (or `"Vec3"`, `"Vec4"`,
+`"Color"`; default `"Float"`), and their key values and explicit tangent
+slopes are written as values of that type, for example
+`{ type = "Color", keys = [{ position = 0.0, value = [0.5, 0.1, 30.0] }] }`
+(color tangents are OKLab-plus-alpha slopes).
 
 Large values (tables) read better as TOML sub-tables, for example
 `[[tests.inputs.table.columns]]` with `name`, `type` and `values` keys.
@@ -1146,21 +1439,39 @@ fn md_cell(text: &str) -> String {
     text.replace('|', "\\|").replace('\n', " ")
 }
 
-fn port_list(ports: &[livspeil_node_api::PortSpec], with_defaults: bool) -> String {
+fn port_list(node: &dyn NodeImpl, inputs: bool) -> String {
+    let spec = node.spec();
+    let ports = if inputs { &spec.inputs } else { &spec.outputs };
     if ports.is_empty() {
         return "none".to_owned();
     }
     ports
         .iter()
         .map(|p| {
-            let default = match (&p.default, with_defaults) {
+            let default = match (&p.default, inputs) {
                 (Some(d), true) if !event_placeholder(p) => format!(" = {}", show(d)),
                 _ => String::new(),
             };
-            md_cell(&format!("`{}: {}{}`", p.name, p.ty, default))
+            let ty = port_var(node, p.name, inputs)
+                .map_or_else(|| p.ty.to_string(), |v| v.name.to_owned());
+            md_cell(&format!("`{}: {}{}`", p.name, ty, default))
         })
         .collect::<Vec<_>>()
         .join("<br>")
+}
+
+/// `<T: Any = Float>` for a polymorphic node, empty otherwise.
+fn type_params(node: &dyn NodeImpl) -> String {
+    let vars: Vec<String> = node
+        .type_vars()
+        .iter()
+        .map(|v| format!("{}: {} = {}", v.name, v.class, v.fallback))
+        .collect();
+    if vars.is_empty() {
+        String::new()
+    } else {
+        format!("<{}>", vars.join(", "))
+    }
 }
 
 fn render_docs(nodes: &[(Arc<dyn NodeImpl>, Option<String>, usize)]) -> String {
@@ -1176,6 +1487,10 @@ fn render_docs(nodes: &[(Arc<dyn NodeImpl>, Option<String>, usize)]) -> String {
     for (node, _, tests) in nodes {
         let spec = node.spec();
         let mut summary = md_cell(spec.summary);
+        let params = type_params(node.as_ref());
+        if !params.is_empty() {
+            summary.push_str(&format!(" `{params}`"));
+        }
         if spec.time_dependent {
             summary.push_str(" *(time)*");
         }
@@ -1189,8 +1504,8 @@ fn render_docs(nodes: &[(Arc<dyn NodeImpl>, Option<String>, usize)]) -> String {
             spec.version,
             anchor(spec),
             summary,
-            port_list(&spec.inputs, true),
-            port_list(&spec.outputs, false),
+            port_list(node.as_ref(), true),
+            port_list(node.as_ref(), false),
             tests
         );
     }
@@ -1199,6 +1514,10 @@ fn render_docs(nodes: &[(Arc<dyn NodeImpl>, Option<String>, usize)]) -> String {
         let spec = node.spec();
         let _ = writeln!(out, "\n### {}@{}\n", spec.id, spec.version);
         let _ = writeln!(out, "{}", spec.summary);
+        let params = type_params(node.as_ref());
+        if !params.is_empty() {
+            let _ = writeln!(out, "\nType variables: `{params}`.");
+        }
         if let Some(d) = description {
             let _ = writeln!(out, "\n{d}");
         }
@@ -1331,7 +1650,7 @@ fn node_specs_match_the_registry_and_their_tests_pass() {
                 .and_then(toml::Value::as_str)
                 .map(|n| format!("tests[{i}] ({n})"))
                 .unwrap_or_else(|| format!("tests[{i}]"));
-            if let Err(e) = run_case(node.as_ref(), case) {
+            if let Err(e) = run_case(node, case) {
                 file_problems.push(format!("{label}: {e}"));
             }
         }
@@ -1419,6 +1738,23 @@ fn every_value_type_round_trips_through_toml() {
         Value::Table(Table::empty()),
         Value::Curve(Arc::new(curve)),
         Value::Curve(Arc::new(Curve::identity())),
+        Value::Curve(Arc::new(
+            Curve::typed(vec![
+                TypedCurveKey::new(0.0, Value::Color([0.5, 0.1, 30.0, 1.0]))
+                    .with_interpolation(CurveInterpolation::Bezier)
+                    .with_tangent(TypedCurveTangent::Explicit {
+                        incoming: Value::Color([0.0, 0.1, -0.1, 0.0]),
+                        outgoing: Value::Color([1.0, 0.0, 0.0, -1e-7]),
+                    }),
+                TypedCurveKey::new(1.0, Value::Color([0.9, 0.0, 0.0, 0.5]))
+                    .with_tangent(TypedCurveTangent::Flat),
+            ])
+            .unwrap()
+            .with_extrapolation(CurveExtrapolation::Loop, CurveExtrapolation::Hold),
+        )),
+        Value::Curve(Arc::new(
+            Curve::typed(vec![TypedCurveKey::new(2.0, Value::Vec2([1.0, -2.0]))]).unwrap(),
+        )),
     ];
     for value in values {
         let text = encode(&value).unwrap();

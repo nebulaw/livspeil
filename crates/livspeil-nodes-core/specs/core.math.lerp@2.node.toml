@@ -1,0 +1,95 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Node spec (kernel spec, section 9). The keys and ports above the first
+# [[tests]] are generated from the Rust NodeSpec by `cargo xtask node-specs`
+# and checked by crates/livspeil-nodes-core/tests/node_specs.rs; only
+# `description` and the [[tests]] are hand-written. Format: docs/nodes.md.
+
+id = "core.math.lerp"
+version = 2
+summary = "Linear interpolation between a and b (numbers, vectors, colors)"
+time_dependent = false
+reads_system = false
+description = '''
+`out = a + (b - a) * t`, not clamped, for any interpolable type `T`
+(`Float`, `Vec2`, `Vec3`, `Vec4`, `Color`); supersedes `@1`, which stays
+registered. Vectors interpolate component by component. Colors (OKLCH
+plus alpha) interpolate in OKLab plus alpha, so the hue takes the short
+way round and a grey end does not drag it; the result's hue is in
+`[0, 360)` (0 below chroma `1e-9`), and `t = 0` / `t = 1` give `a` / `b`
+exactly. `T` resolves from what is linked or set; unresolved it is
+`Float`. Defaults follow `T`: `a` is zero (black for colors), `b` ones
+(white for colors).
+'''
+
+[[type_vars]]
+name = "T"
+class = "Interpolable"
+fallback = "Float"
+
+[[inputs]]
+name = "a"
+type = "Interpolable"
+var = "T"
+default = 0.0
+
+[[inputs]]
+name = "b"
+type = "Interpolable"
+var = "T"
+default = 1.0
+
+[[inputs]]
+name = "t"
+type = "Float"
+default = 0.5
+
+[[outputs]]
+name = "out"
+type = "Interpolable"
+var = "T"
+
+[[tests]]
+name = "defaults"
+expect = { out = 0.5 }
+
+[[tests]]
+name = "spec example"
+inputs = { b = 10.0, t = 0.25 }
+expect = { out = 2.5 }
+
+[[tests]]
+name = "Vec3"
+types = { T = "Vec3" }
+inputs = { a = [0.0, 0.0, 0.0], b = [2.0, 4.0, 6.0], t = 0.5 }
+expect = { out = [1.0, 2.0, 3.0] }
+
+[[tests]]
+name = "Vec2 defaults"
+types = { T = "Vec2" }
+expect = { out = [0.5, 0.5] }
+
+[[tests]]
+name = "not clamped"
+types = { T = "Vec4" }
+inputs = { t = 2.0 }
+expect = { out = [2.0, 2.0, 2.0, 2.0] }
+
+[[tests]]
+name = "colors mix in OKLab"
+types = { T = "Color" }
+inputs = { a = [0.7, 0.1, 40.0, 1.0], b = [0.7, 0.1, 80.0, 0.0], t = 0.5 }
+expect = { out = [0.7, 0.09396926207859084, 60.0, 0.5] }
+tolerance = 1e-12
+
+[[tests]]
+name = "color ends are exact"
+types = { T = "Color" }
+inputs = { a = [0.7, 0.1, 40.0, 1.0], b = [0.7, 0.1, 80.0, 0.0], t = 0.0 }
+expect = { out = [0.7, 0.1, 40.0, 1.0] }
+
+[[tests]]
+name = "Color defaults: black to white"
+types = { T = "Color" }
+expect = { out = [0.5, 0.0, 0.0, 1.0] }
