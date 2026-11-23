@@ -70,9 +70,12 @@ COOK OPTIONS:
     --format text|jsonl     One line per frame and node (default), or one
                             JSON object per frame
     --stats                 Also print cooked/reused node counts per frame
-    --event NODE.PORT@FRAME Inject an event (no payload) in frame FRAME
-                            into the Event input PORT of NODE, or from its
-                            Event output PORT (repeatable); Event outputs
+    --event NODE.PORT@FRAME[=VALUE]
+                            Inject an event in frame FRAME into the Event
+                            input PORT of NODE, or from its Event output
+                            PORT (repeatable); VALUE is an optional payload
+                            in room.kdl value syntax (1.0, 3, #true,
+                            \"text\", (vec3)\"1 2 3\"); Event outputs
                             print the events fired in the frame (none,
                             event, event(<payload>))
     --fs-root DIR           File root of file-system nodes such as

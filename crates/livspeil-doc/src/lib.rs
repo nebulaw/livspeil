@@ -227,6 +227,7 @@ mod model;
 mod package;
 mod parse;
 mod value;
+mod value_text;
 
 pub use assets::{AssetEntry, AssetIssue, AssetsError, AssetsLock, IssueKind, Severity};
 pub use diff::{Change, DocDiff, Op, Subject, diff};
@@ -242,3 +243,4 @@ pub use package::{
     sha256_file, split_prolog, write_assets_lock,
 };
 pub use parse::parse;
+pub use value_text::parse_value;

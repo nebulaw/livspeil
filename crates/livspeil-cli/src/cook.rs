@@ -52,10 +52,14 @@
 //! Every frame is one tick of the cooker: input (the frame clock and the
 //! events injected for that frame), events (delivered with
 //! `Cooker::tick`), cook (the printed nodes), publish (the printed line).
-//! `--event NODE.PORT@FRAME` (repeatable) injects an event without payload
-//! in frame `FRAME` (counting from 0): delivered to the `Event` input
-//! `PORT` of `NODE`, or emitted from its `Event` output `PORT` if it has
-//! no such input. Events of one frame are injected in command-line order.
+//! `--event NODE.PORT@FRAME[=VALUE]` (repeatable) injects an event in
+//! frame `FRAME` (counting from 0): delivered to the `Event` input `PORT`
+//! of `NODE`, or emitted from its `Event` output `PORT` if it has no such
+//! input. `VALUE`, if given, is the payload, written in the `room.kdl`
+//! value syntax (`1.0`, `3`, `#true`, `"text"`, `(vec3)"1 2 3"`,
+//! `(color)"oklch(0.8 0.1 60)"`; see `livspeil_doc::parse_value`); the
+//! first `=` starts it. Events of one frame are injected in command-line
+//! order.
 //! Event node state is runtime only: every run starts from the initial
 //! states.
 //!
@@ -141,25 +145,40 @@ struct Options {
     events: Vec<EventArg>,
 }
 
-/// One `--event NODE.PORT@FRAME`.
+/// One `--event NODE.PORT@FRAME[=VALUE]`.
 #[derive(Debug, Clone, PartialEq)]
 struct EventArg {
     node: String,
     port: String,
     frame: u64,
+    /// The payload, in the document value syntax.
+    payload: Option<Value>,
 }
 
 impl EventArg {
-    fn parse(text: &str) -> Option<Self> {
-        let (target, frame) = text.rsplit_once('@')?;
-        let (node, port) = target.rsplit_once('.')?;
+    /// Parse the argument; the error says what is wrong.
+    fn parse(text: &str) -> Result<Self, String> {
+        const SHAPE: &str = "expected NODE.PORT@FRAME or NODE.PORT@FRAME=VALUE";
+        let bad = || format!("invalid value '{text}' for --event ({SHAPE})");
+        // Node names cannot contain '=', so the first one starts the value.
+        let (head, payload) = match text.split_once('=') {
+            Some((head, value)) => {
+                let value = livspeil_doc::parse_value(value)
+                    .map_err(|err| format!("--event {head}: invalid payload {err}"))?;
+                (head, Some(value))
+            }
+            None => (text, None),
+        };
+        let (target, frame) = head.rsplit_once('@').ok_or_else(bad)?;
+        let (node, port) = target.rsplit_once('.').ok_or_else(bad)?;
         if node.is_empty() || port.is_empty() {
-            return None;
+            return Err(bad());
         }
-        Some(EventArg {
+        Ok(EventArg {
             node: node.to_owned(),
             port: port.to_owned(),
-            frame: frame.parse().ok()?,
+            frame: frame.parse().map_err(|_| bad())?,
+            payload,
         })
     }
 }
@@ -253,11 +272,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
                 }
                 options.nodes.push(value);
             }
-            "--event" => {
-                options.events.push(EventArg::parse(&value).ok_or_else(|| {
-                    format!("invalid value '{value}' for --event (NODE.PORT@FRAME)")
-                })?)
-            }
+            "--event" => options.events.push(EventArg::parse(&value)?),
             "--fs-root" => {
                 if value.is_empty() {
                     return Err(bad());
@@ -403,7 +418,11 @@ fn external_events(graph: &Graph, args: &[EventArg]) -> Result<Vec<(u64, Externa
                 .find(&arg.node)
                 .or_else(|| graph.find_path(&arg.node))
                 .ok_or_else(|| format!("--event: no node named '{}'", arg.node))?;
-            let event = ExternalEvent::new(graph, id, &arg.port, Event::bang()).map_err(|_| {
+            let event = match &arg.payload {
+                Some(value) => Event::with(value.clone()),
+                None => Event::bang(),
+            };
+            let event = ExternalEvent::new(graph, id, &arg.port, event).map_err(|_| {
                 format!(
                     "--event: node '{}' has no Event port '{}'",
                     arg.node, arg.port
@@ -879,15 +898,36 @@ mod tests {
                 EventArg {
                     node: "blink".into(),
                     port: "fired".into(),
-                    frame: 3
+                    frame: 3,
+                    payload: None,
                 },
                 EventArg {
                     node: "sub/c".into(),
                     port: "trigger".into(),
-                    frame: 0
+                    frame: 0,
+                    payload: None,
                 }
             ]
         );
+        let payload = |arg: &str| opts(&["r", "--event", arg]).map(|o| o.events[0].payload.clone());
+        assert_eq!(payload("a.b@1=1.5"), Ok(Some(Value::Float(1.5))));
+        assert_eq!(payload("a.b@1=3"), Ok(Some(Value::Int(3))));
+        assert_eq!(payload("a.b@1=#true"), Ok(Some(Value::Bool(true))));
+        assert_eq!(
+            payload("a.b@1=\"x=y@z\""),
+            Ok(Some(Value::String("x=y@z".into())))
+        );
+        assert_eq!(
+            payload("a.b@1=(vec3)\"1 2 3\""),
+            Ok(Some(Value::Vec3([1.0, 2.0, 3.0])))
+        );
+        assert_eq!(
+            payload("a.b@1=(color)\"oklch(0.5 0.1 30)\""),
+            Ok(Some(Value::Color([0.5, 0.1, 30.0, 1.0])))
+        );
+        let o = opts(&["r", "--event=a.b@2=-1"]).unwrap();
+        assert_eq!(o.events[0].payload, Some(Value::Int(-1)));
+        assert_eq!(o.events[0].frame, 2);
         let o = opts(&["r", "--event", "a.b.c@2"]).unwrap();
         assert_eq!(
             (o.events[0].node.as_str(), o.events[0].port.as_str()),
@@ -916,6 +956,11 @@ mod tests {
             &["r", "--event", "a.@1"],
             &["r", "--event", "a.b@-1"],
             &["r", "--event"],
+            &["r", "--event", "a.b@1="],
+            &["r", "--event", "a.b@1=1 2"],
+            &["r", "--event", "a.b@1=(vec3)\"1\""],
+            &["r", "--event", "a.b@1=#nan"],
+            &["r", "--event", "a.b=1@1"],
         ] {
             assert!(opts(args).is_err(), "{args:?}");
         }

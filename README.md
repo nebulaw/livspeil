@@ -73,9 +73,11 @@ counter's `count` or a latch's `out` can drive any parameter. Design:
 `crates/livspeil-graph/src/cook/events.rs`.
 
 [`examples/blink.room`](examples/blink.room/room.kdl) blinks a lamp every
-0.5 s and counts the blinks. `--event NODE.PORT@FRAME` injects an event
-(into an `Event` input, or out of an `Event` output) for testing, and
-`Event` outputs print what fired in the frame:
+0.5 s and counts the blinks. `--event NODE.PORT@FRAME[=VALUE]` injects an
+event (into an `Event` input, or out of an `Event` output) for testing,
+with an optional payload in the `room.kdl` value syntax (`=1.0`, `=3`,
+`=#true`, `='"text"'`, `='(vec3)"1 2 3"'`), and `Event` outputs print what
+fired in the frame:
 
 ```sh
 cargo run -p livspeil-cli -- cook examples/blink.room --frames 40 --fps 20 --every 10 \
