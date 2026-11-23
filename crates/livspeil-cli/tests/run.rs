@@ -51,8 +51,13 @@ impl TempRoom {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or_default();
-        let dir =
-            std::env::temp_dir().join(format!("livspeil-cli-run-{}-{nanos}", std::process::id()));
+        // Parallel tests can see the same nanosecond on macOS; add a counter.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "livspeil-cli-run-{}-{nanos}-{n}",
+            std::process::id()
+        ));
         let room = dir.join(example);
         fs::create_dir_all(&room).unwrap();
         let src = repo().join("examples").join(example).join("room.kdl");
