@@ -43,3 +43,9 @@ path = ["sdk/python/livspeil/py.typed"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Livspeil contributors"
 SPDX-License-Identifier = "MPL-2.0"
+
+[[annotations]]
+path = ["crates/livspeil-ui-*/goldens/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Livspeil contributors"
+SPDX-License-Identifier = "MPL-2.0"
