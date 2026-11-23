@@ -54,7 +54,9 @@ intensity out, two promoted parameters) instantiated twice with different
 parameters, printed through four `core.output` nodes.
 
 Floats are printed with six decimals so the output (and its golden files in
-`crates/livspeil-cli/tests/golden/`) is identical on macOS and Linux.
+`crates/livspeil-cli/tests/golden/`) is identical on macOS and Linux;
+`--precision N` picks another number of decimals and `--precision full`
+the exact shortest round-trip form (both text and JSONL).
 `--format jsonl` prints one JSON object per frame, `--stats` adds the
 scheduler's cooked/reused counts, and `livspeil --help` documents every
 option and exit code (0 ok, 1 load error, 2 usage error, 3 node error).

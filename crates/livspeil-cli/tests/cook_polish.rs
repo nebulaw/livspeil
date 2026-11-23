@@ -130,3 +130,80 @@ fn bad_payloads_are_usage_errors() {
         assert!(stderr(&out).contains(message), "{event}: {}", stderr(&out));
     }
 }
+
+fn sun_and_lamp() -> String {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/sun-and-lamp.room")
+        .to_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn precision() {
+    let room = sun_and_lamp();
+    let default = ok(&["cook", &room, "--frames", "2", "--node", "lamp_intensity"]);
+    let six = ok(&[
+        "cook",
+        &room,
+        "--frames",
+        "2",
+        "--node",
+        "lamp_intensity",
+        "--precision",
+        "6",
+    ]);
+    assert_eq!(default, six);
+    let two = ok(&[
+        "cook",
+        &room,
+        "--frames",
+        "2",
+        "--node",
+        "lamp_intensity",
+        "--precision",
+        "2",
+    ]);
+    assert_eq!(
+        two,
+        "frame=0 time=0.00 lamp_intensity.out=0.79\nframe=1 time=0.02 lamp_intensity.out=0.78\n"
+    );
+    let full = ok(&[
+        "cook",
+        &room,
+        "--frames",
+        "2",
+        "--node",
+        "lamp_intensity",
+        "--precision",
+        "full",
+    ]);
+    assert!(
+        full.lines()
+            .nth(1)
+            .unwrap()
+            .starts_with("frame=1 time=0.016666666666666666 "),
+        "{full}"
+    );
+    let line = full.lines().next().unwrap();
+    let value: f64 = line.rsplit_once('=').unwrap().1.parse().unwrap();
+    assert!((value - 0.792593).abs() < 1e-6, "{line}");
+    assert!(line.len() > "frame=0 time=0.0 lamp_intensity.out=0.792593".len());
+    let json = ok(&[
+        "cook",
+        &room,
+        "--frames",
+        "2",
+        "--node",
+        "lamp_intensity",
+        "--format",
+        "jsonl",
+        "--precision",
+        "full",
+    ]);
+    let frame: serde_json::Value = serde_json::from_str(json.lines().nth(1).unwrap()).unwrap();
+    assert_eq!(frame["time"].as_f64(), Some(1.0 / 60.0));
+    let out = livspeil(&["cook", &room, "--precision", "99"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("--precision"), "{}", stderr(&out));
+}

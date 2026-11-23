@@ -70,6 +70,8 @@ COOK OPTIONS:
     --format text|jsonl     One line per frame and node (default), or one
                             JSON object per frame
     --stats                 Also print cooked/reused node counts per frame
+    --precision N|full      Decimals of printed floats (0 to 17, default
+                            6), or full: the shortest exact form
     --event NODE.PORT@FRAME[=VALUE]
                             Inject an event in frame FRAME into the Event
                             input PORT of NODE, or from its Event output
@@ -82,7 +84,7 @@ COOK OPTIONS:
                             core.fs.list_dir (default: the room package
                             directory); paths outside it are refused
 
-    Floats are printed with 6 decimals. Example:
+    Floats are printed with 6 decimals unless --precision. Example:
         livspeil cook examples/sun-and-lamp.room --frames 600 --every 50
 
 DIFF OPTIONS:

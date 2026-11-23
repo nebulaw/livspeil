@@ -35,6 +35,11 @@
 //!
 //! Floats use exactly six decimals (`-0.000000` is written `0.000000`), so
 //! the last-bit differences between platform math libraries do not show.
+//! `--precision N` (0 to 17) prints `N` decimals instead (negative zero
+//! unsigned the same way); `--precision full` prints every float in its
+//! shortest round-trip form (`0.1`, `1.0`, `1e-7`, `-0.0`), which is exact
+//! but platform-dependent in the last bits. The precision applies to
+//! `time=` too.
 //! Values: Float `0.500000`, Int `3`, Bool `true`, `vec2(x y)`,
 //! `vec3(x y z)`, `vec4(x y z w)`, Color `oklch(L C H A)`, String as a JSON
 //! string literal. A failed node prints `<error: message>` for each port.
@@ -101,9 +106,11 @@
 //! "dropped":D}` is present only when the events were cut at the limit,
 //! and `"event_errors":[{"node":..,"error":..}]` only when a handler
 //! failed.
-//! Floats are rounded to six decimals, like the text format, and written in
-//! the shortest form that reads back as that value (`0.8`, `1.0`);
-//! non-finite floats are `null`. `stats` is present only with `--stats`.
+//! Floats are rounded to six decimals (or `--precision N` decimals), like
+//! the text format, and written in the shortest form that reads back as
+//! that value (`0.8`, `1.0`); with `--precision full` they are not rounded
+//! (the shortest round-trip form of the exact value, `0.30000000000000004`).
+//! Non-finite floats are `null`. `stats` is present only with `--stats`.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{self, BufWriter, Write};
@@ -120,6 +127,28 @@ use crate::{read, report, usage};
 
 /// Exit code when at least one printed value is a node error.
 const EXIT_NODE_ERROR: u8 = 3;
+
+/// `--precision`: how floats are printed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Precision {
+    /// This many decimals (text), rounded to them (JSONL).
+    Decimals(usize),
+    /// The shortest form that reads back as the exact value.
+    Full,
+}
+
+/// Most decimals `--precision` accepts (more than an `f64` holds).
+const MAX_DECIMALS: usize = 17;
+
+impl Precision {
+    fn parse(text: &str) -> Option<Self> {
+        if text == "full" {
+            return Some(Precision::Full);
+        }
+        let n: usize = text.parse().ok()?;
+        (n <= MAX_DECIMALS).then_some(Precision::Decimals(n))
+    }
+}
 
 /// Output format of `cook`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,6 +172,8 @@ struct Options {
     fs_root: Option<String>,
     /// `--event NODE.PORT@FRAME`, in command-line order.
     events: Vec<EventArg>,
+    /// `--precision N|full` (default 6 decimals).
+    precision: Precision,
 }
 
 /// One `--event NODE.PORT@FRAME[=VALUE]`.
@@ -215,6 +246,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
         stats: false,
         fs_root: None,
         events: Vec::new(),
+        precision: Precision::Decimals(6),
     };
     let mut args = args.peekable();
     while let Some(arg) = args.next() {
@@ -238,7 +270,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
                 continue;
             }
             "--frames" | "--fps" | "--start" | "--every" | "--node" | "--format" | "--fs-root"
-            | "--event" => {}
+            | "--event" | "--precision" => {}
             _ => return Err(format!("unknown option '{flag}'")),
         }
         let value = match inline.or_else(|| args.next()) {
@@ -273,6 +305,13 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Parsed, String> {
                 options.nodes.push(value);
             }
             "--event" => options.events.push(EventArg::parse(&value)?),
+            "--precision" => {
+                options.precision = Precision::parse(&value).ok_or_else(|| {
+                    format!(
+                        "invalid value '{value}' for --precision (0 to {MAX_DECIMALS}, or full)"
+                    )
+                })?;
+            }
             "--fs-root" => {
                 if value.is_empty() {
                     return Err(bad());
@@ -386,6 +425,7 @@ fn cook(options: &Options) -> ExitCode {
             report: &report,
             graph: &graph,
             stats,
+            precision: options.precision,
         };
         let written = match options.format {
             Format::Text => write_text(&mut out, &frame_out),
@@ -565,18 +605,27 @@ fn describe(graph: &Graph, err: &CookError) -> String {
     }
 }
 
-/// A float with six decimals; negative zero (after rounding) is unsigned.
-fn fixed(x: f64) -> String {
-    let s = format!("{x:.6}");
-    if s == "-0.000000" {
-        "0.000000".to_owned()
-    } else {
-        s
+/// A float with `--precision` decimals, negative zero (after rounding)
+/// unsigned; or with `full`, its shortest round-trip form (`0.1`, `1.0`,
+/// `1e-7`, `-0.0`).
+fn fixed(x: f64, p: Precision) -> String {
+    match p {
+        Precision::Full => format!("{x:?}"),
+        Precision::Decimals(n) => {
+            let s = format!("{x:.n$}");
+            match s.strip_prefix('-') {
+                Some(rest) if rest.bytes().all(|b| b == b'0' || b == b'.') => rest.to_owned(),
+                _ => s,
+            }
+        }
     }
 }
 
-fn fixed_list(xs: &[f64]) -> String {
-    xs.iter().map(|&x| fixed(x)).collect::<Vec<_>>().join(" ")
+fn fixed_list(xs: &[f64], p: Precision) -> String {
+    xs.iter()
+        .map(|&x| fixed(x, p))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn json_string(s: &str) -> String {
@@ -584,29 +633,33 @@ fn json_string(s: &str) -> String {
     serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_owned())
 }
 
-/// A float rounded to six decimals, as JSON (`null` if not finite).
-fn json_float(x: f64) -> String {
+/// A float rounded to `--precision` decimals (or exact with `full`), as
+/// JSON (`null` if not finite).
+fn json_float(x: f64, p: Precision) -> String {
     if !x.is_finite() {
         return "null".to_owned();
     }
-    let rounded: f64 = fixed(x).parse().unwrap_or(x);
+    let rounded: f64 = match p {
+        Precision::Full => x,
+        Precision::Decimals(_) => fixed(x, p).parse().unwrap_or(x),
+    };
     serde_json::to_string(&rounded).unwrap_or_else(|_| "null".to_owned())
 }
 
-fn json_list(xs: &[f64]) -> String {
-    let items: Vec<String> = xs.iter().map(|&x| json_float(x)).collect();
+fn json_list(xs: &[f64], p: Precision) -> String {
+    let items: Vec<String> = xs.iter().map(|&x| json_float(x, p)).collect();
     format!("[{}]", items.join(","))
 }
 
-fn text_value(value: &Value) -> String {
+fn text_value(value: &Value, p: Precision) -> String {
     match value {
-        Value::Float(x) => fixed(*x),
+        Value::Float(x) => fixed(*x, p),
         Value::Int(i) => i.to_string(),
         Value::Bool(b) => b.to_string(),
-        Value::Vec2(v) => format!("vec2({})", fixed_list(v)),
-        Value::Vec3(v) => format!("vec3({})", fixed_list(v)),
-        Value::Vec4(v) => format!("vec4({})", fixed_list(v)),
-        Value::Color(c) => format!("oklch({})", fixed_list(c)),
+        Value::Vec2(v) => format!("vec2({})", fixed_list(v, p)),
+        Value::Vec3(v) => format!("vec3({})", fixed_list(v, p)),
+        Value::Vec4(v) => format!("vec4({})", fixed_list(v, p)),
+        Value::Color(c) => format!("oklch({})", fixed_list(c, p)),
         Value::String(s) => json_string(s),
         Value::Table(t) => {
             let columns: Vec<String> = t
@@ -615,7 +668,12 @@ fn text_value(value: &Value) -> String {
                 .map(|c| format!("{}:{}", c.name(), c.ty()))
                 .collect();
             let rows: Vec<String> = (0..t.row_count())
-                .map(|r| t.row(r).map(text_value).collect::<Vec<_>>().join(" "))
+                .map(|r| {
+                    t.row(r)
+                        .map(|v| text_value(v, p))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
                 .collect();
             format!("table[{}][{}]", columns.join(" "), rows.join("; "))
         }
@@ -623,7 +681,7 @@ fn text_value(value: &Value) -> String {
             let keys: Vec<String> = c
                 .keys()
                 .iter()
-                .map(|k| format!("{}:{}", fixed(k.position), fixed(k.value)))
+                .map(|k| format!("{}:{}", fixed(k.position, p), fixed(k.value, p)))
                 .collect();
             format!("curve({})", keys.join(" "))
         }
@@ -631,34 +689,34 @@ fn text_value(value: &Value) -> String {
     }
 }
 
-fn json_value(value: &Value) -> String {
-    let (tag, body) = json_parts(value);
+fn json_value(value: &Value, p: Precision) -> String {
+    let (tag, body) = json_parts(value, p);
     format!("{{\"{tag}\":{body}}}")
 }
 
 /// The type tag and untagged JSON of a value.
-fn json_parts(value: &Value) -> (&'static str, String) {
+fn json_parts(value: &Value, p: Precision) -> (&'static str, String) {
     match value {
-        Value::Float(x) => ("float", json_float(*x)),
+        Value::Float(x) => ("float", json_float(*x, p)),
         Value::Int(i) => ("int", i.to_string()),
         Value::Bool(b) => ("bool", b.to_string()),
-        Value::Vec2(v) => ("vec2", json_list(v)),
-        Value::Vec3(v) => ("vec3", json_list(v)),
-        Value::Vec4(v) => ("vec4", json_list(v)),
-        Value::Color(c) => ("color", json_list(c)),
+        Value::Vec2(v) => ("vec2", json_list(v, p)),
+        Value::Vec3(v) => ("vec3", json_list(v, p)),
+        Value::Vec4(v) => ("vec4", json_list(v, p)),
+        Value::Color(c) => ("color", json_list(c, p)),
         Value::String(s) => ("string", json_string(s)),
         Value::Table(t) => {
             let columns: Vec<String> = t
                 .columns()
                 .iter()
                 .map(|c| {
-                    let tag = Value::zero(c.ty()).map_or("unsupported", |z| json_parts(&z).0);
+                    let tag = Value::zero(c.ty()).map_or("unsupported", |z| json_parts(&z, p).0);
                     format!("{{\"name\":{},\"type\":\"{tag}\"}}", json_string(c.name()))
                 })
                 .collect();
             let rows: Vec<String> = (0..t.row_count())
                 .map(|r| {
-                    let cells: Vec<String> = t.row(r).map(|v| json_parts(v).1).collect();
+                    let cells: Vec<String> = t.row(r).map(|v| json_parts(v, p).1).collect();
                     format!("[{}]", cells.join(","))
                 })
                 .collect();
@@ -675,7 +733,7 @@ fn json_parts(value: &Value) -> (&'static str, String) {
             let keys: Vec<String> = c
                 .keys()
                 .iter()
-                .map(|k| json_list(&[k.position, k.value]))
+                .map(|k| json_list(&[k.position, k.value], p))
                 .collect();
             ("curve", format!("[{}]", keys.join(",")))
         }
@@ -692,6 +750,7 @@ struct FrameOut<'a> {
     report: &'a TickReport,
     graph: &'a Graph,
     stats: Option<livspeil_graph::CookStats>,
+    precision: Precision,
 }
 
 impl FrameOut<'_> {
@@ -713,44 +772,44 @@ impl FrameOut<'_> {
     }
 }
 
-fn text_events(events: &[&Event]) -> String {
+fn text_events(events: &[&Event], p: Precision) -> String {
     if events.is_empty() {
         return "none".to_owned();
     }
     events
         .iter()
         .map(|e| match &e.payload {
-            Some(p) => format!("event({})", text_value(p)),
+            Some(payload) => format!("event({})", text_value(payload, p)),
             None => "event".to_owned(),
         })
         .collect::<Vec<_>>()
         .join(",")
 }
 
-fn json_events(events: &[&Event]) -> String {
+fn json_events(events: &[&Event], p: Precision) -> String {
     let items: Vec<String> = events
         .iter()
         .map(|e| {
             e.payload
                 .as_ref()
-                .map_or_else(|| "null".to_owned(), json_value)
+                .map_or_else(|| "null".to_owned(), |v| json_value(v, p))
         })
         .collect();
     format!("{{\"event\":[{}]}}", items.join(","))
 }
 
 fn write_text(out: &mut impl Write, f: &FrameOut<'_>) -> io::Result<()> {
-    let prefix = format!("frame={} time={}", f.frame, fixed(f.time));
+    let prefix = format!("frame={} time={}", f.frame, fixed(f.time, f.precision));
     for (target, outcome) in f.targets.iter().zip(f.outcomes) {
         write!(out, "{prefix}")?;
         for (index, port) in target.ports.iter().enumerate() {
             let value = match outcome {
                 Ok(_) if target.events.get(index) == Some(&true) => {
-                    text_events(&f.fired(target, index))
+                    text_events(&f.fired(target, index), f.precision)
                 }
                 Ok(values) => values
                     .get(index)
-                    .map_or_else(|| "<missing>".to_owned(), text_value),
+                    .map_or_else(|| "<missing>".to_owned(), |v| text_value(v, f.precision)),
                 Err(message) => format!("<error: {message}>"),
             };
             write!(out, " {}.{port}={value}", target.name)?;
@@ -792,9 +851,9 @@ fn write_jsonl(out: &mut impl Write, f: &FrameOut<'_>) -> io::Result<()> {
                         .enumerate()
                         .map(|(index, (port, value))| {
                             let value = if target.events.get(index) == Some(&true) {
-                                json_events(&f.fired(target, index))
+                                json_events(&f.fired(target, index), f.precision)
                             } else {
-                                json_value(value)
+                                json_value(value, f.precision)
                             };
                             format!("{}:{value}", json_string(port))
                         })
@@ -810,7 +869,7 @@ fn write_jsonl(out: &mut impl Write, f: &FrameOut<'_>) -> io::Result<()> {
         out,
         "{{\"frame\":{},\"time\":{},\"outputs\":{{{}}}",
         f.frame,
-        json_float(f.time),
+        json_float(f.time, f.precision),
         nodes.join(",")
     )?;
     if f.report.overflowed() {
@@ -847,6 +906,8 @@ fn write_jsonl(out: &mut impl Write, f: &FrameOut<'_>) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const P6: Precision = Precision::Decimals(6);
 
     fn opts(args: &[&str]) -> Result<Options, String> {
         match parse_args(args.iter().map(|s| (*s).to_owned()))? {
@@ -988,9 +1049,9 @@ mod tests {
         let targets = targets(&graph, &[]).unwrap();
         let mut cooker = Cooker::new();
         let stable = |x: f64| {
-            let s = fixed(x);
+            let s = fixed(x, P6);
             for y in [x * (1.0 + 1e-12), x * (1.0 - 1e-12), x + 1e-15, x - 1e-15] {
-                assert_eq!(fixed(y), s, "{x:e} is too close to a rounding boundary");
+                assert_eq!(fixed(y, P6), s, "{x:e} is too close to a rounding boundary");
             }
         };
         let mut checked = 0;
@@ -1042,29 +1103,72 @@ mod tests {
 
     #[test]
     fn float_formatting() {
-        assert_eq!(fixed(0.5), "0.500000");
-        assert_eq!(fixed(-0.0), "0.000000");
-        assert_eq!(fixed(-1e-9), "0.000000");
-        assert_eq!(fixed(-0.25), "-0.250000");
-        assert_eq!(json_float(0.8000000001), "0.8");
-        assert_eq!(json_float(1.0), "1.0");
-        assert_eq!(json_float(-1e-9), "0.0");
-        assert_eq!(json_float(f64::NAN), "null");
+        assert_eq!(fixed(0.5, P6), "0.500000");
+        assert_eq!(fixed(-0.0, P6), "0.000000");
+        assert_eq!(fixed(-1e-9, P6), "0.000000");
+        assert_eq!(fixed(-0.25, P6), "-0.250000");
+        assert_eq!(json_float(0.8000000001, P6), "0.8");
+        assert_eq!(json_float(1.0, P6), "1.0");
+        assert_eq!(json_float(-1e-9, P6), "0.0");
+        assert_eq!(json_float(f64::NAN, P6), "null");
+    }
+
+    #[test]
+    fn precision() {
+        assert_eq!(opts(&["r"]).unwrap().precision, P6);
+        assert_eq!(
+            opts(&["r", "--precision", "2"]).unwrap().precision,
+            Precision::Decimals(2)
+        );
+        assert_eq!(
+            opts(&["r", "--precision=full"]).unwrap().precision,
+            Precision::Full
+        );
+        for bad in ["-1", "18", "x", ""] {
+            assert!(opts(&["r", "--precision", bad]).is_err(), "{bad}");
+        }
+        let (p0, p2, full) = (
+            Precision::Decimals(0),
+            Precision::Decimals(2),
+            Precision::Full,
+        );
+        assert_eq!(fixed(0.125, p2), "0.12");
+        assert_eq!(fixed(-0.001, p2), "0.00");
+        assert_eq!(fixed(-0.4, p0), "0");
+        assert_eq!(fixed(2.5, p0), "2");
+        assert_eq!(fixed(0.1 + 0.2, full), "0.30000000000000004");
+        assert_eq!(fixed(1.0, full), "1.0");
+        assert_eq!(fixed(-0.0, full), "-0.0");
+        assert_eq!(fixed(1e-7, full), "1e-7");
+        assert_eq!(json_float(0.1 + 0.2, full), "0.30000000000000004");
+        assert_eq!(json_float(0.1 + 0.2, p2), "0.3");
+        assert_eq!(json_float(f64::INFINITY, full), "null");
+        assert_eq!(
+            text_value(&Value::Vec2([0.5, 1.0 / 3.0]), full),
+            "vec2(0.5 0.3333333333333333)"
+        );
+        assert_eq!(
+            json_value(
+                &Value::Color([0.123456789, 0.0, 1.0, 1.0]),
+                Precision::Decimals(3)
+            ),
+            "{\"color\":[0.123,0.0,1.0,1.0]}"
+        );
     }
 
     #[test]
     fn value_formatting() {
         assert_eq!(
-            text_value(&Value::Color([0.8, 0.12, 60.0, 1.0])),
+            text_value(&Value::Color([0.8, 0.12, 60.0, 1.0]), P6),
             "oklch(0.800000 0.120000 60.000000 1.000000)"
         );
-        assert_eq!(text_value(&Value::String("a\"b".into())), "\"a\\\"b\"");
+        assert_eq!(text_value(&Value::String("a\"b".into()), P6), "\"a\\\"b\"");
         assert_eq!(
-            json_value(&Value::Vec2([1.0, -0.5])),
+            json_value(&Value::Vec2([1.0, -0.5]), P6),
             "{\"vec2\":[1.0,-0.5]}"
         );
-        assert_eq!(json_value(&Value::Int(-3)), "{\"int\":-3}");
-        assert_eq!(json_value(&Value::Bool(true)), "{\"bool\":true}");
+        assert_eq!(json_value(&Value::Int(-3), P6), "{\"int\":-3}");
+        assert_eq!(json_value(&Value::Bool(true), P6), "{\"bool\":true}");
         let table = livspeil_node_api::Table::from_rows(
             &[
                 ("name", livspeil_node_api::PortType::String),
@@ -1078,21 +1182,21 @@ mod tests {
         .unwrap();
         let table = Value::Table(table);
         assert_eq!(
-            text_value(&table),
+            text_value(&table, P6),
             "table[name:String size:Int][\"a\" 1; \"b c\" 2]"
         );
         assert_eq!(
-            json_value(&table),
+            json_value(&table, P6),
             "{\"table\":{\"columns\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"size\",\"type\":\"int\"}],\"rows\":[[\"a\",1],[\"b c\",2]]}}"
         );
         let empty = Value::Table(livspeil_node_api::Table::empty());
-        assert_eq!(text_value(&empty), "table[][]");
+        assert_eq!(text_value(&empty, P6), "table[][]");
         let curve = Value::Curve(Arc::new(livspeil_node_api::Curve::identity()));
         assert_eq!(
-            text_value(&curve),
+            text_value(&curve, P6),
             "curve(0.000000:0.000000 1.000000:1.000000)"
         );
-        assert_eq!(json_value(&curve), "{\"curve\":[[0.0,0.0],[1.0,1.0]]}");
+        assert_eq!(json_value(&curve, P6), "{\"curve\":[[0.0,0.0],[1.0,1.0]]}");
     }
 
     #[test]
