@@ -22,6 +22,8 @@ use crate::value::decode;
 
 // Block values (`table`, `curve`) inside `input` (M0.8).
 mod blocks;
+// Shared Charm definitions (`charms`, `def=`; M0.16).
+mod charms;
 
 /// Parse the text of a `room.kdl` file.
 ///
@@ -174,6 +176,7 @@ impl Reader<'_> {
 
         let mut network = None;
         let mut meta = None;
+        let mut charms = None;
         for child in children(room) {
             self.no_annotation(child)?;
             match child.name().value() {
@@ -186,6 +189,12 @@ impl Reader<'_> {
                     }
                     network = Some(self.root_network(child)?);
                 }
+                "charms" => {
+                    if charms.is_some() {
+                        return Err(self.err_node(child, "only one charms block is allowed"));
+                    }
+                    charms = Some(self.charms(child)?);
+                }
                 "meta" => {
                     if meta.is_some() {
                         return Err(self.err_node(child, "only one meta block is allowed"));
@@ -195,7 +204,9 @@ impl Reader<'_> {
                 other => {
                     return Err(self.err_node(
                         child,
-                        format!("unknown node `{other}` in room; expected `network` or `meta`"),
+                        format!(
+                            "unknown node `{other}` in room; expected `charms`, `network` or `meta`"
+                        ),
                     ));
                 }
             }
@@ -204,6 +215,8 @@ impl Reader<'_> {
             self.err_node(room, "the room has no network; add `network \"/\" { ... }`")
         })?;
         let meta = meta.unwrap_or_default();
+        let charms = charms.unwrap_or_default();
+        self.check_def_refs(&charms, &network)?;
 
         let paths = network.walk();
         let names: BTreeSet<&str> = paths.iter().map(|(p, _)| p.as_str()).collect();
@@ -220,6 +233,7 @@ impl Reader<'_> {
             name,
             format: CURRENT_FORMAT,
             min_tier,
+            charms,
             network,
             meta,
         })
@@ -287,7 +301,7 @@ impl Reader<'_> {
 
     fn node(&self, node: &KdlNode) -> Result<DocNode, DocError> {
         let entries = self.entries(node)?;
-        self.allow_props(&entries, &["type", "id", "port-type"])?;
+        self.allow_props(&entries, &["type", "id", "port-type", "def"])?;
         let name = self.single_string_arg(node, &entries, "node name")?;
         if name.is_empty() {
             return Err(self.err_node(node, "node names must not be empty"));
@@ -323,6 +337,7 @@ impl Reader<'_> {
                 })?;
             doc_node.port_type = Some(ty);
         }
+        self.def_ref(node, &entries, &mut doc_node)?;
         let mut seen = BTreeSet::new();
         for child in children(node) {
             self.no_annotation(child)?;

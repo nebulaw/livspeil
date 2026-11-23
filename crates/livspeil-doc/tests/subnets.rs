@@ -78,9 +78,11 @@ fn charm_demo_is_canonical_and_round_trips() {
     let (_, body) = split_prolog(&text);
     assert_eq!(format(&doc).unwrap(), body);
     let graph = doc.to_graph(registry()).unwrap();
-    // 4 root nodes + 4 outputs + 2 Charms of 11 nodes each.
+    // 4 root nodes + 4 outputs + 2 instances of 11 nodes each.
     assert_eq!(graph.node_count(), 29);
     let desk = graph.find("desk_lamp").unwrap();
+    assert!(graph.is_instance(desk));
+    assert_eq!(graph.instances_of("daylight").len(), 2);
     assert_eq!(graph.charm(desk).unwrap().name, "Daylight");
     assert_eq!(graph.interface(desk, PortDirection::Input).len(), 3);
     let back = Document::from_graph(&graph, doc.name.clone()).unwrap();
