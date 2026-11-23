@@ -32,6 +32,20 @@
 //! `Unpromote` and `SetCharm`. Composite commands (promotion, interface
 //! ports, subnet deletion) apply as transactions of primitive edits, so
 //! their inverses are exact by construction.
+//!
+//! Shared Charm definitions (M0.16): `AddDefinition` / `RemoveDefinition`,
+//! `UpdateDefinition` (its inverse restores the previous definition and
+//! then every instance input's exact sources, the links dropped with
+//! removed interface ports and the re-rendered expressions),
+//! `Instantiate`, `Detach` / `Attach` (each other's inverse),
+//! `MakeDefinition` (a transaction: carry outside readers, delete the
+//! subnet, add the definition, instantiate with the subnet's id, relink),
+//! and `DeleteNode` on an instance (its inverse instantiates it again and
+//! restores its interface input sources and links). `MoveNodeRewired`
+//! applies a rewired move as a transaction of unlinks, the move, new
+//! interface ports and links, with port ids derived from its `seed` so
+//! journals replay exactly. Edits inside an instance are refused by the
+//! graph (`GraphError::InInstance`).
 
 mod command;
 mod entry;

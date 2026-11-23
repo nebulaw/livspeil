@@ -474,10 +474,19 @@ impl Graph {
             }
         }
         for l in &def.links {
-            if !by_id.contains_key(&l.from) || !by_id.contains_key(&l.to) {
+            let (Some(_), Some(to)) = (by_id.get(&l.from), by_id.get(&l.to)) else {
                 return Err(invalid(
                     id,
                     "a link names a node the definition does not have",
+                ));
+            };
+            if to.parent.is_none() && to.type_id == INPUT_TYPE {
+                return Err(invalid(
+                    id,
+                    format!(
+                        "interface input '{}' is fed from around instances, not by the definition",
+                        to.name
+                    ),
                 ));
             }
         }
@@ -588,7 +597,7 @@ impl Graph {
         }
         let links = self
             .links()
-            .filter(|l| members.contains(&l.from.node) && members.contains(&l.to.node))
+            .filter(|l| self.internal_link(subnet, &members, l.from.node, l.to.node))
             .filter_map(|l| self.named(l))
             .collect();
         let mut meta = self
@@ -603,6 +612,22 @@ impl Graph {
             nodes,
             links,
         })
+    }
+
+    /// Whether a link from `from` to `to` belongs to the contents of
+    /// container `root` (whose subtree is `members`): both ends inside,
+    /// and not into one of `root`'s own interface inputs (those are fed
+    /// from around it).
+    fn internal_link(
+        &self,
+        root: NodeId,
+        members: &BTreeSet<NodeId>,
+        from: NodeId,
+        to: NodeId,
+    ) -> bool {
+        members.contains(&from)
+            && members.contains(&to)
+            && !(self.parent(to) == Some(root) && self.node_type(to) == Some(INPUT_TYPE))
     }
 
     /// The nodes the expression on input `port` of `node` reads.
@@ -770,7 +795,7 @@ impl Graph {
         }
         let internal: BTreeSet<(NodeId, String, NodeId, String)> = self
             .links()
-            .filter(|l| members.contains(&l.from.node) && members.contains(&l.to.node))
+            .filter(|l| self.internal_link(root, &members, l.from.node, l.to.node))
             .filter_map(|l| self.named(l))
             .map(|l| (l.from, l.from_port, l.to, l.to_port))
             .collect();
@@ -866,17 +891,17 @@ impl Graph {
         version: &str,
     ) -> Result<(), GraphError> {
         self.check_structure_editable(subnet)?;
-        let def = self.capture(subnet, id, version, true)?;
+        let plan = self.conversion_plan(subnet, id, version)?;
         let backup = self.duplicate();
-        if let Err(err) = self.convert_subnet(subnet, def) {
+        if let Err(err) = self.convert_subnet(subnet, plan) {
             *self = backup;
             return Err(err);
         }
         Ok(())
     }
 
-    fn convert_subnet(&mut self, subnet: NodeId, def: CharmDef) -> Result<(), GraphError> {
-        let plan = self.conversion_plan(subnet, &def)?;
+    fn convert_subnet(&mut self, subnet: NodeId, plan: ConversionPlan) -> Result<(), GraphError> {
+        let def = plan.def;
         for (node, port, _) in &plan.readers {
             self.clear_expression(*node, port)?;
         }
@@ -896,17 +921,21 @@ impl Graph {
         Ok(())
     }
 
-    /// What converting `subnet` into an instance of `def` (captured from
-    /// it) must carry over, with ids already mapped to the instance's.
-    /// Used by [`Graph::make_definition`] and by the command bus.
+    /// What [`Graph::make_definition`] does, without doing it: the
+    /// definition captured from `subnet` (expressions of its interface
+    /// inputs that read outside it left out) and what converting the
+    /// subnet into an instance of it must carry over, with ids already
+    /// mapped to the instance's. Used by the command bus.
     ///
     /// # Errors
-    /// [`GraphError::UnknownNode`].
+    /// The errors of [`Graph::definition_from_subnet`].
     pub fn conversion_plan(
         &self,
         subnet: NodeId,
-        def: &CharmDef,
+        id: &str,
+        version: &str,
     ) -> Result<ConversionPlan, GraphError> {
+        let def = self.capture(subnet, id, version, true)?;
         let name = self
             .node_name(subnet)
             .ok_or(GraphError::UnknownNode(subnet))?
@@ -921,8 +950,8 @@ impl Graph {
         };
         let mut links = Vec::new();
         for l in self.links() {
-            let (a, b) = (members.contains(&l.from.node), members.contains(&l.to.node));
-            if a != b {
+            let touches = members.contains(&l.from.node) || members.contains(&l.to.node);
+            if touches && !self.internal_link(subnet, &members, l.from.node, l.to.node) {
                 if let Some(mut named) = self.named(l) {
                     named.from = map(named.from);
                     named.to = map(named.to);
@@ -952,6 +981,7 @@ impl Graph {
             }
         }
         Ok(ConversionPlan {
+            def,
             parent: self.parent(subnet),
             name,
             links,
@@ -1111,7 +1141,7 @@ impl Graph {
             .collect();
         let internal: Vec<NamedLink> = self
             .links()
-            .filter(|l| members.contains(&l.from.node) && members.contains(&l.to.node))
+            .filter(|l| self.internal_link(root, &members, l.from.node, l.to.node))
             .filter_map(|l| self.named(l))
             .collect();
         for l in &internal {
@@ -1132,7 +1162,7 @@ impl Graph {
                 links.extend(self.outgoing_links(n));
             }
             for l in links {
-                if !members.contains(&l.from) || !members.contains(&l.to) {
+                if !self.internal_link(root, &members, l.from, l.to) {
                     unlinked.push(l);
                 }
             }
@@ -1291,9 +1321,11 @@ impl Graph {
 
 /// What [`Graph::conversion_plan`] found: what to carry over when a subnet
 /// becomes an instance of a definition captured from it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct ConversionPlan {
+    /// The definition captured from the subnet.
+    pub def: CharmDef,
     /// The subnet's network.
     pub parent: Option<NodeId>,
     /// The subnet's name.
