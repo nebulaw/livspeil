@@ -8,14 +8,15 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use livspeil_node_api::{NodeImpl, NodeRegistry, NodeSpec, PortType, Value};
+use livspeil_node_api::{NodeImpl, NodeRegistry, NodeSpec, PortType, TypeClass, Value};
 use livspeil_params::AnimChannel;
-use livspeil_params::expr::ExprError;
+use livspeil_params::expr::{ExprError, RefKind};
 use uuid::Uuid;
 
 use crate::network::{self, CharmMeta, Subnet};
 use crate::snapshot::{GraphSnapshot, NamedLink, NodeSnapshot};
 use crate::sources::{Expression, InputRef};
+use crate::types::{Poly, SourceKind};
 
 /// Stable identifier of a node (UUIDv7, so ids sort by creation time).
 ///
@@ -154,6 +155,30 @@ pub enum GraphError {
     NotPolymorphic(String),
     /// The subnet cannot be moved into itself or one of its descendants.
     WouldNest(NodeId),
+    /// The edit would leave type variable `var` of `node` (and the
+    /// variables linked to it) without a type: it must be `expected` but
+    /// would also need to be `found` (M0.17; see the `types` module).
+    TypeConflict {
+        node: NodeId,
+        var: String,
+        expected: PortType,
+        found: PortType,
+    },
+    /// Type variable `var` of `node` would need type `found`, which is not
+    /// in its constraint class `class` (or that of a variable linked to
+    /// it).
+    NotInClass {
+        node: NodeId,
+        var: String,
+        class: TypeClass,
+        found: PortType,
+    },
+    /// The node type declares type variables that do not fit its spec.
+    InvalidTypeVars { node_type: String, reason: String },
+    /// An expression reads port `port` of `node` through `ch()` or
+    /// `out()`, but the port's type variable is not pinned, so its type
+    /// could change under the expression (see the `types` module).
+    UnpinnedRead { node: NodeId, port: String },
 }
 
 impl fmt::Display for GraphError {
@@ -199,6 +224,35 @@ impl fmt::Display for GraphError {
             GraphError::WouldNest(id) => {
                 write!(f, "subnet {id} cannot be moved into itself")
             }
+            GraphError::TypeConflict {
+                node,
+                var,
+                expected,
+                found,
+            } => write!(
+                f,
+                "type conflict on {var} of node {node}: it is {expected} here, but {found} is needed"
+            ),
+            GraphError::NotInClass {
+                node,
+                var,
+                class,
+                found,
+            } => write!(
+                f,
+                "{var} of node {node} cannot be {found}: it must be {class}"
+            ),
+            GraphError::InvalidTypeVars { node_type, reason } => {
+                write!(
+                    f,
+                    "node type '{node_type}' has invalid type variables: {reason}"
+                )
+            }
+            GraphError::UnpinnedRead { node, port } => write!(
+                f,
+                "port '{port}' of node {node} is polymorphic and not pinned; \
+                 add the node with a port type to read it from an expression"
+            ),
         }
     }
 }
@@ -214,8 +268,12 @@ pub(crate) struct Node {
     /// network.
     pub(crate) parent: Option<NodeId>,
     /// The declared port type of a boundary node (`core.subnet.input@1`,
-    /// `core.output@1`); `None` for other nodes.
+    /// `core.output@1`), or the pinned type of a polymorphic node's type
+    /// variable; `None` for other nodes.
     pub(crate) port_type: Option<PortType>,
+    /// Type variables of a polymorphic node (`imp` is then the resolved
+    /// instance); see the `types` module.
+    pub(crate) poly: Option<Box<Poly>>,
     /// Explicitly set input values, by input port index. `None` means "use
     /// the spec default".
     pub(crate) values: Vec<Option<Value>>,
@@ -432,7 +490,11 @@ impl Graph {
     /// Add a node to the network of subnet `parent` (`None`: the root
     /// network). `port_type` sets the type of a boundary node's ports
     /// (`core.subnet.input@1`, `core.output@1`); `None` keeps the
-    /// registered type (`Float`).
+    /// registered type (`Float`). For a polymorphic node type with one
+    /// type variable, `port_type` *pins* the variable to that type (it
+    /// must be in the variable's class); unpinned variables resolve from
+    /// links and sources (see the `types` module). [`Graph::port_type`]
+    /// reports the pin.
     ///
     /// Adding a `core.subnet@1` node creates an empty network inside it.
     ///
@@ -441,8 +503,11 @@ impl Graph {
     /// plus [`GraphError::UnknownNode`] / [`GraphError::NotASubnet`] for a
     /// bad parent, [`GraphError::InvalidName`] (see the error),
     /// [`GraphError::NotInSubnet`] for a `core.subnet.input@1` in the root
-    /// network and [`GraphError::NotPolymorphic`] for a port type on any
-    /// other node type.
+    /// network, [`GraphError::NotPolymorphic`] for a port type on any
+    /// other node type (except polymorphic ones with one type variable),
+    /// [`GraphError::NotInClass`] for a pin outside the variable's class
+    /// and [`GraphError::InvalidTypeVars`] for a node type whose type
+    /// variables do not fit its spec.
     pub fn add_node_in(
         &mut self,
         parent: Option<NodeId>,
@@ -472,23 +537,47 @@ impl Graph {
         if self.index.contains_key(&id) {
             return Err(GraphError::DuplicateId(id));
         }
-        if port_type.is_some() && !boundary {
-            return Err(GraphError::NotPolymorphic(qualified_id.to_owned()));
-        }
-        if qualified_id == network::INPUT_TYPE && parent.is_none() {
-            return Err(GraphError::NotInSubnet(id));
-        }
         let mut imp = self
             .registry
             .get(qualified_id)
             .ok_or_else(|| GraphError::UnknownNodeType(qualified_id.to_owned()))?
             .clone();
-        if let Some(ty) = port_type {
+        let mut poly = Poly::of(&imp)?.map(Box::new);
+        let pinnable = poly.as_ref().is_some_and(|p| p.types.len() == 1);
+        if port_type.is_some() && !boundary && !pinnable {
+            return Err(GraphError::NotPolymorphic(qualified_id.to_owned()));
+        }
+        if qualified_id == network::INPUT_TYPE && parent.is_none() {
+            return Err(GraphError::NotInSubnet(id));
+        }
+        if let Some(p) = poly.as_deref_mut() {
+            if let Some(ty) = port_type {
+                p.types = vec![ty];
+            }
+            imp = livspeil_node_api::instantiate(&p.base, &p.types).map_err(|e| match e {
+                livspeil_node_api::TypeError::NotInClass { var, class, found } => {
+                    GraphError::NotInClass {
+                        node: id,
+                        var: var.to_owned(),
+                        class,
+                        found,
+                    }
+                }
+                e => GraphError::InvalidTypeVars {
+                    node_type: qualified_id.to_owned(),
+                    reason: e.to_string(),
+                },
+            })?;
+        } else if let Some(ty) = port_type {
             imp = network::retype(imp, ty);
         }
-        let port_type = boundary
-            .then(|| imp.spec().inputs.first().map(|p| p.ty))
-            .flatten();
+        let port_type = if poly.is_some() {
+            port_type
+        } else {
+            boundary
+                .then(|| imp.spec().inputs.first().map(|p| p.ty))
+                .flatten()
+        };
         let inputs = imp.spec().inputs.len();
         self.rev_counter += 1;
         self.topo_rev += 1;
@@ -499,6 +588,7 @@ impl Graph {
             imp,
             parent,
             port_type,
+            poly,
             values: vec![None; inputs],
             exprs: (0..inputs).map(|_| None).collect(),
             anims: vec![None; inputs],
@@ -543,6 +633,8 @@ impl Graph {
             return Err(GraphError::UnknownNode(id));
         }
         let subtree = self.subtree(id);
+        let mut retype = self.poly_neighbors(&subtree);
+        retype.retain(|n| !subtree.contains(n));
         for &n in &subtree {
             for (by, port) in self.ch_dependents(n) {
                 if !subtree.contains(&by) {
@@ -570,6 +662,7 @@ impl Graph {
         for n in subtree {
             self.remove_one(n)?;
         }
+        self.refresh_types(retype);
         Ok(())
     }
 
@@ -640,6 +733,8 @@ impl Graph {
     pub fn set_input(&mut self, node: NodeId, port: &str, value: Value) -> Result<(), GraphError> {
         let (index, ty) = self.input_port(node, port)?;
         let found = value.port_type();
+        let poly = self.check_poly_source(node, index, SourceKind::Value, found)?;
+        let ty = poly.unwrap_or(ty);
         let value = value.coerce(ty).ok_or(GraphError::TypeMismatch {
             expected: ty,
             found,
@@ -648,6 +743,9 @@ impl Graph {
             n.values[index] = Some(value);
         }
         self.bump(node);
+        if poly.is_some() {
+            self.refresh_types([node]);
+        }
         Ok(())
     }
 
@@ -661,6 +759,9 @@ impl Graph {
             n.values[index] = None;
         }
         self.bump(node);
+        if self.var_port(node, RefKind::Input, index).is_some() {
+            self.refresh_types([node]);
+        }
         Ok(())
     }
 
@@ -693,7 +794,16 @@ impl Graph {
     ) -> Result<(), GraphError> {
         let (out_index, out_ty) = self.output_port(from, from_port)?;
         let (in_index, in_ty) = self.input_port(to, to_port)?;
-        if !in_ty.accepts(out_ty) {
+        let from_end = Endpoint {
+            node: from,
+            port: out_index,
+        };
+        let to_end = Endpoint {
+            node: to,
+            port: in_index,
+        };
+        let poly = self.check_poly_link(from_end, to_end)?;
+        if !poly && !in_ty.accepts(out_ty) {
             return Err(GraphError::TypeMismatch {
                 expected: in_ty,
                 found: out_ty,
@@ -742,6 +852,9 @@ impl Graph {
         self.add_dependent(from_slot, to_slot);
         self.topo_rev += 1;
         self.bump(to);
+        if poly {
+            self.refresh_types([from, to]);
+        }
         Ok(())
     }
 
@@ -770,6 +883,11 @@ impl Graph {
         }
         self.topo_rev += 1;
         self.bump(to);
+        if self.var_port(to, RefKind::Input, index).is_some()
+            || self.var_port(src.node, RefKind::Output, src.port).is_some()
+        {
+            self.refresh_types([src.node, to]);
+        }
         Ok(true)
     }
 
@@ -1039,6 +1157,42 @@ impl Graph {
     /// Set the Charm metadata slot of a subnet (no checks).
     pub(crate) fn charm_slot(&mut self, subnet: NodeId) -> Option<&mut Option<CharmMeta>> {
         self.subnets.get_mut(&subnet).map(|s| &mut s.charm)
+    }
+
+    /// The source of the link into input `port` of `node`.
+    pub(crate) fn link_source_endpoint(&self, node: NodeId, port: usize) -> Option<Endpoint> {
+        self.links.get(&(node, port)).copied()
+    }
+
+    /// The inputs fed by outputs `ports` of `node`.
+    pub(crate) fn link_targets(&self, node: NodeId, ports: &[usize]) -> Vec<Endpoint> {
+        self.outgoing
+            .range((node, NodeId::MIN, 0)..)
+            .take_while(|(from, _, _)| *from == node)
+            .filter(|&&(_, to, port)| {
+                self.links
+                    .get(&(to, port))
+                    .is_some_and(|src| ports.contains(&src.port))
+            })
+            .map(|&(_, to, port)| Endpoint { node: to, port })
+            .collect()
+    }
+
+    /// The nodes linked into `node`.
+    pub(crate) fn incoming_endpoints(&self, node: NodeId) -> Vec<NodeId> {
+        self.links
+            .range((node, 0)..=(node, usize::MAX))
+            .map(|(_, src)| src.node)
+            .collect()
+    }
+
+    /// The nodes `node` is linked into.
+    pub(crate) fn outgoing_endpoints(&self, node: NodeId) -> Vec<NodeId> {
+        self.outgoing
+            .range((node, NodeId::MIN, 0)..)
+            .take_while(|(from, _, _)| *from == node)
+            .map(|&(_, to, _)| to)
+            .collect()
     }
 
     /// All links, ordered by target node and input port.
