@@ -77,6 +77,20 @@
 //! `frame=N time=T event-error <node>: <message>` and makes the exit code
 //! 3, like a node error.
 //!
+//! Frames that are cooked but not printed (`--every`) still report their
+//! event problems: before the next printed frame (or at the end of the
+//! run), one summary line per kind covers the skipped frames since the
+//! last printed one, from the first to the last frame that had it:
+//!
+//! ```text
+//! frames 3..49: 47 event overflows (last: processed=10000 dropped=1)
+//! frames 3..49: 2 event errors (last: timer: invalid input 'period': must be positive, got 0)
+//! ```
+//!
+//! (`frame 7: ...` when only one frame had it; the counts are ticks for
+//! overflows and failed handler calls for errors). A handler error in any
+//! frame, printed or not, makes the exit code 3.
+//!
 //! # File system
 //!
 //! Nodes that read files (`core.fs.list_dir`) see the room package
@@ -105,7 +119,11 @@
 //! tagged value as above. After `outputs`, `"events":{"processed":P,
 //! "dropped":D}` is present only when the events were cut at the limit,
 //! and `"event_errors":[{"node":..,"error":..}]` only when a handler
-//! failed.
+//! failed. The summary of skipped frames is one object per kind, written
+//! where the text lines would be: `{"skipped":{"from":A,"to":B,
+//! "overflows":N,"last":{"processed":P,"dropped":D}}}` and
+//! `{"skipped":{"from":A,"to":B,"event_errors":N,"last":{"node":..,
+//! "error":..}}}` (they have no `"frame"` key).
 //! Floats are rounded to six decimals (or `--precision N` decimals), like
 //! the text format, and written in the shortest form that reads back as
 //! that value (`0.8`, `1.0`); with `--precision full` they are not rounded
@@ -397,6 +415,7 @@ fn cook(options: &Options) -> ExitCode {
     }
     let dt = 1.0 / options.fps;
     let mut node_error = false;
+    let mut skipped = Skipped::default();
     for frame in 0..options.frames {
         // Exact for every frame count a run can reach (below 2^53).
         #[allow(clippy::cast_precision_loss)]
@@ -412,10 +431,16 @@ fn cook(options: &Options) -> ExitCode {
             .iter()
             .map(|t| cook_target(&mut cooker, &graph, t))
             .collect();
+        // Handler errors count in every frame, printed or not.
+        node_error |= !report.errors.is_empty();
         if frame % options.every != 0 {
+            skipped.add(frame, &report, &graph);
             continue;
         }
-        node_error |= outcomes.iter().any(Result::is_err) || !report.errors.is_empty();
+        if let Err(err) = skipped.write(&mut out, options.format) {
+            return output_failed(&err);
+        }
+        node_error |= outcomes.iter().any(Result::is_err);
         let stats = options.stats.then(|| cooker.stats());
         let frame_out = FrameOut {
             frame,
@@ -435,7 +460,10 @@ fn cook(options: &Options) -> ExitCode {
             return output_failed(&err);
         }
     }
-    if let Err(err) = out.flush() {
+    if let Err(err) = skipped
+        .write(&mut out, options.format)
+        .and_then(|()| out.flush())
+    {
         return output_failed(&err);
     }
     if node_error {
@@ -741,6 +769,131 @@ fn json_parts(value: &Value, p: Precision) -> (&'static str, String) {
     }
 }
 
+/// Frames from `first` to `last` (inclusive) that had a problem, with
+/// how many there were and the last one.
+#[derive(Debug, Clone, PartialEq)]
+struct Span<T> {
+    first: u64,
+    last: u64,
+    count: usize,
+    latest: T,
+}
+
+impl<T> Span<T> {
+    fn add(span: &mut Option<Self>, frame: u64, count: usize, latest: T) {
+        match span {
+            Some(s) => {
+                s.last = frame;
+                s.count += count;
+                s.latest = latest;
+            }
+            None => {
+                *span = Some(Span {
+                    first: frame,
+                    last: frame,
+                    count,
+                    latest,
+                });
+            }
+        }
+    }
+
+    fn frames(&self) -> String {
+        if self.first == self.last {
+            format!("frame {}", self.first)
+        } else {
+            format!("frames {}..{}", self.first, self.last)
+        }
+    }
+}
+
+/// Event problems of the frames that were cooked but not printed (with
+/// `--every`) since the last printed frame.
+#[derive(Debug, Default)]
+struct Skipped {
+    /// Ticks cut at the event limit; the last one's `(processed, dropped)`.
+    overflows: Option<Span<(usize, usize)>>,
+    /// Failed handlers; the last one's `(node name, message)`.
+    errors: Option<Span<(String, String)>>,
+}
+
+impl Skipped {
+    fn add(&mut self, frame: u64, report: &TickReport, graph: &Graph) {
+        if report.overflowed() {
+            Span::add(
+                &mut self.overflows,
+                frame,
+                1,
+                (report.processed, report.dropped),
+            );
+        }
+        if let Some(last) = event_errors(report, graph).pop() {
+            Span::add(&mut self.errors, frame, report.errors.len(), last);
+        }
+    }
+
+    /// Write and forget the summary, if there is one: in text
+    /// `frames A..B: N event overflows (last: processed=P dropped=D)` and
+    /// `frames A..B: N event errors (last: <node>: <message>)`; in JSONL
+    /// one `{"skipped":{..}}` object for each.
+    fn write(&mut self, out: &mut impl Write, format: Format) -> io::Result<()> {
+        let plural = |n: usize| if n == 1 { "" } else { "s" };
+        if let Some(s) = self.overflows.take() {
+            let (processed, dropped) = s.latest;
+            match format {
+                Format::Text => writeln!(
+                    out,
+                    "{}: {} event overflow{} (last: processed={processed} dropped={dropped})",
+                    s.frames(),
+                    s.count,
+                    plural(s.count)
+                )?,
+                Format::Jsonl => writeln!(
+                    out,
+                    "{{\"skipped\":{{\"from\":{},\"to\":{},\"overflows\":{},\
+                     \"last\":{{\"processed\":{processed},\"dropped\":{dropped}}}}}}}",
+                    s.first, s.last, s.count
+                )?,
+            }
+        }
+        if let Some(s) = self.errors.take() {
+            let (node, message) = &s.latest;
+            match format {
+                Format::Text => writeln!(
+                    out,
+                    "{}: {} event error{} (last: {node}: {message})",
+                    s.frames(),
+                    s.count,
+                    plural(s.count)
+                )?,
+                Format::Jsonl => writeln!(
+                    out,
+                    "{{\"skipped\":{{\"from\":{},\"to\":{},\"event_errors\":{},\
+                     \"last\":{{\"node\":{},\"error\":{}}}}}}}",
+                    s.first,
+                    s.last,
+                    s.count,
+                    json_string(node),
+                    json_string(message)
+                )?,
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Failed handlers of a tick as `(node name, message)`.
+fn event_errors(report: &TickReport, graph: &Graph) -> Vec<(String, String)> {
+    report
+        .errors
+        .iter()
+        .map(|e| {
+            let name = display_name(graph, e.node).unwrap_or_else(|| e.node.to_string());
+            (name, describe(graph, &e.error))
+        })
+        .collect()
+}
+
 /// Everything printed for one frame.
 struct FrameOut<'a> {
     frame: u64,
@@ -761,14 +914,7 @@ impl FrameOut<'_> {
 
     /// Failed handlers as `(node name, message)`.
     fn event_errors(&self) -> Vec<(String, String)> {
-        self.report
-            .errors
-            .iter()
-            .map(|e| {
-                let name = display_name(self.graph, e.node).unwrap_or_else(|| e.node.to_string());
-                (name, describe(self.graph, &e.error))
-            })
-            .collect()
+        event_errors(self.report, self.graph)
     }
 }
 

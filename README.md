@@ -93,6 +93,11 @@ frame=10 time=0.500000 light.value=0.200000
 frame=10 time=0.500000 ticks.value=event(1)
 ```
 
+Event overflows and handler errors are reported for every frame: printed
+frames list them, and frames skipped by `--every` are summarized before the
+next printed frame (`frames 3..49: 2 event errors (last: timer: ...)`). A
+handler error in any frame makes the exit code 3.
+
 ### `diff`
 
 `livspeil diff <a> <b> [--format text|jsonl] [--meta]` compares two

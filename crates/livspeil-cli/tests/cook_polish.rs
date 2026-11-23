@@ -207,3 +207,108 @@ fn precision() {
     assert_eq!(out.status.code(), Some(2));
     assert!(stderr(&out).contains("--precision"), "{}", stderr(&out));
 }
+
+/// A timer whose period is 0 (a handler error) in frames 1 and 3 only.
+const FLAKY: &str = r#"room "flaky" format=1 {
+  network "/" {
+    node "timer" type="core.event.every@1" id="01920000-0000-7000-8000-000000000001" {
+      input "period" expr="if($F == 1 || $F == 3, 0.0, 1.0)"
+    }
+    node "count" type="core.event.counter@1" id="01920000-0000-7000-8000-000000000002"
+    link from="timer.fired" to="count.trigger"
+  }
+}
+"#;
+
+/// A gate feeding itself: every tick with an event overflows.
+const LOOP: &str = r#"room "loop" format=1 {
+  network "/" {
+    node "gate" type="core.event.gate@1" id="01920000-0000-7000-8000-000000000001"
+    node "count" type="core.event.counter@1" id="01920000-0000-7000-8000-000000000002"
+    link from="gate.out" to="count.trigger"
+    link from="gate.out" to="gate.trigger"
+  }
+}
+"#;
+
+#[test]
+fn skipped_frames_report_event_errors() {
+    let room = TempRoom::new("flaky", FLAKY);
+    let path = room.path();
+    // Printed: 0 and 4; the errors are in the skipped frames 1 and 3.
+    let out = livspeil(&["cook", &path, "--frames", "5", "--every", "4"]);
+    assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
+    assert_eq!(
+        stdout(&out),
+        "frame=0 time=0.000000 count.count=1\n\
+         frames 1..3: 2 event errors (last: timer: invalid input 'period': must be positive, got 0)\n\
+         frame=4 time=0.066667 count.count=1\n"
+    );
+    // Trailing skipped frames are summarized at the end; a single frame.
+    let out = livspeil(&["cook", &path, "--frames", "2", "--every", "4"]);
+    assert_eq!(out.status.code(), Some(3));
+    assert_eq!(
+        stdout(&out),
+        "frame=0 time=0.000000 count.count=1\n\
+         frame 1: 1 event error (last: timer: invalid input 'period': must be positive, got 0)\n"
+    );
+    let out = livspeil(&[
+        "cook", &path, "--frames", "5", "--every", "4", "--format", "jsonl",
+    ]);
+    assert_eq!(out.status.code(), Some(3));
+    let lines: Vec<serde_json::Value> = stdout(&out)
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 3);
+    assert_eq!(
+        lines[1],
+        serde_json::json!({"skipped": {"from": 1, "to": 3, "event_errors": 2,
+            "last": {"node": "timer", "error": "invalid input 'period': must be positive, got 0"}}})
+    );
+    // Without errors in the run, nothing extra and exit 0.
+    let out = ok(&["cook", &path, "--frames", "1"]);
+    assert_eq!(out, "frame=0 time=0.000000 count.count=1\n");
+}
+
+#[test]
+fn skipped_frames_report_overflows() {
+    let room = TempRoom::new("loop", LOOP);
+    let path = room.path();
+    let out = ok(&[
+        "cook",
+        &path,
+        "--frames",
+        "11",
+        "--every",
+        "10",
+        "--event",
+        "gate.trigger@3",
+        "--event",
+        "gate.trigger@5",
+    ]);
+    assert_eq!(
+        out,
+        "frame=0 time=0.000000 count.count=0\n\
+         frames 3..5: 2 event overflows (last: processed=10000 dropped=1)\n\
+         frame=10 time=0.166667 count.count=6666\n"
+    );
+    let json = ok(&[
+        "cook",
+        &path,
+        "--frames",
+        "2",
+        "--every",
+        "10",
+        "--event",
+        "gate.trigger@1",
+        "--format",
+        "jsonl",
+    ]);
+    assert_eq!(
+        json.lines().nth(1),
+        Some(
+            r#"{"skipped":{"from":1,"to":1,"overflows":1,"last":{"processed":10000,"dropped":1}}}"#
+        )
+    );
+}
