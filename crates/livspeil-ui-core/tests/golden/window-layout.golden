@@ -1,0 +1,13 @@
+window 0,0 640x400
+  root 0,0 640x400
+    sidebar 0,0 180x400
+      row0 8,8 164x32
+        item0 16,16 43x17 "Item 0"
+      row1 8,44 164x32
+        item1 16,52 43x17 "Item 1"
+      row2 8,80 164x32
+        item2 16,88 43x17 "Item 2"
+    content 180,0 460x400
+      card0 196,16 208x80
+      card1 416,16 208x80
+      card2 196,206 208x80

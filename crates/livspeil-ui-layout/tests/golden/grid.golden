@@ -1,0 +1,6 @@
+grid 0,0 300x44
+  cell 0,0 60x20
+  cell 66,0 76x20
+  cell 148,0 152x20
+  cell 0,24 60x20
+  cell 66,24 76x20

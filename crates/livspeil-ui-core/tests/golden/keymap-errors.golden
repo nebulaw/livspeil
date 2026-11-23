@@ -1,0 +1,5 @@
+unknown-modifier: keymap.toml:2:1: unknown modifier `hyper` in `hyper-a`
+unknown-key: keymap.toml:2:1: unknown key `banana` in `ctrl-banana`
+bad-action: keymap.toml:2:12: invalid action name `Select All` (use lowercase letters, digits, `_`, `.`, `-`)
+unknown-section: keymap.toml:1:2: unknown field `bind`, expected `bindings` or `contexts`
+not-a-string: keymap.toml:2:7: invalid type: integer `3`, expected a string

@@ -1,0 +1,9 @@
+unknown-key: motion.toml:2:1: unknown field `sped`, expected one of `profile`, `speed`, `reduce_motion`, `profiles`, `overrides`
+wrong-type: motion.toml:1:9: invalid type: string "fast", expected f64
+unknown-profile: motion.toml:2:11: unknown profile `bouncy` (known: calm, fluid, off, snappy)
+negative-speed: motion.toml:1:9: speed must be between 0 and 100, got -1
+bad-damping: motion.toml:2:37: damping must be in (0, 10], got 0
+custom-incomplete: motion.toml:1:1: custom profile `mine` must define `standard`
+spring-unknown-field: motion.toml:2:40: unknown field `mass`, expected `response` or `damping`
+override-profile: motion.toml:2:11: unknown profile `nope` (known: calm, fluid, off, snappy)
+syntax: motion.toml:1:11: string values must be quoted, expected literal string
