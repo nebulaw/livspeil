@@ -173,3 +173,54 @@ fn interaction_states() {
     wait(h, 600);
     snap(h, "state-tooltip");
 }
+
+#[test]
+fn semantics_descriptions() {
+    let mut out = String::new();
+    let mut push = |s: livspeil_ui_widgets::Semantics| out.push_str(&s.to_string());
+    push(Button::new("Save").primary().semantics());
+    push(Button::new("Off").disabled(true).semantics());
+    push(IconButton::new("bx-trash", "Trash").semantics());
+    push(Toggle::new(true).label("Wi-Fi").semantics());
+    push(Checkbox::new(CheckState::Mixed).label("All").semantics());
+    push(
+        RadioGroup::new(["A", "B"], Some(1))
+            .label("Size")
+            .disable_option(0)
+            .semantics(),
+    );
+    push(
+        SegmentedControl::new(["Day", "Week"], 0)
+            .label("Range")
+            .semantics(),
+    );
+    push(Tooltip::new("Saves").semantics());
+    push(Label::new("Name").semantics());
+    let mut app = App::new();
+    let env = livspeil_ui_widgets::Env::headless(&mut app);
+    let v = app.new_model(50.0_f32);
+    push(
+        Slider::new(v, 0.0, 100.0, 5.0)
+            .label("Volume")
+            .semantics(&app),
+    );
+    let n = app.new_model(1.5_f64);
+    push(
+        NumberField::new(&env, n, 0.0, 10.0, 0.5)
+            .label("X")
+            .semantics(&app),
+    );
+    push(
+        TextField::new(&env, "hello")
+            .label("Name")
+            .placeholder("Your name")
+            .semantics(),
+    );
+    let s = app.new_model(Some(1));
+    push(
+        Select::new(&env, s, ["Linear", "Ease"])
+            .label("Curve")
+            .semantics(&app),
+    );
+    assert_golden(&golden_dir(), "semantics", &out);
+}
