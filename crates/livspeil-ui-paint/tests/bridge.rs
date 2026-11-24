@@ -190,7 +190,13 @@ fn stacks_apply_to_quads_and_text() {
         panic!()
     };
     assert_eq!(g.opacity, 0.25);
-    assert_eq!(g.transform.m[4..], [10.0, 20.0]);
+    // Translation is folded into the (pixel-snapped) glyph positions.
+    assert_eq!(g.transform, livspeil_ui_render::Affine::IDENTITY);
+    assert!(
+        g.glyphs
+            .iter()
+            .all(|s| s.rect.x >= 10.0 && s.rect.y >= 20.0)
+    );
     let clip = g.clip.unwrap();
     assert_eq!((clip.x, clip.y, clip.w, clip.h), (10.0, 20.0, 50.0, 30.0));
     let Primitive::Glyphs(g) = &list.items[1].primitive else {

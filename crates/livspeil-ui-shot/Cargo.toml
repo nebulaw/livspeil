@@ -13,7 +13,12 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
+livspeil-ui-core = { path = "../livspeil-ui-core" }
+livspeil-ui-layout = { path = "../livspeil-ui-layout" }
+livspeil-ui-paint = { path = "../livspeil-ui-paint" }
 livspeil-ui-render = { path = "../livspeil-ui-render" }
+livspeil-ui-text = { path = "../livspeil-ui-text" }
+livspeil-ui-theme = { path = "../livspeil-ui-theme" }
 png = "0.18"
 
 [lints]

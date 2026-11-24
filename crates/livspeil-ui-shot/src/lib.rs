@@ -20,15 +20,17 @@
 #![forbid(unsafe_code)]
 
 pub mod scenes;
+pub mod ui;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use livspeil_ui_render::{
-    FrameOptions, GpuContext, RenderError, Renderer, RgbaImage, TARGET_FORMAT, encode, render_cpu,
+    AtlasStore, FrameOptions, GpuContext, RenderError, Renderer, RgbaImage, TARGET_FORMAT, encode,
+    render_cpu_with,
 };
 
-pub use scenes::{Scene, find, scenes};
+pub use scenes::{Scene, Shot, find, scenes};
 
 /// Errors from rendering, PNG I/O or golden checks.
 #[derive(Debug)]
@@ -41,6 +43,8 @@ pub enum ShotError {
     PngEncode(String),
     /// PNG decoding failed or the PNG is not 8-bit RGBA.
     PngDecode(String),
+    /// Building a UI scene (core views, paint bridge) failed.
+    Scene(String),
 }
 
 impl fmt::Display for ShotError {
@@ -50,6 +54,7 @@ impl fmt::Display for ShotError {
             ShotError::Io(p, e) => write!(f, "{}: {e}", p.display()),
             ShotError::PngEncode(e) => write!(f, "PNG encoding failed: {e}"),
             ShotError::PngDecode(e) => write!(f, "PNG decoding failed: {e}"),
+            ShotError::Scene(e) => write!(f, "building the scene failed: {e}"),
         }
     }
 }
@@ -74,8 +79,11 @@ pub fn frame_options(scene: &Scene) -> FrameOptions {
 
 /// Renders a scene with the CPU reference rasterizer.
 pub fn render_scene_cpu(scene: &Scene) -> Result<RgbaImage, ShotError> {
-    let frame = encode(&(scene.build)(), frame_options(scene))?;
-    Ok(render_cpu(&frame))
+    let shot = (scene.build)(scene.scale)?;
+    let frame = encode(&shot.list, frame_options(scene))?;
+    let mut atlases = AtlasStore::new();
+    atlases.apply_all(&shot.atlas)?;
+    Ok(render_cpu_with(&frame, &atlases))
 }
 
 /// A GPU device with a renderer, reusable across scenes.
@@ -97,7 +105,10 @@ impl GpuShooter {
 
     /// Renders a scene on the GPU and reads it back.
     pub fn render(&mut self, scene: &Scene) -> Result<RgbaImage, ShotError> {
-        let frame = encode(&(scene.build)(), frame_options(scene))?;
+        let shot = (scene.build)(scene.scale)?;
+        let frame = encode(&shot.list, frame_options(scene))?;
+        self.renderer
+            .update_atlases(&self.context.device, &self.context.queue, &shot.atlas)?;
         Ok(self.context.render_to_image(&mut self.renderer, &frame)?)
     }
 

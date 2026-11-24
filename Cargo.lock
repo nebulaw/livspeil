@@ -1363,7 +1363,12 @@ dependencies = [
 name = "livspeil-ui-shot"
 version = "0.0.0"
 dependencies = [
+ "livspeil-ui-core",
+ "livspeil-ui-layout",
+ "livspeil-ui-paint",
  "livspeil-ui-render",
+ "livspeil-ui-text",
+ "livspeil-ui-theme",
  "png",
 ]
 

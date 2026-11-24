@@ -333,21 +333,29 @@ pub(crate) fn draw_text(
     if s.trim().is_empty() || d.color.alpha <= 0.0 || st.opacity <= 0.0 {
         return Ok(());
     }
-    // Rasterize for the transform's scale (zoomed canvases stay crisp),
-    // except under rotation or skew where the sprite is resampled anyway.
+    // Under translation and uniform scale (pressed buttons, zoomed
+    // canvases) glyphs are rasterized at the effective scale and snapped
+    // to the screen's pixel grid: the layout origin is moved through the
+    // transform and only the pure scale stays on the sprites, so texels
+    // still map 1:1 to pixels. Rotation or skew resamples the sprites.
     let [a, b, c, dd, _, _] = st.transform.m;
-    let axis_aligned = b == 0.0 && c == 0.0 && a > 0.0 && dd > 0.0 && (a - dd).abs() < 1e-6;
-    let raster_scale = if axis_aligned {
-        local_scale(d.scale, st.transform)
+    let uniform = b == 0.0 && c == 0.0 && a > 0.0 && (a - dd).abs() < 1e-6;
+    let (origin, raster_scale, transform) = if uniform {
+        let (sx, sy) = st.transform.apply(d.origin.0, d.origin.1);
+        (
+            (sx / a, sy / a),
+            local_scale(d.scale, st.transform),
+            Affine::scale(a, a),
+        )
     } else {
-        d.scale
+        (d.origin, d.scale, st.transform)
     };
     let glyphs = text
         .glyphs(
             s,
             style,
             Placement {
-                origin: d.origin,
+                origin,
                 max_width: d.max_width,
                 scale: raster_scale,
             },
@@ -364,7 +372,7 @@ pub(crate) fn draw_text(
             color: d.color,
             clip: st.clip,
             opacity: st.opacity,
-            transform: st.transform,
+            transform,
         },
     );
     Ok(())
