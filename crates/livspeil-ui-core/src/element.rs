@@ -246,6 +246,7 @@ pub struct Element {
     pub(crate) key_context: Option<SharedString>,
     pub(crate) canvas: Option<Canvas>,
     pub(crate) hit_test: bool,
+    pub(crate) semantics: Option<Box<crate::semantics::Semantics>>,
 }
 
 /// A container element.
@@ -285,6 +286,7 @@ impl Element {
             key_context: None,
             canvas: None,
             hit_test: true,
+            semantics: None,
         }
     }
 

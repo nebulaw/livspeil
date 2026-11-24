@@ -135,7 +135,7 @@ pub struct App {
     renders_this_frame: usize,
     root_view: Option<AnyView>,
     root_mounted: bool,
-    tree: Tree,
+    pub(crate) tree: Tree,
     theme: Theme,
     motion: MotionConfig,
     keymap: Keymap,
@@ -293,7 +293,7 @@ impl App {
         }
     }
 
-    fn flush_effects(&mut self) {
+    pub(crate) fn flush_effects(&mut self) {
         if self.flushing {
             return;
         }
@@ -835,7 +835,7 @@ impl App {
         self.set_focus(None, false);
     }
 
-    fn set_focus(&mut self, id: Option<ElementId>, visible: bool) {
+    pub(crate) fn set_focus(&mut self, id: Option<ElementId>, visible: bool) {
         if self.focus == id && self.focus_visible == visible {
             return;
         }
@@ -1070,7 +1070,10 @@ impl App {
         }
     }
 
-    fn node_handlers(&self, id: ElementId) -> Option<(Rect, Rc<crate::element::Handlers>)> {
+    pub(crate) fn node_handlers(
+        &self,
+        id: ElementId,
+    ) -> Option<(Rect, Rc<crate::element::Handlers>)> {
         let n = self.tree.nodes.get(&id)?;
         Some((n.bounds, n.handlers.clone()?))
     }
@@ -1128,7 +1131,7 @@ impl App {
         handler(&event, &mut cx);
     }
 
-    fn fire_click(
+    pub(crate) fn fire_click(
         &mut self,
         id: ElementId,
         pos: Point,
@@ -1328,7 +1331,7 @@ impl fmt::Debug for EventCx<'_> {
 }
 
 impl<'a> EventCx<'a> {
-    fn new(
+    pub(crate) fn new(
         app: &'a mut App,
         target: ElementId,
         current: ElementId,

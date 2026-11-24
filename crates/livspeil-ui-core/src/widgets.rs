@@ -10,6 +10,7 @@ use livspeil_ui_theme::{MotionClass, Theme};
 use crate::element::{Element, SharedString, div, text};
 use crate::entity::{Model, Render, ViewContext};
 use crate::keymap::actions;
+use crate::semantics::{Role, SemanticValue, ValueRequest};
 
 /// A push button: hover, press and keyboard focus animate with the
 /// micro spring; Space/Enter activate it when focused. Add `.on_click`.
@@ -31,6 +32,9 @@ pub fn button(theme: &Theme, label: impl Into<SharedString>) -> Element {
         .focus_visual(|r| r.border_color(c.focus_ring))
         .transition(MotionClass::Micro)
         .focusable()
+        // a11y (M1.7)
+        .role(Role::Button)
+        .semantics(|s| s.label(label.clone()))
         .child(text(label).name("label").hit_test(false))
 }
 
@@ -52,6 +56,9 @@ pub fn toggle(theme: &Theme, on: bool) -> Element {
         .bg(if on { theme.accent() } else { c.surface[3] })
         .transition(MotionClass::Micro)
         .focusable()
+        // a11y (M1.7); add a name with `.semantics(|s| s.label(..))`
+        .role(Role::Switch)
+        .semantics(|s| s.checked(on))
         .child(
             div()
                 .key("thumb")
@@ -82,6 +89,8 @@ pub struct Slider {
     pub step: f32,
     /// Track width.
     pub width: f32,
+    /// Accessible name (a11y, M1.7).
+    pub label: Option<SharedString>,
     dragging: bool,
 }
 
@@ -98,6 +107,7 @@ impl Slider {
             max: max.max(min),
             step: if step > 0.0 { step } else { 1.0 },
             width: 200.0,
+            label: None,
             dragging: false,
         }
     }
@@ -204,6 +214,27 @@ impl Render for Slider {
             .on_action(actions::DECREMENT_LARGE, step_action(-10.0))
             .on_action(actions::MIN, move |cx| set_value(&view, cx, |s, _| s.min))
             .on_action(actions::MAX, move |cx| set_value(&view, cx, |s, _| s.max))
+            // a11y (M1.7)
+            .role(Role::Slider)
+            .semantics(|s| {
+                let s = s.value(SemanticValue::number(
+                    f64::from(value),
+                    f64::from(self.min),
+                    f64::from(self.max),
+                    f64::from(self.step),
+                ));
+                match &self.label {
+                    Some(l) => s.label(l.clone()),
+                    None => s,
+                }
+            })
+            .on_set_value(move |req, cx| {
+                if let ValueRequest::Number(v) = req {
+                    #[allow(clippy::cast_possible_truncation)]
+                    let v = *v as f32;
+                    set_value(&view, cx, |s, _| s.snap(v));
+                }
+            })
             .child(
                 div()
                     .key("track")
