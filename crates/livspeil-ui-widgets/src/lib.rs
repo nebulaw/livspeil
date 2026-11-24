@@ -62,6 +62,7 @@ mod env;
 pub mod keymap;
 mod label;
 mod number_field;
+mod scroll;
 mod segmented;
 mod select;
 pub mod semantics;
@@ -77,6 +78,10 @@ pub use env::{Clipboard, Env, MemoryClipboard, WidgetRoot};
 pub use keymap::{WIDGET_KEYMAP, keymap};
 pub use label::{Label, Tone};
 pub use number_field::{NumberField, Scrub, scrub_precision};
+pub use scroll::{
+    OVERSCAN, SCROLL_SCOPE, ScrollAxis, ScrollContent, ScrollInfo, ScrollPhysics, ScrollView,
+    Scroller, VirtualList, rubber_band, scroll_actions, visible_range,
+};
 pub use segmented::{SEGMENT_INSET, SegmentedControl};
 pub use select::Select;
 pub use semantics::{NumericValue, Role, SemanticAction, Semantics, Toggled};

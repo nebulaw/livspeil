@@ -285,6 +285,13 @@ impl Env {
     }
 }
 
+/// Ask scroll containers to bring the focused element into view.
+fn reveal_focus(cx: &mut App) {
+    if let Some(f) = cx.focused() {
+        cx.dispatch_action_at(f, livspeil_ui_core::SCROLL_INTO_VIEW);
+    }
+}
+
 /// The root view: content plus the overlay layer (popups and tooltips are
 /// painted and hit-tested above everything else), and focus tracking for
 /// focus-aware widgets.
@@ -368,11 +375,13 @@ impl Render for WidgetRoot {
                 move |cx| {
                     cx.focus_next();
                     env.sync_focus(cx);
+                    reveal_focus(cx);
                 }
             })
             .on_action(actions::FOCUS_PREV, move |cx| {
                 cx.focus_prev();
                 e5.sync_focus(cx);
+                reveal_focus(cx);
             })
             .child(
                 div()

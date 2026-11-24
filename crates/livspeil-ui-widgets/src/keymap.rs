@@ -164,6 +164,16 @@ pub const WIDGET_KEYMAP: &str = r#"
 "home" = "ui.first"
 "end" = "ui.last"
 "alt-down" = "ui.open"
+
+[contexts.ScrollView]
+"up" = "scroll.line_up"
+"down" = "scroll.line_down"
+"left" = "scroll.line_left"
+"right" = "scroll.line_right"
+"pageup" = "scroll.page_up"
+"pagedown" = "scroll.page_down"
+"home" = "scroll.top"
+"end" = "scroll.bottom"
 "#;
 
 /// The default widget bindings.

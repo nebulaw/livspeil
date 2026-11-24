@@ -42,6 +42,28 @@ pub enum Role {
     Tooltip,
     /// Static text label.
     Label,
+    /// A scrollable area.
+    ScrollView,
+    /// A panel (a titled group).
+    Panel,
+    /// A draggable splitter between panels (ARIA focusable `separator`).
+    Splitter,
+    /// A menu (popup list of items).
+    Menu,
+    /// A menu bar.
+    MenuBar,
+    /// A menu item (also a menu bar title).
+    MenuItem,
+    /// A menu item with a check mark.
+    MenuItemCheckBox,
+    /// A separator between menu items.
+    Separator,
+    /// A window titlebar (title and toolbar items).
+    Titlebar,
+    /// A node editor canvas.
+    NodeCanvas,
+    /// One node card on a node canvas.
+    Node,
 }
 
 /// Toggle state of switches and check boxes.
@@ -302,6 +324,14 @@ impl Semantics {
             Role::ListBoxOption => R::ListBoxOption,
             Role::Tooltip => R::Tooltip,
             Role::Label => R::Label,
+            Role::ScrollView => R::ScrollView,
+            Role::Panel | Role::NodeCanvas | Role::Node => R::Group,
+            Role::Splitter | Role::Separator => R::Separator,
+            Role::Menu => R::Menu,
+            Role::MenuBar => R::MenuBar,
+            Role::MenuItem => R::MenuItem,
+            Role::MenuItemCheckBox => R::MenuItemCheckBox,
+            Role::Titlebar => R::Toolbar,
         }
     }
 
@@ -320,6 +350,7 @@ impl Semantics {
         }
         let toggled = match (self.role, self.toggled, self.selected) {
             (Role::RadioButton, _, Some(sel)) => Some(livspeil_ui_core::Toggled::from(sel)),
+            (Role::MenuItemCheckBox, None, _) => Some(livspeil_ui_core::Toggled::Off),
             (_, Some(Toggled::True), _) => Some(livspeil_ui_core::Toggled::On),
             (_, Some(Toggled::False), _) => Some(livspeil_ui_core::Toggled::Off),
             (_, Some(Toggled::Mixed), _) => Some(livspeil_ui_core::Toggled::Mixed),
