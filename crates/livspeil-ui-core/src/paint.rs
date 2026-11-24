@@ -103,6 +103,8 @@ pub enum PaintCmd {
     Quad(Quad),
     /// Draw text.
     Text(TextRun),
+    /// Stroke a wire (cubic Bézier).
+    Wire(crate::wire::Wire),
 }
 
 /// A frame's display list.
@@ -214,6 +216,20 @@ impl Scene {
                     }
                     let _ = write!(out, " color={}", color(t.color));
                 }
+                PaintCmd::Wire(w) => {
+                    let p = |p: livspeil_ui_layout::Point| format!("{},{}", num(p.x), num(p.y));
+                    let _ = write!(
+                        out,
+                        "wire {} {} {} {} {} w={} color={}",
+                        name(w.element),
+                        p(w.from),
+                        p(w.c1),
+                        p(w.c2),
+                        p(w.to),
+                        num(w.width),
+                        color(w.color)
+                    );
+                }
             }
             out.push('\n');
         }
@@ -314,6 +330,9 @@ fn paint_node(input: &PaintInput<'_>, id: ElementId, scene: &mut Scene, stats: &
             font: t.font(input.theme),
             color: t.color.unwrap_or(input.theme.colors().text_primary),
         }));
+    }
+    for w in &node.wires {
+        cmds.push(PaintCmd::Wire(crate::wire::Wire { element: id, ..*w }));
     }
 
     if !node.children.is_empty() {

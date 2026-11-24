@@ -262,6 +262,7 @@ pub struct Element {
     pub(crate) canvas: Option<Canvas>,
     pub(crate) hit_test: bool,
     pub(crate) semantics: Option<Box<crate::semantics::Semantics>>,
+    pub(crate) wires: Vec<crate::wire::Wire>,
 }
 
 /// A container element.
@@ -311,6 +312,7 @@ impl Element {
             canvas: None,
             hit_test: true,
             semantics: None,
+            wires: Vec::new(),
         }
     }
 
