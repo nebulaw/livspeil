@@ -246,6 +246,7 @@ pub(crate) struct Node {
     pub(crate) key_context: Option<SharedString>,
     pub(crate) canvas: Option<Canvas>,
     pub(crate) hit_test: bool,
+    pub(crate) semantics: Option<Box<crate::semantics::Semantics>>,
     /// Absolute untransformed layout bounds.
     pub(crate) bounds: Rect,
     pub(crate) anims: NodeAnims,
@@ -313,6 +314,7 @@ pub(crate) fn reconcile(
         key_context,
         canvas,
         hit_test,
+        semantics,
     } = el;
     let text = match kind {
         ElementKind::View(any) => {
@@ -370,6 +372,7 @@ pub(crate) fn reconcile(
         node.key_context = key_context;
         node.canvas = canvas;
         node.hit_test = hit_test;
+        node.semantics = semantics;
         node.layout
     } else {
         let layout = tree.layout.create(style, measure).ok()?;
@@ -392,6 +395,7 @@ pub(crate) fn reconcile(
                 key_context,
                 canvas,
                 hit_test,
+                semantics,
                 bounds: Rect::ZERO,
                 anims,
                 hovered: false,
