@@ -1738,6 +1738,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "livspeil-ui-widgets"
+version = "0.0.0"
+dependencies = [
+ "livspeil-testkit",
+ "livspeil-ui-core",
+ "livspeil-ui-layout",
+ "livspeil-ui-text",
+ "livspeil-ui-theme",
+ "proptest",
+]
+
+[[package]]
 name = "livspeil-wasm-host"
 version = "0.0.0"
 dependencies = [

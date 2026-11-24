@@ -1,0 +1,19 @@
+Button label="Save" focusable actions=[Click, Focus]
+Button label="Off" disabled
+Button label="Trash" focusable actions=[Click, Focus]
+Switch label="Wi-Fi" toggled=True focusable actions=[Click, Focus]
+CheckBox label="All" toggled=Mixed focusable actions=[Click, Focus]
+RadioGroup label="Size" value="B" focusable actions=[Focus]
+  RadioButton label="A" selected=false disabled
+  RadioButton label="B" selected=true focusable actions=[Click]
+SegmentedControl label="Range" value="Day" focusable actions=[Focus]
+  Segment label="Day" selected=true focusable actions=[Click]
+  Segment label="Week" selected=false focusable actions=[Click]
+Tooltip label="Saves"
+Label label="Name"
+Slider label="Volume" value="50" range=0..=100 step=5 focusable actions=[Increment, Decrement, SetValue, Focus]
+SpinButton label="X" value="1.5" range=0..=10 step=0.5 focusable actions=[Increment, Decrement, SetValue, Focus]
+TextInput label="Name" value="hello" placeholder="Your name" selection=5..5 focusable actions=[Focus, SetValue, SetTextSelection, Clipboard]
+ComboBox label="Curve" value="Ease" expanded=false placeholder="Choose…" focusable actions=[Click, Expand, SetValue, Focus]
+  ListBoxOption label="Linear" selected=false focusable actions=[Click]
+  ListBoxOption label="Ease" selected=true focusable actions=[Click]
