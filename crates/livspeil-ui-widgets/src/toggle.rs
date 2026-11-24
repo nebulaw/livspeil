@@ -104,7 +104,10 @@ impl Toggle {
             } else {
                 Toggled::False
             })
-            .interactive(self.disabled, &[SemanticAction::Click, SemanticAction::Focus])
+            .interactive(
+                self.disabled,
+                &[SemanticAction::Click, SemanticAction::Focus],
+            )
     }
 
     /// Build the element (name `toggle`, children `track` > `thumb`).
@@ -115,7 +118,11 @@ impl Toggle {
         let (w, h, thumb) = metrics(theme).switch;
         let inset = (h - thumb) / 2.0;
         let travel = w - thumb - 2.0 * inset;
-        let fill = if self.on { theme.accent() } else { c.surface[3] };
+        let fill = if self.on {
+            theme.accent()
+        } else {
+            c.surface[3]
+        };
         let mut track = div()
             .key("track")
             .size(w, h)
@@ -247,7 +254,10 @@ impl Checkbox {
         Semantics::new(Role::CheckBox)
             .label_opt(self.label.as_deref())
             .toggled(self.state.toggled())
-            .interactive(self.disabled, &[SemanticAction::Click, SemanticAction::Focus])
+            .interactive(
+                self.disabled,
+                &[SemanticAction::Click, SemanticAction::Focus],
+            )
     }
 
     /// Build the element (name `checkbox`, children `box` > `mark`).
@@ -389,7 +399,10 @@ impl Radio {
         Semantics::new(Role::RadioButton)
             .label(&*self.label)
             .selected(self.selected)
-            .interactive(self.disabled, &[SemanticAction::Click, SemanticAction::Focus])
+            .interactive(
+                self.disabled,
+                &[SemanticAction::Click, SemanticAction::Focus],
+            )
     }
 
     /// Build the element (name `radio:<label>`).
@@ -515,7 +528,10 @@ impl RadioGroup {
     pub fn render(self, theme: &Theme) -> Element {
         let sem = self.semantics();
         let m = metrics(theme);
-        let mut group = div().name("radio-group").gap(m.gap).key_context("RadioGroup");
+        let mut group = div()
+            .name("radio-group")
+            .gap(m.gap)
+            .key_context("RadioGroup");
         group = if self.horizontal {
             group.flex_row().items_center()
         } else {

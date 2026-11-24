@@ -7,8 +7,7 @@ use std::rc::Rc;
 
 use livspeil_ui_core::{
     App, DragPhase, Element, EventCx, Render, SharedString, ValueRequest, View, ViewContext,
-    actions as core,
-    div,
+    actions as core, div,
 };
 use livspeil_ui_layout::Point;
 use livspeil_ui_theme::MotionClass;

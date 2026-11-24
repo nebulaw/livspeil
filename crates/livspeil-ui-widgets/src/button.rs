@@ -172,7 +172,10 @@ impl Button {
     pub fn semantics(&self) -> Semantics {
         Semantics::new(Role::Button)
             .label(&*self.label)
-            .interactive(self.disabled, &[SemanticAction::Click, SemanticAction::Focus])
+            .interactive(
+                self.disabled,
+                &[SemanticAction::Click, SemanticAction::Focus],
+            )
     }
 
     /// Build the element (name `button:<label>`, label child `label`).
@@ -257,7 +260,10 @@ impl IconButton {
     pub fn semantics(&self) -> Semantics {
         Semantics::new(Role::Button)
             .label(&*self.label)
-            .interactive(self.disabled, &[SemanticAction::Click, SemanticAction::Focus])
+            .interactive(
+                self.disabled,
+                &[SemanticAction::Click, SemanticAction::Focus],
+            )
     }
 
     /// Build the element (name `icon-button:<label>`).

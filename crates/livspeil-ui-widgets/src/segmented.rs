@@ -45,7 +45,10 @@ impl std::fmt::Debug for SegmentedControl {
 impl SegmentedControl {
     /// Segments `options` with `selected` chosen.
     #[must_use]
-    pub fn new<S: Into<SharedString>>(options: impl IntoIterator<Item = S>, selected: usize) -> Self {
+    pub fn new<S: Into<SharedString>>(
+        options: impl IntoIterator<Item = S>,
+        selected: usize,
+    ) -> Self {
         SegmentedControl {
             options: options.into_iter().map(Into::into).collect(),
             selected,

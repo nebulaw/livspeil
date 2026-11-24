@@ -130,9 +130,12 @@ impl TextBox {
 
     /// Caret x in layout coordinates.
     pub(crate) fn caret_x(&self) -> Option<f32> {
-        self.editor
-            .display_caret()
-            .map(|c| self.cache.layout.cursor_rect(TextCursor::new(c), CARET_WIDTH).x)
+        self.editor.display_caret().map(|c| {
+            self.cache
+                .layout
+                .cursor_rect(TextCursor::new(c), CARET_WIDTH)
+                .x
+        })
     }
 
     /// Scroll so the caret is inside `inner_width`.
@@ -333,7 +336,12 @@ impl TextBox {
         let underline = |key: String, r: &livspeil_ui_text::Rect, thick: f32| {
             div()
                 .key(key)
-                .absolute(Rect::new(x0 + r.x, y + r.y + r.height - thick, r.width, thick))
+                .absolute(Rect::new(
+                    x0 + r.x,
+                    y + r.y + r.height - thick,
+                    r.width,
+                    thick,
+                ))
                 .bg(text_color)
                 .hit_test(false)
         };
@@ -355,7 +363,12 @@ impl TextBox {
             out.push(
                 div()
                     .key("caret")
-                    .absolute(Rect::new(x0 + r.x, y + r.y, CARET_WIDTH, r.height.max(size)))
+                    .absolute(Rect::new(
+                        x0 + r.x,
+                        y + r.y,
+                        CARET_WIDTH,
+                        r.height.max(size),
+                    ))
                     .bg(theme.accent())
                     .hit_test(false),
             );

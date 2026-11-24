@@ -207,9 +207,7 @@ impl Render for Slider {
             .border(1.0, accent)
             .elevation(Elevation::E1)
             .translate(Vec2::new(offset, 0.0))
-            .transition_with(
-                (!self.dragging).then_some(Transition::Motion(MotionClass::Micro)),
-            );
+            .transition_with((!self.dragging).then_some(Transition::Motion(MotionClass::Micro)));
         if self.disabled {
             thumb = thumb.hit_test(false);
         } else {

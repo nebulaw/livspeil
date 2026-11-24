@@ -209,7 +209,11 @@ impl Semantics {
     pub fn interactive(mut self, disabled: bool, actions: &[SemanticAction]) -> Self {
         self.disabled = disabled;
         self.focusable = !disabled;
-        self.actions = if disabled { Vec::new() } else { actions.to_vec() };
+        self.actions = if disabled {
+            Vec::new()
+        } else {
+            actions.to_vec()
+        };
         self
     }
 
@@ -328,7 +332,11 @@ impl Semantics {
         if let Some(e) = self.expanded {
             s = s.expanded(e);
         }
-        if let Some(p) = self.placeholder.as_deref().filter(|_| self.value.as_deref() == Some("")) {
+        if let Some(p) = self
+            .placeholder
+            .as_deref()
+            .filter(|_| self.value.as_deref() == Some(""))
+        {
             s = s.description(p);
         }
         for a in &self.actions {
@@ -355,11 +363,11 @@ impl Semantics {
     #[must_use]
     pub fn apply(&self, el: livspeil_ui_core::Element) -> livspeil_ui_core::Element {
         let core = self.to_core();
-        el.semantics(move |prev| {
-            match prev.get_description().map(str::to_owned) {
+        el.semantics(
+            move |prev| match prev.get_description().map(str::to_owned) {
                 Some(d) if core.get_description().is_none() => core.description(d),
                 _ => core,
-            }
-        })
+            },
+        )
     }
 }

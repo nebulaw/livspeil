@@ -258,10 +258,10 @@ impl NumberField {
     /// The focusable element's name for `view`.
     #[must_use]
     pub fn element_name(view: &View<NumberField>, app: &App) -> String {
-        view.read(app)
-            .name
-            .as_deref()
-            .map_or_else(|| style::entity_name("numberfield", view.id()), str::to_owned)
+        view.read(app).name.as_deref().map_or_else(
+            || style::entity_name("numberfield", view.id()),
+            str::to_owned,
+        )
     }
 
     /// Semantics: `SpinButton` with value and range (core: `Slider` with a
@@ -315,7 +315,11 @@ fn set_value(model: Model<f64>, cx: &mut App, v: f64) {
 }
 
 /// Update the field; a returned value is written to the model afterwards.
-fn with(view: View<NumberField>, cx: &mut App, f: impl FnOnce(&mut NumberField, &mut App) -> Option<f64>) {
+fn with(
+    view: View<NumberField>,
+    cx: &mut App,
+    f: impl FnOnce(&mut NumberField, &mut App) -> Option<f64>,
+) {
     let (model, v) = view.update(cx, |nf, vcx| {
         let v = f(nf, vcx);
         vcx.notify();
@@ -350,10 +354,10 @@ impl Render for NumberField {
         let theme = cx.theme().clone();
         let m = metrics(&theme);
         let c = theme.colors();
-        let name = self
-            .name
-            .as_deref()
-            .map_or_else(|| style::entity_name("numberfield", view.id()), str::to_owned);
+        let name = self.name.as_deref().map_or_else(
+            || style::entity_name("numberfield", view.id()),
+            str::to_owned,
+        );
         let focused = !self.disabled && self.env.is_focused(cx, &name);
         // Losing focus commits the edit.
         if self.edit.is_some()
@@ -381,9 +385,14 @@ impl Render for NumberField {
         if let Some(tb) = &mut self.edit {
             tb.refresh(&self.env, m.font);
             tb.keep_caret_visible(self.width - 2.0 * pad);
-            el = el
-                .key_context("TextField")
-                .children(tb.elements(&theme, height, pad, focused, c.text_primary, None));
+            el = el.key_context("TextField").children(tb.elements(
+                &theme,
+                height,
+                pad,
+                focused,
+                c.text_primary,
+                None,
+            ));
         } else {
             if self.min.is_finite() && self.max.is_finite() && self.max > self.min {
                 #[allow(clippy::cast_possible_truncation)]
