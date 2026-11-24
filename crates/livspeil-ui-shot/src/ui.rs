@@ -377,63 +377,58 @@ fn dark() -> Color {
     surface(0)
 }
 
-macro_rules! pair {
-    ($v:ident, $name:literal, $desc:literal, $w:expr, $h:expr, $build:expr) => {
-        $v.push(Scene {
-            name: concat!($name, "-1x"),
-            description: $desc,
-            width: $w,
-            height: $h,
-            scale: 1.0,
-            build: $build,
-            clear: dark,
-        });
-        $v.push(Scene {
-            name: concat!($name, "-2x"),
-            description: $desc,
-            width: $w,
-            height: $h,
-            scale: 2.0,
-            build: $build,
-            clear: dark,
-        });
-    };
+/// A scene at 1x and 2x (`names` are the two scene names).
+fn pair(
+    names: [&'static str; 2],
+    description: &'static str,
+    width: u32,
+    height: u32,
+    build: fn(f32) -> Result<Shot, ShotError>,
+) -> [Scene; 2] {
+    [1.0, 2.0].map(|scale| Scene {
+        name: if scale == 1.0 { names[0] } else { names[1] },
+        description,
+        width,
+        height,
+        scale,
+        build,
+        clear: dark,
+    })
 }
 
 /// The UI scenes, each at 1x and 2x.
 pub fn scenes() -> Vec<Scene> {
-    let mut v = Vec::new();
-    pair!(
-        v,
-        "button-states",
-        "Button from core: rest, hover, pressed, focused, disabled",
-        576,
-        100,
-        button_states
-    );
-    pair!(
-        v,
-        "toggle-slider",
-        "Toggles on/off and sliders at 30% / 75% with labels",
-        320,
-        168,
-        toggle_slider
-    );
-    pair!(
-        v,
-        "text-samples",
-        "Inter sizes and weights, tnum digits, Georgian, bidi, a wrapped paragraph",
-        640,
-        380,
-        text_samples
-    );
-    pair!(
-        v,
-        "frost-sidebar",
-        "a Frost sidebar with labels over a gradient",
-        480,
-        300,
-        frost_sidebar
-    );
-    v
+    [
+        pair(
+            ["button-states-1x", "button-states-2x"],
+            "Button from core: rest, hover, pressed, focused, disabled",
+            576,
+            100,
+            button_states,
+        ),
+        pair(
+            ["toggle-slider-1x", "toggle-slider-2x"],
+            "Toggles on/off and sliders at 30% / 75% with labels",
+            320,
+            168,
+            toggle_slider,
+        ),
+        pair(
+            ["text-samples-1x", "text-samples-2x"],
+            "Inter sizes and weights, tnum digits, Georgian, bidi, a wrapped paragraph",
+            640,
+            380,
+            text_samples,
+        ),
+        pair(
+            ["frost-sidebar-1x", "frost-sidebar-2x"],
+            "a Frost sidebar with labels over a gradient",
+            480,
+            300,
+            frost_sidebar,
+        ),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
