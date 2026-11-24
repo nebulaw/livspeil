@@ -277,7 +277,13 @@ impl Element {
             key: None,
             name: None,
             kind,
-            style: Style::default(),
+            // Every element is a containing block (CSS `position:
+            // relative`), so absolutely positioned children are placed in
+            // their parent, not in the nearest positioned ancestor.
+            style: Style {
+                position: Position::Relative,
+                ..Style::default()
+            },
             visual: Visual::default(),
             children: Vec::new(),
             handlers: None,
