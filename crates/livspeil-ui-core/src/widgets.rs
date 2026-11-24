@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: MPL-2.0
 
 //! Proof widgets for the core: [`button`], [`toggle`] and [`Slider`].
-//! They move to `livspeil-ui-widgets` once that crate exists.
+//!
+//! The real widget set is `livspeil-ui-widgets` (Button, Toggle, Slider and
+//! more, with densities, states and semantics); use that in applications.
+//! These stay as minimal fixtures for the core's and `livspeil-ui-a11y`'s
+//! tests, which cannot depend on the widget crate.
 
 use livspeil_ui_layout::{Rect, Vec2};
 use livspeil_ui_theme::{MotionClass, Theme};
