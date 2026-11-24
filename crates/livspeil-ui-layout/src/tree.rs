@@ -8,8 +8,18 @@
 //! Setters compare before writing, so unchanged nodes stay clean and Taffy's
 //! per-node cache skips them: a change only relayouts the dirty node, its
 //! ancestors, and siblings whose constraints actually change.
+//!
+//! Pixel rounding is done here rather than by Taffy: Taffy 0.16's rounding
+//! pass walks each containing block's list of hoisted out-of-flow boxes,
+//! and that list goes stale when a positioned box loses its last child (it
+//! is then laid out as a leaf, which never rewrites the list) or is hidden.
+//! Removing such a child made the next layout panic with "invalid SlotMap
+//! key"; see `docs/known-issues.md`. Our pass walks the real children and
+//! only uses the hoisted lists of live ancestors to find a box's containing
+//! block, so stale entries are never dereferenced.
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::fmt;
 
 use taffy::{AvailableSpace, NodeId, TaffyTree, compute_leaf_layout};
@@ -31,9 +41,10 @@ pub enum Measure {
     None,
     /// A fixed intrinsic size.
     Fixed(Size),
-    /// Placeholder for text until `livspeil-ui-text` lands: `chars` glyphs
-    /// of average advance `0.55 × font_size`, one line of `line_height`,
-    /// wrapped to the available width.
+    /// A text size estimate for when no shaper is available (the UI core
+    /// uses it for text without an installed text measurer, e.g. headless
+    /// tests): `chars` glyphs of average advance `0.55 × font_size`, lines
+    /// of `line_height`, wrapped to the available width.
     TextPlaceholder {
         /// Number of characters.
         chars: u32,
@@ -80,7 +91,7 @@ impl Measure {
     }
 }
 
-/// A Taffy error.
+/// A Taffy error (including an unknown or removed node).
 #[derive(Debug)]
 pub struct LayoutError(taffy::TaffyError);
 
@@ -112,6 +123,10 @@ pub struct LayoutStats {
 /// A retained Taffy tree.
 pub struct LayoutTree {
     taffy: TaffyTree<Measure>,
+    /// Rounded border boxes relative to the parent, keyed by every live node
+    /// (so it doubles as the liveness check that keeps stale ids from
+    /// reaching Taffy, which panics on them).
+    rects: HashMap<NodeId, Rect>,
     measure_calls: Cell<usize>,
     stats: LayoutStats,
 }
@@ -135,8 +150,11 @@ impl LayoutTree {
     /// An empty tree.
     #[must_use]
     pub fn new() -> Self {
+        let mut taffy = TaffyTree::new();
+        taffy.disable_rounding();
         LayoutTree {
-            taffy: TaffyTree::new(),
+            taffy,
+            rects: HashMap::new(),
             measure_calls: Cell::new(0),
             stats: LayoutStats::default(),
         }
@@ -152,6 +170,15 @@ impl LayoutTree {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// The Taffy id of a live node.
+    fn id(&self, node: LayoutNode) -> Result<NodeId, LayoutError> {
+        if self.rects.contains_key(&node.0) {
+            Ok(node.0)
+        } else {
+            Err(LayoutError(taffy::TaffyError::InvalidInputNode(node.0)))
+        }
     }
 
     /// Counters.
@@ -173,6 +200,7 @@ impl LayoutTree {
         } else {
             self.taffy.new_leaf_with_context(style, measure)?
         };
+        self.rects.insert(id, Rect::ZERO);
         Ok(LayoutNode(id))
     }
 
@@ -181,7 +209,13 @@ impl LayoutTree {
     /// # Errors
     /// Taffy errors (unknown node).
     pub fn remove(&mut self, node: LayoutNode) -> Result<(), LayoutError> {
-        self.taffy.remove(node.0)?;
+        let id = self.id(node)?;
+        let parent = self.taffy.parent(id);
+        self.taffy.remove(id)?;
+        if let Some(p) = parent {
+            self.dirty_ancestors(p)?;
+        }
+        self.rects.remove(&id);
         Ok(())
     }
 
@@ -190,10 +224,12 @@ impl LayoutTree {
     /// # Errors
     /// Taffy errors.
     pub fn set_style(&mut self, node: LayoutNode, style: &Style) -> Result<bool, LayoutError> {
-        if self.taffy.style(node.0)? == style {
+        let id = self.id(node)?;
+        if self.taffy.style(id)? == style {
             return Ok(false);
         }
-        self.taffy.set_style(node.0, style.clone())?;
+        self.taffy.set_style(id, style.clone())?;
+        self.dirty_ancestors(id)?;
         self.stats.style_writes += 1;
         Ok(true)
     }
@@ -203,16 +239,14 @@ impl LayoutTree {
     /// # Errors
     /// Taffy errors.
     pub fn set_measure(&mut self, node: LayoutNode, measure: Measure) -> Result<bool, LayoutError> {
-        let current = self
-            .taffy
-            .get_node_context(node.0)
-            .cloned()
-            .unwrap_or_default();
+        let id = self.id(node)?;
+        let current = self.taffy.get_node_context(id).cloned().unwrap_or_default();
         if current == measure {
             return Ok(false);
         }
         let ctx = (measure != Measure::None).then_some(measure);
-        self.taffy.set_node_context(node.0, ctx)?;
+        self.taffy.set_node_context(id, ctx)?;
+        self.dirty_ancestors(id)?;
         Ok(true)
     }
 
@@ -225,12 +259,31 @@ impl LayoutTree {
         node: LayoutNode,
         children: &[LayoutNode],
     ) -> Result<bool, LayoutError> {
-        let current = self.taffy.children(node.0)?;
-        if current.len() == children.len() && current.iter().zip(children).all(|(a, b)| *a == b.0) {
+        let id = self.id(node)?;
+        let ids = children
+            .iter()
+            .map(|c| self.id(*c))
+            .collect::<Result<Vec<NodeId>, _>>()?;
+        if ids.contains(&id) || ids.iter().any(|c| self.is_ancestor(*c, id)) {
+            return Err(LayoutError(taffy::TaffyError::InvalidInputNode(id)));
+        }
+        let mut seen = std::collections::HashSet::with_capacity(ids.len());
+        if !ids.iter().all(|c| seen.insert(*c)) {
+            return Err(LayoutError(taffy::TaffyError::InvalidInputNode(id)));
+        }
+        if self.taffy.children(id)? == ids {
             return Ok(false);
         }
-        let ids: Vec<NodeId> = children.iter().map(|c| c.0).collect();
-        self.taffy.set_children(node.0, &ids)?;
+        let old_parents: Vec<NodeId> = ids
+            .iter()
+            .filter_map(|c| self.taffy.parent(*c))
+            .filter(|p| *p != id)
+            .collect();
+        self.taffy.set_children(id, &ids)?;
+        for p in old_parents {
+            self.dirty_ancestors(p)?;
+        }
+        self.dirty_ancestors(id)?;
         Ok(true)
     }
 
@@ -239,7 +292,56 @@ impl LayoutTree {
     /// # Errors
     /// Taffy errors.
     pub fn is_dirty(&self, node: LayoutNode) -> Result<bool, LayoutError> {
-        Ok(self.taffy.dirty(node.0)?)
+        Ok(self.taffy.dirty(self.id(node)?)?)
+    }
+
+    /// The node's parent, if attached.
+    ///
+    /// # Errors
+    /// Unknown node.
+    pub fn parent(&self, node: LayoutNode) -> Result<Option<LayoutNode>, LayoutError> {
+        Ok(self.taffy.parent(self.id(node)?).map(LayoutNode))
+    }
+
+    /// The node's children.
+    ///
+    /// # Errors
+    /// Unknown node.
+    pub fn children(&self, node: LayoutNode) -> Result<Vec<LayoutNode>, LayoutError> {
+        Ok(self
+            .taffy
+            .children(self.id(node)?)?
+            .into_iter()
+            .map(LayoutNode)
+            .collect())
+    }
+
+    /// Clear the cache of `node` and every ancestor.
+    ///
+    /// Taffy's `mark_dirty` stops at the first node whose cache is already
+    /// empty, assuming its ancestors are dirty too. Nodes under a
+    /// `display: none` box break that: hidden layout clears their cache and
+    /// never refills it, while the hidden box itself is cached, so a change
+    /// under it was never laid out (stale rects for moved or new nodes).
+    fn dirty_ancestors(&mut self, node: NodeId) -> Result<(), LayoutError> {
+        let mut cur = Some(node);
+        while let Some(n) = cur {
+            self.taffy.mark_dirty(n)?;
+            cur = self.taffy.parent(n);
+        }
+        Ok(())
+    }
+
+    /// Whether `ancestor` is `node` or one of its ancestors.
+    fn is_ancestor(&self, ancestor: NodeId, node: NodeId) -> bool {
+        let mut cur = Some(node);
+        while let Some(n) = cur {
+            if n == ancestor {
+                return true;
+            }
+            cur = self.taffy.parent(n);
+        }
+        false
     }
 
     /// Lay out the tree under `root` in `available` space. Clean subtrees
@@ -248,6 +350,7 @@ impl LayoutTree {
     /// # Errors
     /// Taffy errors.
     pub fn compute(&mut self, root: LayoutNode, available: Size) -> Result<(), LayoutError> {
+        let root = LayoutNode(self.id(root)?);
         self.stats.computes += 1;
         let counter = &self.measure_calls;
         self.taffy.compute_layout_with_measure(
@@ -276,7 +379,56 @@ impl LayoutTree {
                 )
             },
         )?;
+        self.round(root.0);
         Ok(())
+    }
+
+    /// Pixel-snap the subtree under `root`, like Taffy's own rounding (edges
+    /// are rounded in absolute coordinates, so adjacent boxes stay flush),
+    /// but walking real children instead of hoisted lists.
+    fn round(&mut self, root: NodeId) {
+        // (node, unrounded absolute origin) for the ancestor chain.
+        let mut chain: Vec<(NodeId, f32, f32)> = Vec::new();
+        // (node, depth of its parent in `chain`, or `None` for the root).
+        let mut stack: Vec<(NodeId, Option<usize>)> = vec![(root, None)];
+        while let Some((node, parent_depth)) = stack.pop() {
+            chain.truncate(parent_depth.map_or(0, |d| d + 1));
+            let (px, py) = chain.last().map_or((0.0, 0.0), |&(_, x, y)| (x, y));
+            // An out-of-flow box is positioned relative to its containing
+            // block: the nearest ancestor that hoisted it (the compute root
+            // claims whatever no positioned ancestor did).
+            let style = self.taffy.style(node).ok();
+            let out_of_flow = style
+                .is_some_and(|s| s.position.is_out_of_flow() && s.display != taffy::Display::None);
+            let (bx, by) = if out_of_flow && !chain.is_empty() {
+                chain
+                    .iter()
+                    .rev()
+                    .find(|(a, _, _)| {
+                        self.taffy
+                            .hoisted_children(*a)
+                            .is_ok_and(|h| h.contains(&node))
+                    })
+                    .map_or((px, py), |&(_, x, y)| (x, y))
+            } else {
+                (px, py)
+            };
+            let l = self.taffy.unrounded_layout(node);
+            let x = bx + l.location.x;
+            let y = by + l.location.y;
+            let rect = Rect::new(
+                round(x) - round(px),
+                round(y) - round(py),
+                round(x + l.size.width) - round(x),
+                round(y + l.size.height) - round(y),
+            );
+            self.rects.insert(node, rect);
+            let depth = chain.len();
+            chain.push((node, x, y));
+            if let Ok(children) = self.taffy.children(node) {
+                stack.extend(children.into_iter().rev().map(|c| (c, Some(depth))));
+            }
+        }
     }
 
     /// The node's border box relative to its parent's border box.
@@ -284,14 +436,16 @@ impl LayoutTree {
     /// # Errors
     /// Taffy errors.
     pub fn rect(&self, node: LayoutNode) -> Result<Rect, LayoutError> {
-        let l = self.taffy.layout(node.0)?;
-        Ok(Rect::new(
-            l.location.x,
-            l.location.y,
-            l.size.width,
-            l.size.height,
-        ))
+        self.rects
+            .get(&node.0)
+            .copied()
+            .ok_or(LayoutError(taffy::TaffyError::InvalidInputNode(node.0)))
     }
+}
+
+/// Round half up, as Taffy does.
+fn round(v: f32) -> f32 {
+    (v + 0.5).floor()
 }
 
 /// Style helpers that keep callers off Taffy's verbose constructors.

@@ -27,5 +27,9 @@ winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "
 arboard = { version = "3.7", default-features = false }
 log = "0.4"
 
+[dev-dependencies]
+livspeil-ui-paint = { path = "../livspeil-ui-paint" }
+livspeil-ui-widgets = { path = "../livspeil-ui-widgets" }
+
 [lints]
 workspace = true

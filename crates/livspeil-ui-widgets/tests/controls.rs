@@ -259,7 +259,7 @@ fn radio_group_arrow_keys_wrap_and_skip_disabled() {
     assert_eq!(s.get_selected(), Some(true));
     assert_eq!(
         h.app.semantic_node(group).unwrap().role(),
-        Some(Role::Group)
+        Some(Role::RadioGroup)
     );
 }
 

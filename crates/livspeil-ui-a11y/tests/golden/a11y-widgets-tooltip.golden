@@ -1,0 +1,9 @@
+Window @0,0 400x400
+  GenericContainer [Focus] @0,0 400x400
+    RadioGroup "Size" value="Small" [Click,Focus] @8,8 160x72
+      RadioButton "Small" toggled=True selected=true [Click] @8,8 160x32
+      RadioButton "Large" toggled=False selected=false [Click] @8,48 160x32
+    SpinButton "Scale" value=2.5 range=0..10 step=0.5 [Click,Focus,Increment,Decrement,SetValue] @8,88 120x32
+    *ComboBox "Curve" value="Ease" expanded=false [Click,Focus,SetValue] @8,128 160x32
+    Button "Help" desc="Opens the curve editor" [Focus] @8,168 24x24
+    Tooltip "Opens the curve editor" @4,198 147x23

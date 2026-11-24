@@ -6,7 +6,7 @@
 //! renderer-agnostic paint list.
 //!
 //! ```
-//! use livspeil_ui_core::{App, Element, Model, Render, TestHost, ViewContext, div, text, widgets};
+//! use livspeil_ui_core::{App, Element, Model, Render, TestHost, ViewContext, div, text};
 //! use livspeil_ui_layout::Size;
 //!
 //! struct Counter {
@@ -21,12 +21,19 @@
 //!             .flex_col()
 //!             .gap(8.0)
 //!             .child(text(format!("Count: {n}")))
-//!             .child(widgets::button(cx.theme(), "Increment").key("inc").on_click(move |_, cx| {
-//!                 count.update(cx, |c, cx| {
-//!                     *c += 1;
-//!                     cx.notify();
-//!                 });
-//!             }))
+//!             .child(
+//!                 div()
+//!                     .key("inc")
+//!                     .size(120.0, 32.0)
+//!                     .focusable()
+//!                     .child(text("Increment"))
+//!                     .on_click(move |_, cx| {
+//!                         count.update(cx, |c, cx| {
+//!                             *c += 1;
+//!                             cx.notify();
+//!                         });
+//!                     }),
+//!             )
 //!     }
 //! }
 //!
@@ -54,7 +61,6 @@ mod platform;
 mod semantics;
 mod text_measure;
 mod tree;
-pub mod widgets;
 
 pub use anim::{Animatable, Animated, Easing, TransformParts, spring_step};
 pub use app::{
@@ -79,4 +85,4 @@ pub use semantics::{
     ActionSet, Role, SCROLL_INTO_VIEW, SemanticAction, SemanticActionError, SemanticNode,
     SemanticRequest, SemanticValue, Semantics, Toggled, ValueRequest,
 };
-pub use text_measure::TextMeasurer;
+pub use text_measure::{FontFeature, FontSpec, TextMeasurer};

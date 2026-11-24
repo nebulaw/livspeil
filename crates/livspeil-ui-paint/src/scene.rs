@@ -291,7 +291,7 @@ fn text_run(
     layer: i32,
     list: &mut DisplayList,
 ) -> Result<(), PaintError> {
-    let style = TextStyle::sized(t.size);
+    let style = crate::text::text_style(&t.font);
     // Labels are laid out at their measured width; only wrap when the box
     // is narrower than the text (a paragraph given a width by its view).
     let natural = text.natural_width(&t.text, &style);

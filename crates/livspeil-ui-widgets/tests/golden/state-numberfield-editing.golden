@@ -43,7 +43,7 @@ quad fill 12,134 39x4 r=2 fill=oklch(0.68 0.16 255 / 0.7)
 transform [1 0 0 1 31.2 0]
   quad thumb 12,128 16x16 r=8 fill=oklch(1 0 0 / 1) border=1 oklch(0.68 0.16 255 / 1) shadow=E1
 pop
-text value 140,128 14x17 "30" size=13 color=oklch(0.97 0 0 / 0.62)
+text value 140,128 14x17 "30" size=13 features=tnum=1 color=oklch(0.97 0 0 / 0.62)
 quad number 162,120 120x32 r=6 fill=oklch(0.2 0.01 265 / 1) border=1 oklch(0.68 0.16 255 / 1)
 clip 162,120 120x32 r=6
   quad selection-0 174,128 29x16 fill=oklch(0.68 0.16 255 / 0.35)

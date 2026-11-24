@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Livspeil contributors
 // SPDX-License-Identifier: MPL-2.0
 
-//! AccessKit trees from a sample view with the proof widgets: structure,
+//! AccessKit trees from a sample view with `livspeil-ui-widgets`: structure,
 //! incremental updates, focus, action round trips, hidden/disabled and a
 //! property test over random mutations.
 
@@ -11,12 +11,12 @@ use std::path::{Path, PathBuf};
 use accesskit::{Action, ActionData, ActionRequest, Node, NodeId, TreeId, TreeUpdate};
 use livspeil_testkit::assert_golden;
 use livspeil_ui_a11y::{A11yError, A11yTree, handle_action, node_id};
-use livspeil_ui_core::widgets::{Slider, button, toggle};
 use livspeil_ui_core::{
     App, Element, ElementId, Model, Render, Role, SemanticActionError, SemanticValue, TestHost,
     View, ViewContext, div, text,
 };
 use livspeil_ui_layout::Size;
+use livspeil_ui_widgets::{Button, Slider, Toggle};
 use proptest::prelude::*;
 
 fn golden_dir() -> PathBuf {
@@ -55,36 +55,41 @@ impl Render for Demo {
             .child(text(st.status.clone()).name("status"))
             .child(text(format!("Count: {n}")).name("count"))
             .child(
-                button(&theme, "Increment")
-                    .key("inc")
+                Button::new("Increment")
                     .on_click(move |_, cx| {
                         count.update(cx, |c, cx| {
                             *c += 1;
                             cx.notify();
                         });
-                    }),
+                    })
+                    .render(&theme)
+                    .key("inc"),
             )
             .child(
-                button(&theme, "Delete")
-                    .key("delete")
-                    .semantics(|s| s.disabled(st.disabled).description("Removes it"))
+                Button::new("Delete")
+                    .destructive()
+                    .disabled(st.disabled)
                     .on_click(move |_, cx| {
                         count.update(cx, |c, cx| {
                             *c -= 100;
                             cx.notify();
                         });
-                    }),
+                    })
+                    .render(&theme)
+                    .key("delete")
+                    .semantics(|s| s.description("Removes it")),
             )
             .child(
-                toggle(&theme, is_on)
-                    .key("wifi")
-                    .semantics(|s| s.label("Wi-Fi"))
-                    .on_click(move |_, cx| {
-                        on.update(cx, |v, cx| {
-                            *v = !*v;
+                Toggle::new(is_on)
+                    .on_change(move |v, cx| {
+                        on.update(cx, |o, cx| {
+                            *o = v;
                             cx.notify();
                         });
-                    }),
+                    })
+                    .render(&theme)
+                    .key("wifi")
+                    .semantics(|s| s.label("Wi-Fi")),
             )
             .child(Element::view(&self.slider))
             .child(
@@ -143,9 +148,7 @@ impl Fixture {
         let count = app.new_model(0);
         let on = app.new_model(false);
         let value = app.new_model(50.0_f32);
-        let mut slider = Slider::new(value, 0.0, 100.0, 5.0);
-        slider.label = Some("Volume".into());
-        let slider = app.new_view(slider);
+        let slider = app.new_view(Slider::new(value, 0.0, 100.0, 5.0).label("Volume"));
         let demo = app.new_view(Demo {
             state,
             count,

@@ -2,7 +2,7 @@
 
 An Arch-based operating system whose desktop is a scene you author: 2D or 3D, built from **Charms** (typed-port node-graph widgets), edited in place in **Dream Mode** and used in **Live Mode**. Think Houdini/Blender/Affinity-grade tools as the substrate, not a set of example scenes.
 
-Status: **Phase 0 (kernel)**. This repository currently holds the headless, cross-platform kernel scaffold (milestone M0.1). Nothing here needs a GPU or a window, and everything builds on macOS and Linux.
+Status: **Phase 0 (kernel) and Phase 1 (UI toolkit)**. This repository holds the headless, cross-platform kernel and the Livspeil UI crates (state and views, layout, theme, rendering, text, widgets, accessibility and a desktop host). The kernel needs no GPU or window; the UI crates are tested headlessly too (CPU reference rasterizer, `TestHost`). Everything builds on macOS and Linux.
 
 ## Layout
 
@@ -16,11 +16,22 @@ Status: **Phase 0 (kernel)**. This repository currently holds the headless, cros
 | `crates/livspeil-nodes-core` | Core nodes: math, logic, vector, time, sky, color, text (M0.6), subnet and output nodes (M0.7), tables, ramps and fs (M0.8), events (M0.10) |
 | `crates/livspeil-testkit` | Golden-file harness |
 | `crates/livspeil-script` | Script worker host: out-of-process scripts, capabilities, limits (M0.14) |
+| `crates/livspeil-wasm-host` | Sandboxed WebAssembly node packages (third-party Charms in process) |
 | `crates/livspeil-cli` | `livspeil` headless command line (`validate`, `fmt`, `cook`, `diff`, `assets`, `run`) |
+| `crates/livspeil-ui-core` | UI core: models, views, element diffing, input and focus, animation driver, frame loop, paint list (MPL-2.0, like every UI crate) |
+| `crates/livspeil-ui-layout` | Geometry, Taffy flex/grid/block layout over a retained tree, dock and infinite-canvas layouts |
+| `crates/livspeil-ui-theme` | Design tokens, materials, motion profiles, theme/motion config loading and hot reload |
+| `crates/livspeil-ui-render` | Display list, wgpu renderer (quads, materials with backdrop blur, glyphs) and CPU reference rasterizer |
+| `crates/livspeil-ui-text` | Text shaping, layout, editing model and glyph atlas (on Parley) |
+| `crates/livspeil-ui-paint` | Paint bridge: core scenes to display lists, cached text shaping and glyph atlas uploads |
+| `crates/livspeil-ui-widgets` | Widgets: buttons, toggles, check boxes, radios, segmented control, slider, number and text fields, select, tooltip |
+| `crates/livspeil-ui-a11y` | Accessibility: incremental AccessKit trees from the UI core and action routing |
+| `crates/livspeil-ui-shot` | Headless screenshots of UI scenes and the golden-image diff harness |
+| `crates/livspeil-ui-host-winit` | Desktop host: winit window, wgpu surface, frame pacing, input and IME (macOS first) |
 | `sdk/python` | Python SDK for scripts (MPL-2.0, standard library only) |
 | `xtask` | Project automation (`cargo xtask check`) |
 | `specs/` | Design specs |
-| `docs/` | Licensing and contribution documentation |
+| `docs/` | Licensing, contribution and component documentation (nodes, scripting, UI host, widgets, accessibility, known upstream issues) |
 
 ## Command line
 

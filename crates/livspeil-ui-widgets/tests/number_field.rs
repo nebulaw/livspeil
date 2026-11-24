@@ -221,7 +221,7 @@ fn keyboard_steps_and_semantics() {
         assert!((v(&f) - want).abs() < 1e-9, "{k}: {} != {want}", v(&f));
     }
     let node = f.h.app.semantic_node(id).unwrap();
-    assert_eq!(node.role(), Some(Role::Slider));
+    assert_eq!(node.role(), Some(Role::SpinButton));
     assert_eq!(node.label(), Some("X"));
     f.h.app
         .perform_semantic_action(

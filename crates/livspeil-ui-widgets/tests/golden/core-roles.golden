@@ -1,0 +1,14 @@
+Button -> Button
+Switch -> Switch
+CheckBox -> CheckBox
+RadioGroup -> RadioGroup
+  RadioButton -> RadioButton
+SegmentedControl -> TabList
+  Segment -> Tab
+Tooltip -> Tooltip
+Label -> Label
+Slider -> Slider
+SpinButton -> SpinButton
+TextInput -> TextInput
+ComboBox -> ComboBox
+  ListBoxOption -> ListBoxOption

@@ -285,7 +285,7 @@ fn popup(view: View<Select>, app: &App, appearing: bool) -> Vec<Element> {
         .scale(if appearing { 0.97 } else { 1.0 })
         .translate(Vec2::new(0.0, if appearing { -4.0 } else { 0.0 }))
         .transition(MotionClass::Standard)
-        .semantics(|x| x.role(livspeil_ui_core::Role::List));
+        .semantics(|x| x.role(livspeil_ui_core::Role::ListBox));
     for (i, label) in s.options.iter().enumerate() {
         let enabled = s.enabled[i];
         let hl = s.highlighted == Some(i);

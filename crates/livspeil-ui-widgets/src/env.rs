@@ -13,7 +13,7 @@ use livspeil_ui_core::{
     App, Element, ElementId, EntityId, EventCx, Model, Phase, PointerFilter, Render, View,
     ViewContext, actions, div,
 };
-use livspeil_ui_layout::{Style, taffy};
+use livspeil_ui_layout::Rect;
 use livspeil_ui_text::FontSystem;
 
 use crate::keymap;
@@ -67,10 +67,6 @@ pub(crate) enum OverlayPhase {
 /// Builds a popup's elements in window coordinates (direct, absolutely
 /// positioned children of the overlay layer); `appearing` is true for the
 /// first render (initial look).
-///
-/// They are not wrapped in a common absolute container: taffy 0.16 keeps
-/// stale hoisted keys when an absolute subtree containing further absolute
-/// boxes is removed.
 pub(crate) type PopupBuilder = Rc<dyn Fn(&App, bool) -> Vec<Element>>;
 
 #[derive(Clone)]
@@ -289,16 +285,6 @@ impl Env {
     }
 }
 
-/// Place a child in the single cell of the root grid.
-fn cell(s: &mut Style) {
-    let one = || taffy::Line {
-        start: taffy::style_helpers::line(1),
-        end: taffy::GridPlacement::Auto,
-    };
-    s.grid_row = one();
-    s.grid_column = one();
-}
-
 /// The root view: content plus the overlay layer (popups and tooltips are
 /// painted and hit-tested above everything else), and focus tracking for
 /// focus-aware widgets.
@@ -365,19 +351,6 @@ impl Render for WidgetRoot {
             .name("widget-root")
             .w_full()
             .h_full()
-            .style(|s| {
-                // A 1×1 grid: content and the overlay layer share the cell,
-                // so the overlay covers the content without being absolutely
-                // positioned (taffy 0.16 keeps stale hoisted keys when an
-                // absolute child of an absolute box is removed).
-                s.display = taffy::Display::Grid;
-                s.grid_template_rows = vec![taffy::GridTemplateComponent::Single(
-                    taffy::style_helpers::fr(1.0),
-                )];
-                s.grid_template_columns = vec![taffy::GridTemplateComponent::Single(
-                    taffy::style_helpers::fr(1.0),
-                )];
-            })
             .tab_index(-1)
             .on_pointer(PointerFilter::Down, Phase::Capture, move |_, cx| {
                 e1.sync_focus(cx);
@@ -404,7 +377,6 @@ impl Render for WidgetRoot {
             .child(
                 div()
                     .key("content")
-                    .style(cell)
                     .w_full()
                     .h_full()
                     .hit_test(false)
@@ -413,9 +385,7 @@ impl Render for WidgetRoot {
             .child(
                 div()
                     .key("overlay")
-                    .style(cell)
-                    .w(viewport.width)
-                    .h(viewport.height)
+                    .absolute(Rect::new(0.0, 0.0, viewport.width, viewport.height))
                     .hit_test(false)
                     .children(layer),
             )

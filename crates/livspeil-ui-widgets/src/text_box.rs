@@ -122,12 +122,6 @@ impl TextBox {
         }
     }
 
-    /// The layout of the display text (call [`TextBox::refresh`] first).
-    #[allow(dead_code)]
-    pub(crate) fn layout(&self) -> &TextLayout {
-        &self.cache.layout
-    }
-
     /// Caret x in layout coordinates.
     pub(crate) fn caret_x(&self) -> Option<f32> {
         self.editor.display_caret().map(|c| {

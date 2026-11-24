@@ -57,12 +57,29 @@ pub enum Role {
     CheckBox,
     /// An on/off switch (`checked` holds its state).
     Switch,
+    /// A radio button (`checked` holds whether it is the chosen one).
+    RadioButton,
+    /// A group of [`Role::RadioButton`]s (one choice).
+    RadioGroup,
     /// A slider (numeric value with min/max/step).
     Slider,
     /// A progress indicator (numeric value).
     ProgressIndicator,
+    /// A numeric field stepped with the keyboard (ARIA `spinbutton`;
+    /// numeric value with min/max/step).
+    SpinButton,
     /// Single-line text input.
     TextInput,
+    /// A collapsed select that opens a [`Role::ListBox`] (ARIA
+    /// `combobox`; `expanded` holds whether the popup is open, the value
+    /// is the chosen option's text).
+    ComboBox,
+    /// A list of options to choose from (a select's popup).
+    ListBox,
+    /// An option of a [`Role::ListBox`] (`selected` holds its state).
+    ListBoxOption,
+    /// A tooltip (its label is the tip text).
+    Tooltip,
     /// An image (`label` is its alternative text).
     Image,
     /// A list.
@@ -95,9 +112,14 @@ impl Role {
                 | Role::Link
                 | Role::CheckBox
                 | Role::Switch
+                | Role::RadioButton
                 | Role::Slider
+                | Role::SpinButton
                 | Role::ProgressIndicator
                 | Role::TextInput
+                | Role::ComboBox
+                | Role::ListBoxOption
+                | Role::Tooltip
                 | Role::Image
                 | Role::Label
                 | Role::Heading

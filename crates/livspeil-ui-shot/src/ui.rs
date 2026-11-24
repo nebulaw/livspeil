@@ -5,31 +5,21 @@
 //! `TestHost`, laid out with the bridge's text measurer) painted through
 //! `livspeil-ui-paint`, with the bundled fonts only (deterministic).
 
-use livspeil_ui_core::widgets::{Slider, button, toggle};
 use livspeil_ui_core::{
-    App, Element, ElementId, Fill, Model, PaintCmd, Quad, Render, Scene as CoreScene, TestHost,
-    View, ViewContext, div, text,
+    App, Element, ElementId, Fill, FontFeature, Model, PaintCmd, Quad, Render, Scene as CoreScene,
+    TestHost, View, ViewContext, div, text,
 };
 use livspeil_ui_layout::{Corners, Rect, Size, Transform2D, Vec2};
-use livspeil_ui_paint::{FontSystem, PaintBridge, TextItem};
+use livspeil_ui_paint::{FontSystem, PaintBridge};
 use livspeil_ui_render::{Color, DisplayList};
-use livspeil_ui_text::{FontFeature, TextStyle};
 use livspeil_ui_theme::{Color as ThemeColor, Material, Theme};
+use livspeil_ui_widgets::{Button, Slider, Toggle};
 
 use crate::ShotError;
 use crate::scenes::{Scene, Shot, surface};
 
 fn paint_err(e: impl std::fmt::Display) -> ShotError {
     ShotError::Scene(e.to_string())
-}
-
-fn rcolor(c: ThemeColor) -> Color {
-    Color {
-        l: c.l,
-        a: c.a,
-        b: c.b,
-        alpha: c.alpha,
-    }
 }
 
 /// Mounts `view` in a fresh app measured by `bridge`, applies `drive`,
@@ -94,8 +84,10 @@ struct ButtonCell {
 impl Render for ButtonCell {
     fn render(&mut self, cx: &mut ViewContext<'_, Self>) -> Element {
         let theme = cx.theme().clone();
-        let b = button(&theme, "Apply").key("b");
-        let b = if self.disabled { b.opacity(0.4) } else { b };
+        let b = Button::new("Apply")
+            .disabled(self.disabled)
+            .render(&theme)
+            .key("b");
         div()
             .size(112.0, 84.0)
             .flex_col()
@@ -161,12 +153,12 @@ impl Render for Controls {
             .gap(8.0)
             .child(
                 row()
-                    .child(toggle(&theme, !self.off).key("t1"))
+                    .child(Toggle::new(!self.off).render(&theme).key("t1"))
                     .child(caption("Snap to grid")),
             )
             .child(
                 row()
-                    .child(toggle(&theme, self.off).key("t2"))
+                    .child(Toggle::new(self.off).render(&theme).key("t2"))
                     .child(caption("Reduce motion")),
             )
             .child(row().child(Element::view(&self.a)).child(caption("30%")))
@@ -176,9 +168,7 @@ impl Render for Controls {
 
 fn slider(app: &mut App, v: f32) -> View<Slider> {
     let m: Model<f32> = app.new_model(v);
-    let mut s = Slider::new(m, 0.0, 1.0, 0.01);
-    s.width = 200.0;
-    app.new_view(s)
+    app.new_view(Slider::new(m, 0.0, 1.0, 0.01).width(200.0))
 }
 
 fn toggle_slider(scale: f32) -> Result<Shot, ShotError> {
@@ -204,6 +194,44 @@ const PARAGRAPH: &str = "Dream Mode edits the scene; Live Mode uses it. Every \
 
 struct TextSamples;
 
+/// Inter weights and proportional vs tabular digits, as core text elements
+/// with a font weight and the `tnum` feature.
+fn weights_and_digits(theme: &Theme) -> Element {
+    let c = theme.colors();
+    let mut block = div().flex_col().h(118.0);
+    for (w, label) in [
+        (400.0, "Regular 400"),
+        (500.0, "Medium 500"),
+        (600.0, "Semibold 600"),
+    ] {
+        block = block.child(
+            div()
+                .h(22.0)
+                .child(text(label).font_size(15.0).font_weight(w)),
+        );
+    }
+    for (tnum, label) in [(false, "proportional"), (true, "tnum")] {
+        let digits = text("1111.11  8888.88").font_size(13.0);
+        let digits = if tnum {
+            digits.font_feature(FontFeature::TNUM)
+        } else {
+            digits
+        };
+        block = block.child(
+            div()
+                .h(20.0)
+                .flex_row()
+                .child(div().w(150.0).child(digits))
+                .child(
+                    div()
+                        .style(|s| s.padding.top = livspeil_ui_layout::style::length(2.0))
+                        .child(text(label).font_size(11.0).text_color(c.text_secondary)),
+                ),
+        );
+    }
+    block
+}
+
 impl Render for TextSamples {
     fn render(&mut self, cx: &mut ViewContext<'_, Self>) -> Element {
         let theme = cx.theme().clone();
@@ -223,9 +251,7 @@ impl Render for TextSamples {
                     .flex_col()
                     .gap(8.0)
                     .w(250.0)
-                    // Room for the weight and digit samples drawn by
-                    // `text_samples` (the core has no weights yet).
-                    .child(div().h(118.0))
+                    .child(weights_and_digits(&theme))
                     .child(text("ქართული ენა · გამარჯობა").font_size(15.0))
                     .child(text("Livspeil: مرحبا بالعالم 2026").font_size(15.0))
                     .child(
@@ -242,53 +268,7 @@ impl Render for TextSamples {
 fn text_samples(scale: f32) -> Result<Shot, ShotError> {
     let bridge = PaintBridge::new(FontSystem::test());
     let scene = settle(&bridge, |_| TextSamples, Size::new(640.0, 380.0), |_| {})?;
-    let theme = Theme::default();
-    let primary = rcolor(theme.colors().text_primary);
-    let secondary = rcolor(theme.colors().text_secondary);
-    finish(bridge, &scene, scale, |bridge, list| {
-        let x = 16.0 + 330.0 + 16.0;
-        let mut y = 16.0;
-        for (w, label) in [
-            (400.0, "Regular 400"),
-            (500.0, "Medium 500"),
-            (600.0, "Semibold 600"),
-        ] {
-            let style = TextStyle::sized(15.0).with_weight(w);
-            bridge
-                .draw_text(
-                    &TextItem::new(label, &style, (x, y), primary),
-                    scale,
-                    0,
-                    list,
-                )
-                .map_err(paint_err)?;
-            y += 22.0;
-        }
-        let digits = "1111.11  8888.88";
-        let prop = TextStyle::sized(13.0);
-        let tnum = TextStyle::sized(13.0).with_feature(FontFeature::TNUM);
-        for (style, label) in [(&prop, "proportional"), (&tnum, "tnum")] {
-            bridge
-                .draw_text(
-                    &TextItem::new(digits, style, (x, y), primary),
-                    scale,
-                    0,
-                    list,
-                )
-                .map_err(paint_err)?;
-            let small = TextStyle::sized(11.0);
-            bridge
-                .draw_text(
-                    &TextItem::new(label, &small, (x + 150.0, y + 2.0), secondary),
-                    scale,
-                    0,
-                    list,
-                )
-                .map_err(paint_err)?;
-            y += 20.0;
-        }
-        Ok(())
-    })
+    finish(bridge, &scene, scale, |_, _| Ok(()))
 }
 
 // ---- frost-sidebar ----
@@ -401,7 +381,7 @@ pub fn scenes() -> Vec<Scene> {
     [
         pair(
             ["button-states-1x", "button-states-2x"],
-            "Button from core: rest, hover, pressed, focused, disabled",
+            "Button (livspeil-ui-widgets): rest, hover, pressed, focused, disabled",
             576,
             100,
             button_states,

@@ -6,7 +6,7 @@
 //! and fully cold (reshaping and rasterizing every glyph).
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use livspeil_ui_core::{Border, ElementId, Fill, PaintCmd, Quad, Scene, TextRun};
+use livspeil_ui_core::{Border, ElementId, Fill, FontSpec, PaintCmd, Quad, Scene, TextRun};
 use livspeil_ui_layout::{Corners, Rect};
 use livspeil_ui_paint::{FontSystem, PaintBridge};
 use livspeil_ui_render::DisplayList;
@@ -36,7 +36,7 @@ fn scene() -> Scene {
             element: ElementId::ROOT,
             rect: Rect::new(x, y, 170.0, 16.0),
             text: format!("{} {}", words[i as usize % words.len()], i).into(),
-            size: if i % 3 == 0 { 12.0 } else { 13.0 },
+            font: FontSpec::sized(if i % 3 == 0 { 12.0 } else { 13.0 }),
             color: Color::WHITE,
         }));
     }
