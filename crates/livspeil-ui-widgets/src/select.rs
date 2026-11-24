@@ -257,7 +257,7 @@ fn highlight(view: View<Select>, cx: &mut App, f: impl FnOnce(&Select) -> Option
 }
 
 /// The popup (scrim + list) in window coordinates.
-fn popup(view: View<Select>, app: &App, appearing: bool) -> Element {
+fn popup(view: View<Select>, app: &App, appearing: bool) -> Vec<Element> {
     let s = view.read(app);
     let theme = app.theme();
     let m = metrics(theme);
@@ -274,7 +274,7 @@ fn popup(view: View<Select>, app: &App, appearing: bool) -> Element {
     let x = s.anchor.x.min(vp.width - 4.0 - w).max(4.0);
     let sem = s.semantics(app);
     let mut list = div()
-        .key("listbox")
+        .key(format!("listbox-{:?}", view.id()))
         .name("listbox")
         .absolute(Rect::new(x, y, w, h))
         .flex_col()
@@ -333,20 +333,15 @@ fn popup(view: View<Select>, app: &App, appearing: bool) -> Element {
         }
         list = list.child(row);
     }
-    div()
-        .key(format!("popup-{:?}", view.id()))
+    let scrim = div()
+        .key(format!("scrim-{:?}", view.id()))
+        .name("scrim")
         .absolute(Rect::new(0.0, 0.0, vp.width, vp.height))
-        .hit_test(false)
-        .child(
-            div()
-                .key("scrim")
-                .absolute(Rect::new(0.0, 0.0, vp.width, vp.height))
-                .on_pointer_down(move |_, cx| {
-                    close(view, cx, false);
-                    cx.stop_propagation();
-                }),
-        )
-        .child(list)
+        .on_pointer_down(move |_, cx| {
+            close(view, cx, false);
+            cx.stop_propagation();
+        });
+    vec![scrim, list]
 }
 
 impl Render for Select {
