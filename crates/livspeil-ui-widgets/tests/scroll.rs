@@ -173,7 +173,7 @@ fn list_host(rows: usize) -> (TestHost, View<ScrollView>) {
     let mut out = None;
     let (h, _) = host_sized(Size::new(300.0, 400.0), |app, env| {
         let list = app.new_view(
-            VirtualList::new(env, rows, 20.0, |_, i| text(format!("Row {i}")))
+            VirtualList::build(env, rows, 20.0, |_, i| text(format!("Row {i}")))
                 .name("list")
                 .label("Rows"),
         );

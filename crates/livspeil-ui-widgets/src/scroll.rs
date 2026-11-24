@@ -286,7 +286,7 @@ impl Scroller {
             self.tracker.reset();
             self.tracker.push(time, self.raw);
         }
-        self.raw = self.raw - Vec2::new(delta.x * m.x, delta.y * m.y);
+        self.raw -= Vec2::new(delta.x * m.x, delta.y * m.y);
         // Without rubber band the gesture cannot build up overscroll.
         if !p.rubber_band {
             self.raw = self.clamp(self.raw);
@@ -918,7 +918,7 @@ impl VirtualList {
     /// A scroll view over `count` rows built by `row` (called only for
     /// visible rows; the row is placed and sized by the list).
     #[must_use]
-    pub fn new(
+    pub fn build(
         env: &Env,
         count: usize,
         row_height: f32,

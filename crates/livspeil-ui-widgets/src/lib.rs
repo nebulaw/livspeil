@@ -62,6 +62,7 @@ mod dock;
 mod env;
 pub mod keymap;
 mod label;
+mod menu;
 mod number_field;
 mod scroll;
 mod segmented;
@@ -79,6 +80,11 @@ pub use dock::{DockView, PANEL_SCOPE, Panel, PanelMaterial, SlotFn};
 pub use env::{Clipboard, Env, MemoryClipboard, WidgetRoot};
 pub use keymap::{WIDGET_KEYMAP, keymap};
 pub use label::{Label, Tone};
+pub use menu::{
+    ContextMenu, Menu, MenuAnchor, MenuBar, MenuCallback, MenuEntry, MenuItem, MenuPopup,
+    SUBMENU_DELAY, close_menu, format_keystroke, open_menu, place_below, place_menu, place_submenu,
+    shortcut_for,
+};
 pub use number_field::{NumberField, Scrub, scrub_precision};
 pub use scroll::{
     OVERSCAN, SCROLL_SCOPE, ScrollAxis, ScrollContent, ScrollInfo, ScrollPhysics, ScrollView,
