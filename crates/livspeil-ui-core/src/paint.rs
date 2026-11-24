@@ -331,8 +331,16 @@ fn paint_node(input: &PaintInput<'_>, id: ElementId, scene: &mut Scene, stats: &
             color: t.color.unwrap_or(input.theme.colors().text_primary),
         }));
     }
+    let o = node.bounds.origin();
     for w in &node.wires {
-        cmds.push(PaintCmd::Wire(crate::wire::Wire { element: id, ..*w }));
+        cmds.push(PaintCmd::Wire(crate::wire::Wire {
+            element: id,
+            from: w.from + o,
+            c1: w.c1 + o,
+            c2: w.c2 + o,
+            to: w.to + o,
+            ..*w
+        }));
     }
 
     if !node.children.is_empty() {

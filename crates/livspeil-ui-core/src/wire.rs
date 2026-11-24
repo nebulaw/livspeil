@@ -3,9 +3,10 @@
 
 //! Wires: stroked cubic Bézier curves (node editor links, connectors).
 //!
-//! An element carries wires with [`Element::wires`]; they are painted in
-//! the element's coordinate space (so under a canvas's pan/zoom) after its
-//! background and before its children, as [`PaintCmd::Wire`]s. Renderers
+//! An element carries wires with [`Element::wires`] in coordinates
+//! relative to its top-left corner; they are painted (offset to window
+//! space, under any enclosing transform such as a canvas's pan/zoom) after
+//! its background and before its children, as [`PaintCmd::Wire`]s. Renderers
 //! flatten them with [`Wire::flatten`] into short segments and stroke each
 //! as a thin rotated quad with round ends (`livspeil-ui-paint`).
 //!
@@ -143,8 +144,9 @@ fn segment_distance(p: Point, a: Point, b: Point) -> f32 {
 }
 
 impl Element {
-    /// Wires to paint in this element's space, above its background and
-    /// below its children. Replaces earlier wires.
+    /// Wires to paint, in coordinates relative to this element's top-left,
+    /// above its background and below its children. Replaces earlier
+    /// wires.
     #[must_use]
     pub fn wires(mut self, wires: Vec<Wire>) -> Self {
         self.wires = wires;

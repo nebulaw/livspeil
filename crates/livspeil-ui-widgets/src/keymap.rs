@@ -98,6 +98,10 @@ pub const WIDGET_KEYMAP: &str = r#"
 "right" = "menu.right"
 "left" = "menu.left"
 
+[contexts.NodeCanvas]
+"ctrl-a" = "edit.select_all"
+"cmd-a" = "edit.select_all"
+
 [contexts.MenuBar]
 "right" = "ui.next"
 "left" = "ui.prev"

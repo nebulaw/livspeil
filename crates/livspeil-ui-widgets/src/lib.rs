@@ -63,6 +63,7 @@ mod env;
 pub mod keymap;
 mod label;
 mod menu;
+mod node_canvas;
 mod number_field;
 mod scroll;
 mod segmented;
@@ -85,6 +86,12 @@ pub use menu::{
     ContextMenu, Menu, MenuAnchor, MenuBar, MenuCallback, MenuEntry, MenuItem, MenuPopup,
     SUBMENU_DELAY, close_menu, format_keystroke, open_menu, place_below, place_menu, place_submenu,
     shortcut_for,
+};
+pub use node_canvas::{
+    CANVAS_SCOPE, CanvasStats, CardMetrics, DemoGraph, DemoNode, GraphCache, LOD_COMPACT, LOD_FULL,
+    Link, Lod, MINIMAP, NODE_WIDTH, NodeCanvas, NodeGeom, NodeGraphModel, NodeId, PORT_DOT,
+    ParamInfo, ParamValue, PortInfo, PortRef, PortSide, SNAP_RADIUS, WIRE_WIDTH, find_snap,
+    graph_bounds, minimap_mapping, oriented, palette_color, rect_from, rubber_select,
 };
 pub use number_field::{NumberField, Scrub, scrub_precision};
 pub use scroll::{
