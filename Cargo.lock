@@ -1339,6 +1339,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "livspeil-ui-paint"
+version = "0.0.0"
+dependencies = [
+ "criterion",
+ "livspeil-ui-core",
+ "livspeil-ui-layout",
+ "livspeil-ui-render",
+ "livspeil-ui-text",
+ "livspeil-ui-theme",
+]
+
+[[package]]
 name = "livspeil-ui-render"
 version = "0.0.0"
 dependencies = [

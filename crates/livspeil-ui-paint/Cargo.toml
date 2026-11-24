@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: MPL-2.0
+
+[package]
+name = "livspeil-ui-paint"
+description = "Livspeil UI paint bridge: core scenes to render display lists, text shaping and glyph atlas uploads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MPL-2.0"
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+livspeil-ui-core = { path = "../livspeil-ui-core" }
+livspeil-ui-layout = { path = "../livspeil-ui-layout" }
+livspeil-ui-render = { path = "../livspeil-ui-render" }
+livspeil-ui-text = { path = "../livspeil-ui-text" }
+livspeil-ui-theme = { path = "../livspeil-ui-theme" }
+
+[dev-dependencies]
+criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "bridge"
+harness = false
+
+[lints]
+workspace = true
