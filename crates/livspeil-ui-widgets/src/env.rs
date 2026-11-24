@@ -99,7 +99,8 @@ struct EnvInner {
     fonts: RefCell<FontSystem>,
     clipboard: RefCell<Box<dyn Clipboard>>,
     overlay: Model<OverlayState>,
-    focus: Model<Option<ElementId>>,
+    /// The focused element and its name, as of the last sync.
+    focus: Model<Option<(ElementId, String)>>,
 }
 
 /// Shared widget environment. Cheap to clone (a reference-counted handle).
@@ -189,7 +190,7 @@ impl Env {
     /// commit on blur) that focus may have changed. [`WidgetRoot`] calls
     /// this after pointer presses and Tab traversal.
     pub fn sync_focus(&self, app: &mut App) {
-        let now = app.focused();
+        let now = app.focused().map(|f| (f, app.label(f).unwrap_or_default()));
         let model = self.inner.focus;
         if *model.read(app) != now {
             model.update(app, |f, cx| {
@@ -199,13 +200,14 @@ impl Env {
         }
     }
 
-    /// Whether the element named `name` is focused. Reading this in
-    /// `render` re-renders the view when focus changes.
+    /// Whether the element named `name` is focused (as of the last
+    /// [`Env::sync_focus`]; the tree cannot be queried during `render`).
+    /// Reading this in `render` re-renders the view when focus changes.
     pub(crate) fn is_focused(&self, app: &App, name: &str) -> bool {
-        let _ = self.inner.focus.read(app);
-        app.focused()
-            .and_then(|f| app.label(f))
-            .is_some_and(|l| l == name)
+        match self.inner.focus.read(app) {
+            Some((id, label)) => app.focused() == Some(*id) && label == name,
+            None => false,
+        }
     }
 
     pub(crate) fn overlay(&self) -> Model<OverlayState> {

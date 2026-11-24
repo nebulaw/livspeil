@@ -160,14 +160,24 @@ fn toggle_and_checkbox_flip_with_springs_and_mixed_state() {
     h.run_until_idle(300);
     assert!(*on.read(&h.app));
     assert_eq!(
-        h.app.semantic_node(toggle).unwrap().semantics.unwrap().get_checked(),
+        h.app
+            .semantic_node(toggle)
+            .unwrap()
+            .semantics
+            .unwrap()
+            .get_checked(),
         Some(Toggled::On)
     );
 
     // Check box: mixed -> checked -> unchecked; keyboard too.
     let cb = find(&h, "checkbox");
     assert_eq!(
-        h.app.semantic_node(cb).unwrap().semantics.unwrap().get_checked(),
+        h.app
+            .semantic_node(cb)
+            .unwrap()
+            .semantics
+            .unwrap()
+            .get_checked(),
         Some(Toggled::Mixed)
     );
     click(&mut h, "checkbox");
@@ -184,7 +194,9 @@ fn toggle_and_checkbox_flip_with_springs_and_mixed_state() {
     assert!(!h.app.needs_frame());
 }
 
-fn radio_host(disabled_option: Option<usize>) -> (livspeil_ui_core::TestHost, Model<Option<usize>>) {
+fn radio_host(
+    disabled_option: Option<usize>,
+) -> (livspeil_ui_core::TestHost, Model<Option<usize>>) {
     let mut model = None;
     let (h, _) = host(|app, _| {
         let sel = app.new_model(None::<usize>);
@@ -236,10 +248,19 @@ fn radio_group_arrow_keys_wrap_and_skip_disabled() {
     click(&mut h, "radio:Small");
     assert_eq!(*sel.read(&h.app), Some(0));
     let small = find(&h, "radio:Small");
-    let s = h.app.semantic_node(small).unwrap().semantics.unwrap().clone();
+    let s = h
+        .app
+        .semantic_node(small)
+        .unwrap()
+        .semantics
+        .unwrap()
+        .clone();
     assert_eq!(s.get_checked(), Some(Toggled::On));
     assert_eq!(s.get_selected(), Some(true));
-    assert_eq!(h.app.semantic_node(group).unwrap().role(), Some(Role::Group));
+    assert_eq!(
+        h.app.semantic_node(group).unwrap().role(),
+        Some(Role::Group)
+    );
 }
 
 fn segmented_host() -> (livspeil_ui_core::TestHost, Model<usize>) {

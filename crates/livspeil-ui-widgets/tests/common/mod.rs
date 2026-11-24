@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use livspeil_ui_core::{
-    App, Element, ElementId, InputEvent, Modifiers, MouseButton, PointerEvent, PointerKind,
-    Render, TestHost, ViewContext,
+    App, Element, ElementId, InputEvent, Modifiers, MouseButton, PointerEvent, PointerKind, Render,
+    TestHost, ViewContext,
 };
 use livspeil_ui_layout::{Point, Size};
 use livspeil_ui_widgets::Env;
@@ -50,7 +50,9 @@ pub fn host_sized(size: Size, setup: impl FnOnce(&mut App, &Env) -> Build) -> (T
 }
 
 pub fn find(h: &TestHost, name: &str) -> ElementId {
-    h.app.find(name).unwrap_or_else(|| panic!("no element {name}\n{}", h.app.dump_tree()))
+    h.app
+        .find(name)
+        .unwrap_or_else(|| panic!("no element {name}\n{}", h.app.dump_tree()))
 }
 
 pub fn center(h: &TestHost, name: &str) -> Point {
