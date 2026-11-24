@@ -26,7 +26,7 @@ pub type SharedString = Rc<str>;
 
 /// Stable identity of an element: a hash of its parent's id and its key
 /// (or its position among unkeyed siblings). Used for diffing, focus,
-/// animations, per-element state and (later) accessibility.
+/// animations, per-element state and accessibility node ids.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ElementId(pub u64);
 

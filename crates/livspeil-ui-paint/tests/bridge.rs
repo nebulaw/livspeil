@@ -49,7 +49,8 @@ fn glyph_runs(list: &DisplayList) -> usize {
 fn core_view_paints_quads_and_text_with_cached_layouts() {
     let mut bridge = PaintBridge::new(FontSystem::test());
     let (host, scene) = demo_scene(&bridge);
-    // Measured, not the placeholder: Inter at 13 px is ~6.5 px per char.
+    // Measured, not the character-count estimate: Inter at 13 px is ~6.5
+    // px per char.
     let hello = host.app.bounds(host.app.find("hello").unwrap()).unwrap();
     assert!(hello.width > 60.0 && hello.width < 110.0, "{hello:?}");
     assert!(hello.height > 13.0 && hello.height < 20.0, "{hello:?}");

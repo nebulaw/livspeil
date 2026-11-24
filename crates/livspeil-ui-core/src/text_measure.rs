@@ -94,7 +94,7 @@ impl fmt::Debug for MeasurerSlot {
         f.write_str(if self.0.is_some() {
             "TextMeasurer"
         } else {
-            "placeholder"
+            "estimate"
         })
     }
 }

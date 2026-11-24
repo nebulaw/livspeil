@@ -41,9 +41,10 @@ pub enum Measure {
     None,
     /// A fixed intrinsic size.
     Fixed(Size),
-    /// Placeholder for text until `livspeil-ui-text` lands: `chars` glyphs
-    /// of average advance `0.55 × font_size`, one line of `line_height`,
-    /// wrapped to the available width.
+    /// A text size estimate for when no shaper is available (the UI core
+    /// uses it for text without an installed text measurer, e.g. headless
+    /// tests): `chars` glyphs of average advance `0.55 × font_size`, lines
+    /// of `line_height`, wrapped to the available width.
     TextPlaceholder {
         /// Number of characters.
         chars: u32,

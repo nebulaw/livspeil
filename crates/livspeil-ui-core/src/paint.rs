@@ -63,7 +63,8 @@ pub struct Quad {
     pub material: Option<(Material, MaterialRecipe)>,
 }
 
-/// A text run. Placeholder until `livspeil-ui-text` provides shaped glyphs.
+/// A text run: unshaped text in its layout box; the renderer shapes it
+/// (`livspeil-ui-paint` with `livspeil-ui-text`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextRun {
     /// The element that painted it.

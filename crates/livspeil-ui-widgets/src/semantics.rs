@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: MPL-2.0
 
 //! ARIA-like semantics of a widget: role, label, value, state and the
-//! actions it supports. Recorded per widget so the accessibility layer
-//! (`livspeil-ui-a11y`, AccessKit) can be wired to it later.
+//! actions it supports. Each widget declares them on its element
+//! ([`Semantics::apply`]), which is what `livspeil-ui-a11y` exposes to
+//! AccessKit.
 
 use std::fmt;
 

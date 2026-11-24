@@ -6,8 +6,8 @@
 //! `livspeil-ui-paint`, with the bundled fonts only (deterministic).
 
 use livspeil_ui_core::{
-    App, Element, ElementId, Fill, FontFeature, Model, PaintCmd, Quad, Render, Scene as CoreScene, TestHost,
-    View, ViewContext, div, text,
+    App, Element, ElementId, Fill, FontFeature, Model, PaintCmd, Quad, Render, Scene as CoreScene,
+    TestHost, View, ViewContext, div, text,
 };
 use livspeil_ui_layout::{Corners, Rect, Size, Transform2D, Vec2};
 use livspeil_ui_paint::{FontSystem, PaintBridge};
@@ -21,7 +21,6 @@ use crate::scenes::{Scene, Shot, surface};
 fn paint_err(e: impl std::fmt::Display) -> ShotError {
     ShotError::Scene(e.to_string())
 }
-
 
 /// Mounts `view` in a fresh app measured by `bridge`, applies `drive`,
 /// runs to idle and returns the settled scene.
@@ -224,11 +223,9 @@ fn weights_and_digits(theme: &Theme) -> Element {
                 .flex_row()
                 .child(div().w(150.0).child(digits))
                 .child(
-                    div().style(|s| s.padding.top = livspeil_ui_layout::style::length(2.0)).child(
-                        text(label)
-                            .font_size(11.0)
-                            .text_color(c.text_secondary),
-                    ),
+                    div()
+                        .style(|s| s.padding.top = livspeil_ui_layout::style::length(2.0))
+                        .child(text(label).font_size(11.0).text_color(c.text_secondary)),
                 ),
         );
     }
