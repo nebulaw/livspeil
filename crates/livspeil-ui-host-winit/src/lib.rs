@@ -29,22 +29,33 @@
 //!
 //! Design notes: `docs/ui-host.md`.
 
+mod accessibility;
 mod error;
 mod host;
 pub mod input;
 mod options;
 pub mod pacing;
+#[cfg(feature = "widgets")]
+mod paint_renderer;
 mod platform;
 mod renderer;
+pub mod widget_platform;
 
+pub use accessibility::Accessibility;
 pub use error::HostError;
-pub use host::{Host, run};
+pub use host::{Host, HostEvent, run};
 pub use options::{
-    HostOptions, SurfaceOptions, Titlebar, WindowOptions, pick_format, surface_config,
+    ActionHook, HostOptions, SurfaceOptions, Titlebar, WindowOptions, pick_format, surface_config,
 };
+#[cfg(feature = "widgets")]
+pub use paint_renderer::{PaintRenderer, clear_color, without_backdrops};
 pub use platform::{
     Clipboard, ImeState, MemoryClipboard, SystemClipboard, cursor_icon, service_clipboard,
 };
 pub use renderer::{RenderTarget, SceneRenderer};
+#[cfg(feature = "widgets")]
+pub use widget_platform::WidgetClipboard;
+
+pub use accesskit_winit;
 
 pub use winit;

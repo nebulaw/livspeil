@@ -3,102 +3,20 @@
 
 //! A window with `livspeil-ui-widgets` (Button, Toggle, Slider) on a Frost
 //! card over a gradient, drawn through `livspeil-ui-paint` (text and
-//! materials) and `livspeil-ui-render`.
+//! materials) and `livspeil-ui-render` with the host's `PaintRenderer`.
+//! Cursor shapes, caret blink, IME, the clipboard and accessibility come
+//! from the host.
 //!
 //! ```sh
 //! cargo run -p livspeil-ui-host-winit --example hello
 //! ```
 
-use livspeil_ui_core::{
-    App, CursorShape, Element, KEYMAP_FILE, Model, Render, Scene, View, ViewContext, div,
-};
-use livspeil_ui_host_winit::{HostError, HostOptions, RenderTarget, SceneRenderer, Titlebar, run};
+use livspeil_ui_core::{App, Element, KEYMAP_FILE, Model, Render, View, ViewContext, div};
+use livspeil_ui_host_winit::{HostOptions, PaintRenderer, Titlebar, WidgetClipboard, run};
 use livspeil_ui_layout::Rect;
 use livspeil_ui_paint::{FontSystem, PaintBridge};
-use livspeil_ui_render as render;
 use livspeil_ui_theme::{Color, ConfigKind, ConfigWatcher, Material, config_dir};
 use livspeil_ui_widgets::{Button, Env, Label, Slider, Toggle, Tone};
-
-/// Draws scenes with the paint bridge: scene to display list plus glyph
-/// atlas uploads, applied to the renderer before each frame.
-struct PaintRenderer {
-    bridge: PaintBridge,
-    clear: render::Color,
-    renderer: Option<(wgpu::TextureFormat, render::Renderer)>,
-}
-
-impl PaintRenderer {
-    fn new(bridge: PaintBridge, clear: render::Color) -> Self {
-        PaintRenderer {
-            bridge,
-            clear,
-            renderer: None,
-        }
-    }
-}
-
-fn renderer_error(e: impl std::error::Error + Send + Sync + 'static) -> HostError {
-    HostError::Renderer(Box::new(e))
-}
-
-/// Surfaces that cannot be sampled get the materials' opaque fallback: each
-/// backdrop becomes a quad of its tint (what T0 and "Reduce transparency"
-/// look like).
-fn without_backdrops(list: &mut render::DisplayList) {
-    for item in &mut list.items {
-        if let render::Primitive::Backdrop(b) = &item.primitive {
-            let mut q = render::Quad::new(b.rect, b.tint.with_alpha(1.0));
-            q.radii = b.radii;
-            q.corners = b.corners;
-            q.shadows = b.shadows.clone();
-            q.clip = b.clip;
-            q.opacity = b.opacity;
-            q.transform = b.transform;
-            item.primitive = render::Primitive::Quad(q);
-        }
-    }
-}
-
-impl SceneRenderer for PaintRenderer {
-    fn render(
-        &mut self,
-        gpu: &render::GpuContext,
-        target: &RenderTarget<'_>,
-        scene: &Scene,
-    ) -> Result<(), HostError> {
-        if self.renderer.as_ref().map(|(f, _)| *f) != Some(target.format) {
-            self.renderer = Some((
-                target.format,
-                render::Renderer::new(&gpu.device, target.format),
-            ));
-            // A new renderer has no atlas texture: upload everything again.
-            self.bridge.text.clear_atlas();
-        }
-        let Some((_, renderer)) = &mut self.renderer else {
-            return Ok(());
-        };
-        let mut list = render::DisplayList::new();
-        let updates = self
-            .bridge
-            .paint_scene(scene, target.scale, &mut list)
-            .map_err(renderer_error)?;
-        if !target.usage.contains(wgpu::TextureUsages::TEXTURE_BINDING) {
-            without_backdrops(&mut list);
-        }
-        renderer.update_atlases(&gpu.device, &gpu.queue, &updates)?;
-        let frame = render::encode(
-            &list,
-            render::FrameOptions {
-                width: target.size_px.0,
-                height: target.size_px.1,
-                scale: target.scale,
-                clear: self.clear,
-            },
-        )?;
-        renderer.render(&gpu.device, &gpu.queue, &frame, target.texture)?;
-        Ok(())
-    }
-}
 
 struct Hello {
     clicks: Model<u32>,
@@ -163,8 +81,7 @@ impl Render for Hello {
                                     cx.notify();
                                 });
                             })
-                            .render(&theme)
-                            .cursor(CursorShape::Pointer),
+                            .render(&theme),
                     ))
                     .child(row(
                         "Toggle".to_owned(),
@@ -176,26 +93,21 @@ impl Render for Hello {
                                     cx.notify();
                                 });
                             })
-                            .render(&theme)
-                            .cursor(CursorShape::Pointer),
+                            .render(&theme),
                     ))
-                    .child(row(
-                        "Slider".to_owned(),
-                        div()
-                            .cursor(CursorShape::Grab)
-                            .child(Element::view(&self.slider)),
-                    )),
+                    .child(row("Slider".to_owned(), Element::view(&self.slider))),
             )
     }
 }
 
 fn main() {
     let mut app = App::new();
-    let bridge = PaintBridge::new(FontSystem::new());
+    let renderer = PaintRenderer::for_theme(PaintBridge::new(FontSystem::new()), app.theme());
     // Layout measures text with the bridge's cache, so labels are shaped
     // once for layout and painting.
-    app.set_text_measurer(bridge.text.measurer());
+    renderer.install_measurer(&mut app);
     let env = Env::new(&mut app, FontSystem::new());
+    WidgetClipboard::install_system(&env);
     let clicks = app.new_model(0_u32);
     let on = app.new_model(false);
     let value = app.new_model(40.0_f32);
@@ -208,8 +120,6 @@ fn main() {
     let root = env.root(&mut app, content);
     app.set_root(root);
 
-    let bg = app.theme().colors().surface[0];
-    let clear = render::Color::oklab(bg.l, bg.a, bg.b).with_alpha(bg.alpha);
     let mut options = HostOptions::default()
         .title("Livspeil: hello")
         .size(720.0, 420.0);
@@ -221,7 +131,7 @@ fn main() {
         watcher.watch(dir.join(KEYMAP_FILE), ConfigKind::Raw("keymap"));
         options = options.config(watcher);
     }
-    if let Err(e) = run(app, PaintRenderer::new(bridge, clear), options) {
+    if let Err(e) = run(app, renderer, options) {
         eprintln!("hello: {e}");
         std::process::exit(1);
     }
