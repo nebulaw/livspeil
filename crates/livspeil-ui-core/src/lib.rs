@@ -51,6 +51,7 @@ mod input;
 mod keymap;
 mod paint;
 mod platform;
+mod semantics;
 mod tree;
 pub mod widgets;
 
@@ -73,3 +74,7 @@ pub use paint::{
     Border, Fill, PaintCmd, PaintStats, Painter, Quad, RecordingPainter, Scene, TextRun,
 };
 pub use platform::{CursorShape, TextInputState};
+pub use semantics::{
+    ActionSet, Role, SCROLL_INTO_VIEW, SemanticAction, SemanticActionError, SemanticNode,
+    SemanticRequest, SemanticValue, Semantics, Toggled, ValueRequest,
+};

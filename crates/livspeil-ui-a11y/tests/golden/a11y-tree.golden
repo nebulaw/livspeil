@@ -1,0 +1,16 @@
+*Window @0,0 400x400
+  Heading "Settings" @8,8 200x17
+  Label value="Ready" @8,29 200x17
+  Label value="Count: 0" @8,50 200x17
+  Button "Increment" [Click,Focus] @8,71 200x32
+  Button "Delete" desc="Removes it" disabled @8,107 200x32
+  Switch "Wi-Fi" toggled=False [Click,Focus] @8,143 36x20
+  Slider "Volume" value=50 range=0..100 step=5 [Focus,Increment,Decrement,SetValue] @8,167 200x20
+  List "Rooms" expanded=true @8,191 200x51
+    ListItem selected=false @8,191 200x17
+      Label value="Hall" @8,191 29x17
+    ListItem selected=true @8,208 200x17
+      Label value="Kitchen" @8,208 50x17
+    ListItem selected=false @8,225 200x17
+      Label value="Study" @8,225 36x17
+  TextInput "Name" value="Ada" [Focus] @8,267 120x20
