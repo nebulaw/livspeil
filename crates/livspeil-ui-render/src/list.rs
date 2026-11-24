@@ -298,18 +298,50 @@ impl Backdrop {
     }
 }
 
-/// A run of glyphs from the glyph atlas. Placeholder: text arrives in M1.2
-/// (`livspeil-ui-text`); this primitive draws nothing yet.
+/// One glyph image: atlas texels drawn into a rectangle.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GlyphSprite {
+    /// Destination in local coordinates (logical pixels). For crisp text
+    /// it covers whole physical pixels and has the texel size divided by
+    /// the frame scale, so texels map 1:1 to pixels.
+    pub rect: Rect,
+    /// Source texels in the atlas `[x, y, width, height]`.
+    pub texels: [u32; 4],
+}
+
+/// A run of glyphs from one R8 coverage atlas (see [`AtlasUpdate`]),
+/// tinted with one color. Coverage is remapped for the text color's
+/// lightness before blending (see the crate docs, "Text").
+///
+/// [`AtlasUpdate`]: crate::AtlasUpdate
 #[derive(Debug, Clone, PartialEq)]
 pub struct Glyphs {
     /// Atlas the glyphs come from.
     pub atlas: u32,
-    /// Glyph ids and their positions in local coordinates.
-    pub glyphs: Vec<(u32, [f32; 2])>,
+    /// The glyph images.
+    pub glyphs: Vec<GlyphSprite>,
     /// Text color.
     pub color: Color,
+    /// Clip rectangle in logical screen coordinates (after the transform).
+    pub clip: Option<Rect>,
+    /// Multiplies the text's alpha.
+    pub opacity: f32,
     /// Local-to-screen transform.
     pub transform: Affine,
+}
+
+impl Glyphs {
+    /// A run with no clip, full opacity and no transform.
+    pub fn new(atlas: u32, glyphs: Vec<GlyphSprite>, color: Color) -> Glyphs {
+        Glyphs {
+            atlas,
+            glyphs,
+            color,
+            clip: None,
+            opacity: 1.0,
+            transform: Affine::IDENTITY,
+        }
+    }
 }
 
 /// An image or icon from a texture atlas. Placeholder: draws nothing yet.
@@ -334,7 +366,7 @@ pub enum Primitive {
     Quad(Quad),
     /// A blurred region.
     Backdrop(Backdrop),
-    /// Text (draws nothing yet).
+    /// Text.
     Glyphs(Glyphs),
     /// An image (draws nothing yet).
     Image(Image),

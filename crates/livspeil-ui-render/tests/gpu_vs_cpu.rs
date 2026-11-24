@@ -5,9 +5,10 @@
 //! exercise every op path. Skipped (with a message) when no adapter exists.
 
 use livspeil_ui_render::{
-    Affine, Backdrop, Border, Color, CornerStyle, DisplayList, Fill, FrameOptions, GpuContext,
-    GradientStop, Highlight, HighlightKind, Quad, Radii, Rect, RenderError, Renderer, RgbaImage,
-    Shadow, TARGET_FORMAT, encode, render_cpu,
+    Affine, AtlasStore, AtlasUpdate, Backdrop, Border, Color, CornerStyle, DisplayList, Fill,
+    FrameOptions, GlyphSprite, Glyphs, GpuContext, GradientStop, Highlight, HighlightKind, Op,
+    Quad, Radii, Rect, RenderError, Renderer, RgbaImage, Shadow, TARGET_FORMAT, encode, render_cpu,
+    render_cpu_with,
 };
 
 fn gpu() -> Option<(GpuContext, Renderer)> {
@@ -238,4 +239,123 @@ fn cpu_reference_basics() {
     let inner = img.pixel(3, 8).unwrap();
     let clear = img.pixel(8, 8).unwrap();
     assert_eq!(inner, clear);
+}
+
+/// A 32x16 atlas with two "glyphs": a ring (0..12) and a soft disc (16..28).
+fn glyph_atlas(generation: u64) -> Vec<AtlasUpdate> {
+    let mut data = vec![0u8; 32 * 16];
+    for y in 0..12 {
+        for x in 0..12 {
+            let (dx, dy) = (x as f32 - 5.5, y as f32 - 5.5);
+            let r = (dx * dx + dy * dy).sqrt();
+            data[y * 32 + x] = ((1.0 - (r - 4.0).abs() / 1.5).clamp(0.0, 1.0) * 255.0) as u8;
+            data[y * 32 + 16 + x] = ((5.5 - r).clamp(0.0, 1.0) * 255.0) as u8;
+        }
+    }
+    // Full upload, then a dirty rect that fills a 2x2 block in a corner.
+    vec![
+        AtlasUpdate {
+            atlas: 0,
+            generation,
+            size: [32, 16],
+            region: [0, 0, 32, 16],
+            data,
+        },
+        AtlasUpdate {
+            atlas: 0,
+            generation,
+            size: [32, 16],
+            region: [26, 10, 2, 2],
+            data: vec![255; 4],
+        },
+    ]
+}
+
+fn glyph_list(scale: f32) -> DisplayList {
+    let s = |v: f32| v / scale;
+    let ring = |x: f32, y: f32| GlyphSprite {
+        rect: Rect::new(s(x), s(y), s(12.0), s(12.0)),
+        texels: [0, 0, 12, 12],
+    };
+    let disc = |x: f32, y: f32| GlyphSprite {
+        rect: Rect::new(s(x), s(y), s(12.0), s(12.0)),
+        texels: [16, 0, 12, 12],
+    };
+    let mut list = DisplayList::new();
+    list.add(Quad::new(Rect::new(0.0, 0.0, 30.0, 60.0), Color::WHITE));
+    list.add(Glyphs::new(
+        0,
+        vec![ring(2.0, 2.0), disc(16.0, 2.0)],
+        Color::BLACK,
+    ));
+    list.add(Quad::new(
+        Rect::new(30.0, 0.0, 34.0, 60.0),
+        Color::oklch(0.3, 0.05, 250.0),
+    ));
+    list.add(Glyphs {
+        opacity: 0.6,
+        clip: Some(Rect::new(0.0, 0.0, 44.0, 64.0)),
+        ..Glyphs::new(
+            0,
+            vec![ring(62.0, 4.0), disc(76.0, 4.0)],
+            Color::oklch(0.9, 0.1, 80.0),
+        )
+    });
+    list.add(Glyphs {
+        transform: Affine::rotate_about(0.4, 40.0, 40.0),
+        ..Glyphs::new(0, vec![ring(70.0, 70.0), disc(90.0, 70.0)], Color::WHITE)
+    });
+    // A second (missing) atlas: draws nothing, but splits the batch.
+    list.add(Glyphs::new(7, vec![ring(2.0, 40.0)], Color::WHITE));
+    list
+}
+
+#[test]
+fn glyphs_gpu_matches_cpu() {
+    for scale in [1.0, 2.0] {
+        let (w, h) = ((64.0 * scale) as u32, (64.0 * scale) as u32);
+        let frame = encode(&glyph_list(scale), opts(w, h, scale)).unwrap();
+        // Quads and glyphs of one atlas batch together; the other atlas
+        // starts a new draw.
+        let draws: Vec<_> = frame
+            .ops
+            .iter()
+            .map(|op| match op {
+                Op::Draw { atlas, .. } => *atlas,
+                Op::Backdrop { .. } => None,
+            })
+            .collect();
+        assert_eq!(draws, vec![Some(0), Some(7)]);
+        let mut store = AtlasStore::new();
+        store.apply_all(&glyph_atlas(0)).unwrap();
+        let cpu = render_cpu_with(&frame, &store);
+        // Texels map 1:1 (sprite rects are given in physical pixels / scale):
+        // the disc's center pixel is fully black on white.
+        assert_eq!(cpu.pixel(21, 7), Some([0, 0, 0, 255]));
+        // Without the atlas no text is drawn.
+        assert_eq!(render_cpu(&frame).pixel(21, 7), Some([255, 255, 255, 255]));
+        let Some((ctx, mut renderer)) = gpu() else {
+            return;
+        };
+        renderer
+            .update_atlases(&ctx.device, &ctx.queue, &glyph_atlas(0))
+            .unwrap();
+        let gpu = ctx.render_to_image(&mut renderer, &frame).unwrap();
+        let (max, over) = diff(&cpu, &gpu);
+        eprintln!("glyphs scale {scale}: max delta {max}, {over} pixels over 4");
+        assert!(
+            over as f64 <= 0.002 * f64::from(w * h),
+            "{over} pixels differ"
+        );
+        // A new generation clears the atlas: only the patched block exists.
+        let mut next = glyph_atlas(1);
+        next.remove(0);
+        renderer
+            .update_atlases(&ctx.device, &ctx.queue, &next)
+            .unwrap();
+        store.apply_all(&next).unwrap();
+        let cpu = render_cpu_with(&frame, &store);
+        let gpu = ctx.render_to_image(&mut renderer, &frame).unwrap();
+        assert!(diff(&cpu, &gpu).0 <= 4);
+    }
 }

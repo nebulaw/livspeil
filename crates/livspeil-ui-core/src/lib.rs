@@ -52,6 +52,7 @@ mod keymap;
 mod paint;
 mod platform;
 mod semantics;
+mod text_measure;
 mod tree;
 pub mod widgets;
 
@@ -78,3 +79,4 @@ pub use semantics::{
     ActionSet, Role, SCROLL_INTO_VIEW, SemanticAction, SemanticActionError, SemanticNode,
     SemanticRequest, SemanticValue, Semantics, Toggled, ValueRequest,
 };
+pub use text_measure::TextMeasurer;

@@ -10,7 +10,8 @@
 //!
 //! It is a reference, not a fast path: it is meant for small test scenes.
 
-use crate::encode::{BlurPlan, Frame, Instance, Op, field, level_size};
+use crate::atlas::AtlasStore;
+use crate::encode::{BlurPlan, Frame, Instance, Op, field, kind, level_size};
 use crate::image::RgbaImage;
 use crate::shade::{self, v4};
 
@@ -58,8 +59,15 @@ impl Level {
     }
 }
 
-/// Renders a frame on the CPU.
+/// Renders a frame on the CPU. Glyphs draw nothing without atlases; use
+/// [`render_cpu_with`] for text.
 pub fn render_cpu(frame: &Frame) -> RgbaImage {
+    render_cpu_with(frame, &AtlasStore::new())
+}
+
+/// Renders a frame on the CPU, sampling glyph coverage from `atlases`
+/// (glyphs of a missing atlas draw nothing).
+pub fn render_cpu_with(frame: &Frame, atlases: &AtlasStore) -> RgbaImage {
     let (w, h) = (frame.options.width, frame.options.height);
     let clear = frame.clear.map(quantize);
     let mut img = RgbaImage::new(w, h);
@@ -69,13 +77,23 @@ pub fn render_cpu(frame: &Frame) -> RgbaImage {
     let scale = frame.options.scale;
     for op in &frame.ops {
         match op {
-            Op::Draw { start, end } => {
+            Op::Draw { start, end, atlas } => {
+                let tex = atlas.and_then(|a| atlases.get(a));
                 for inst in frame
                     .instances
                     .get(*start as usize..*end as usize)
                     .unwrap_or(&[])
                 {
-                    raster(&mut img, inst, scale, |px| shade::shade(inst, px, scale));
+                    if inst[field::XFORM2 + 3] == kind::GLYPH {
+                        let Some(tex) = tex else { continue };
+                        raster(&mut img, inst, scale, |px| {
+                            shade::shade_glyph(inst, px, scale, |x, y| {
+                                f32::from(tex.texel(x, y)) / 255.0
+                            })
+                        });
+                    } else {
+                        raster(&mut img, inst, scale, |px| shade::shade(inst, px, scale));
+                    }
                 }
             }
             Op::Backdrop { instance, blur } => {

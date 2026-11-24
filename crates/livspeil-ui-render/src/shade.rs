@@ -267,6 +267,48 @@ pub(crate) fn shade(inst: &Instance, px: V2, scale: f32) -> V4 {
     [c[0] * k, c[1] * k, c[2] * k, c[3] * k]
 }
 
+/// Remaps glyph coverage `a` for a text color of lightness `l` (see the
+/// crate docs, "Text"); `inv_g` is `1 / TEXT_GAMMA`.
+pub(crate) fn glyph_alpha(a: f32, l: f32, inv_g: f32) -> f32 {
+    let light = a.powf(inv_g);
+    let dark = 1.0 - (1.0 - a).powf(inv_g);
+    dark + (light - dark) * l
+}
+
+/// Output of the quad pipeline for a glyph instance. `texel(x, y)` reads
+/// the atlas (0..1, 0 outside it); texels outside the glyph's own rect
+/// count as empty, so a manual bilinear filter never bleeds.
+pub(crate) fn shade_glyph(
+    inst: &Instance,
+    px: V2,
+    scale: f32,
+    texel: impl Fn(i64, i64) -> f32,
+) -> V4 {
+    let p = local_pos(inst, px, scale);
+    let rect = v4(inst, field::RECT);
+    let t = v4(inst, field::GRAD);
+    let tx = t[0] + (p[0] - rect[0]) / rect[2] * t[2] - 0.5;
+    let ty = t[1] + (p[1] - rect[1]) / rect[3] * t[3] - 0.5;
+    let (x0, y0) = (tx.floor(), ty.floor());
+    let (fx, fy) = (tx - x0, ty - y0);
+    let tap = |x: f32, y: f32| -> f32 {
+        if x < t[0] || y < t[1] || x >= t[0] + t[2] || y >= t[1] + t[3] {
+            0.0
+        } else {
+            texel(x as i64, y as i64)
+        }
+    };
+    let top = tap(x0, y0) + (tap(x0 + 1.0, y0) - tap(x0, y0)) * fx;
+    let bottom = tap(x0, y0 + 1.0) + (tap(x0 + 1.0, y0 + 1.0) - tap(x0, y0 + 1.0)) * fx;
+    let cov = clamp01(top + (bottom - top) * fy);
+    let [l, inv_g, _, _] = v4(inst, field::BORDER);
+    let a = glyph_alpha(cov, l, inv_g)
+        * inst[field::INV2 + 2]
+        * clip_coverage(px, v4(inst, field::CLIP));
+    let c = v4(inst, field::STOPS);
+    [c[0] * a, c[1] * a, c[2] * a, c[3] * a]
+}
+
 /// CSS `saturate()` on gamma sRGB.
 fn saturate(c: [f32; 3], s: f32) -> [f32; 3] {
     let r = (0.213 + 0.787 * s) * c[0] + (0.715 - 0.715 * s) * c[1] + (0.072 - 0.072 * s) * c[2];

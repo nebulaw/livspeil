@@ -1,13 +1,33 @@
 // SPDX-FileCopyrightText: 2026 Livspeil contributors
 // SPDX-License-Identifier: MPL-2.0
 
-//! Named scenes. Tokens are local constants for now (from the UI spec,
-//! section 7); they move to `livspeil-ui-theme` once it lands.
+//! Named scenes. The renderer scenes use local token constants (from the
+//! UI spec, section 7); the UI scenes ([`crate::ui`]) are real core views
+//! painted through `livspeil-ui-paint` with the theme's tokens.
 
 use livspeil_ui_render::{
-    Affine, Backdrop, Border, BorderWidth, Color, CornerStyle, DisplayList, Fill, GradientStop,
-    Highlight, HighlightKind, Quad, Radii, Rect, Shadow,
+    Affine, AtlasUpdate, Backdrop, Border, BorderWidth, Color, CornerStyle, DisplayList, Fill,
+    GradientStop, Highlight, HighlightKind, Quad, Radii, Rect, Shadow,
 };
+
+/// What a scene builds: a display list and the glyph atlas uploads it
+/// needs (empty for scenes without text).
+#[derive(Debug, Clone, Default)]
+pub struct Shot {
+    /// The display list.
+    pub list: DisplayList,
+    /// Atlas uploads to apply before rendering.
+    pub atlas: Vec<AtlasUpdate>,
+}
+
+impl From<DisplayList> for Shot {
+    fn from(list: DisplayList) -> Self {
+        Shot {
+            list,
+            atlas: Vec::new(),
+        }
+    }
+}
 
 /// A named scene: a display list at a fixed logical size and scale.
 #[derive(Debug, Clone, Copy)]
@@ -22,8 +42,9 @@ pub struct Scene {
     pub height: u32,
     /// Physical pixels per logical pixel.
     pub scale: f32,
-    /// Builds the display list.
-    pub build: fn() -> DisplayList,
+    /// Builds the display list for the scene's scale (text is rasterized
+    /// for it).
+    pub build: fn(f32) -> Result<Shot, crate::ShotError>,
     /// Clear color.
     pub clear: fn() -> Color,
 }
@@ -312,14 +333,14 @@ fn dark() -> Color {
 
 /// All scenes, in a stable order.
 pub fn scenes() -> Vec<Scene> {
-    vec![
+    let mut v = vec![
         Scene {
             name: "card-e2",
             description: "a Solid card with e2 shadow and hairline, an e1 chip on it",
             width: 320,
             height: 200,
             scale: 2.0,
-            build: card_e2,
+            build: |_| Ok(card_e2().into()),
             clear: dark,
         },
         Scene {
@@ -328,7 +349,7 @@ pub fn scenes() -> Vec<Scene> {
             width: 480,
             height: 320,
             scale: 1.0,
-            build: frost_panel,
+            build: |_| Ok(frost_panel().into()),
             clear: dark,
         },
         Scene {
@@ -337,7 +358,7 @@ pub fn scenes() -> Vec<Scene> {
             width: 360,
             height: 144,
             scale: 2.0,
-            build: radii_row,
+            build: |_| Ok(radii_row().into()),
             clear: dark,
         },
         Scene {
@@ -346,7 +367,7 @@ pub fn scenes() -> Vec<Scene> {
             width: 176,
             height: 92,
             scale: 1.0,
-            build: hairlines,
+            build: |_| Ok(hairlines().into()),
             clear: dark,
         },
         Scene {
@@ -355,7 +376,7 @@ pub fn scenes() -> Vec<Scene> {
             width: 176,
             height: 92,
             scale: 2.0,
-            build: hairlines,
+            build: |_| Ok(hairlines().into()),
             clear: dark,
         },
         Scene {
@@ -364,10 +385,12 @@ pub fn scenes() -> Vec<Scene> {
             width: 320,
             height: 184,
             scale: 2.0,
-            build: gradients,
+            build: |_| Ok(gradients().into()),
             clear: dark,
         },
-    ]
+    ];
+    v.extend(crate::ui::scenes());
+    v
 }
 
 /// The scene with this name.

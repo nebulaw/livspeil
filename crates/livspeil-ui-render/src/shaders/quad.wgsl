@@ -37,6 +37,8 @@ struct Globals {
 @group(0) @binding(1) var<storage, read> instances: array<Instance>;
 @group(1) @binding(0) var blur_tex: texture_2d<f32>;
 @group(1) @binding(1) var blur_sampler: sampler;
+// R8 coverage atlas for glyph instances (kind 3); read with textureLoad.
+@group(2) @binding(0) var glyph_atlas: texture_2d<f32>;
 
 struct VsOut {
     @builtin(position) position: vec4<f32>,
@@ -267,10 +269,52 @@ fn shade_quad(inst: Instance, p: vec2<f32>, ppu: f32) -> vec4<f32> {
     return fill * shape;
 }
 
+fn glyph_alpha(a: f32, l: f32, inv_g: f32) -> f32 {
+    let light = pow(a, inv_g);
+    let dark = 1.0 - pow(1.0 - a, inv_g);
+    return dark + (light - dark) * l;
+}
+
+fn glyph_tap(x: f32, y: f32, t: vec4<f32>) -> f32 {
+    if x < t.x || y < t.y || x >= t.x + t.z || y >= t.y + t.w {
+        return 0.0;
+    }
+    let size = vec2<i32>(textureDimensions(glyph_atlas));
+    let c = vec2<i32>(i32(x), i32(y));
+    if c.x >= size.x || c.y >= size.y {
+        return 0.0;
+    }
+    return textureLoad(glyph_atlas, c, 0).x;
+}
+
+fn shade_glyph(inst: Instance, px: vec2<f32>) -> vec4<f32> {
+    let p = local_pos(inst, px);
+    let t = inst.grad;
+    let tx = t.x + (p.x - inst.rect.x) / inst.rect.z * t.z - 0.5;
+    let ty = t.y + (p.y - inst.rect.y) / inst.rect.w * t.w - 0.5;
+    let x0 = floor(tx);
+    let y0 = floor(ty);
+    let fx = tx - x0;
+    let fy = ty - y0;
+    let a00 = glyph_tap(x0, y0, t);
+    let a10 = glyph_tap(x0 + 1.0, y0, t);
+    let a01 = glyph_tap(x0, y0 + 1.0, t);
+    let a11 = glyph_tap(x0 + 1.0, y0 + 1.0, t);
+    let top = a00 + (a10 - a00) * fx;
+    let bottom = a01 + (a11 - a01) * fx;
+    let cov = clamp(top + (bottom - top) * fy, 0.0, 1.0);
+    let a = glyph_alpha(cov, inst.border.x, inst.border.y)
+        * inst.inv2.z * clip_coverage(px, inst.clip);
+    return inst.stop0 * a;
+}
+
 @fragment
 fn fs_quad(in: VsOut) -> @location(0) vec4<f32> {
     let inst = instances[in.index];
     let px = in.position.xy;
+    if inst.xform2.w == 3.0 {
+        return shade_glyph(inst, px);
+    }
     let p = local_pos(inst, px);
     let ppu = inst.xform2.z;
     let kind = inst.xform2.w;

@@ -345,14 +345,9 @@ pub(crate) fn reconcile(
             "div".into()
         }
     });
-    let measure = text.as_ref().map_or(Measure::None, |t| {
-        let size = t.size.unwrap_or_else(|| app.theme().metrics().body);
-        Measure::TextPlaceholder {
-            chars: u32::try_from(t.text.chars().count()).unwrap_or(u32::MAX),
-            font_size: size,
-            line_height: (size * 1.3).round(),
-        }
-    });
+    let measure = text
+        .as_ref()
+        .map_or(Measure::None, |t| crate::text_measure::text_measure(app, t));
     let handlers = handlers.map(|h| Rc::new(*h));
 
     let layout = if let Some(node) = tree.nodes.get_mut(&id) {

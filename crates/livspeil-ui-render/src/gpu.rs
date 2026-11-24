@@ -10,9 +10,11 @@
 //! target (downsampled into `Rgba16Float` pyramid levels, scissored to the
 //! backdrop's region) and composites.
 
+use std::collections::HashMap;
 use std::sync::mpsc;
 
 use crate::RenderError;
+use crate::atlas::AtlasUpdate;
 use crate::cpu::{PassParams, blur_passes};
 use crate::encode::{Frame, INSTANCE_FLOATS, MAX_BLUR_LEVELS, Op, level_size};
 use crate::image::RgbaImage;
@@ -20,6 +22,7 @@ use crate::image::RgbaImage;
 /// Format of the offscreen targets made by [`GpuContext::render_to_image`].
 pub const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const LEVEL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+const ATLAS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 const PASS_STRIDE: u64 = 256;
 
 /// A device and queue without a window.
@@ -181,6 +184,49 @@ pub struct Renderer {
     instances: Option<wgpu::Buffer>,
     levels: Vec<wgpu::Texture>,
     levels_for: (u32, u32),
+    atlas_layout: wgpu::BindGroupLayout,
+    atlases: HashMap<u32, GpuAtlas>,
+    empty_atlas: wgpu::BindGroup,
+}
+
+/// One R8 coverage atlas on the GPU.
+#[derive(Debug)]
+struct GpuAtlas {
+    generation: u64,
+    size: [u32; 2],
+    texture: wgpu::Texture,
+    bind_group: wgpu::BindGroup,
+}
+
+fn create_atlas(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    size: [u32; 2],
+) -> (wgpu::Texture, wgpu::BindGroup) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("glyph atlas"),
+        size: wgpu::Extent3d {
+            width: size[0],
+            height: size[1],
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: ATLAS_FORMAT,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("glyph atlas"),
+        layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::TextureView(&view),
+        }],
+    });
+    (texture, bind_group)
 }
 
 impl Renderer {
@@ -265,6 +311,19 @@ impl Renderer {
                 sampler_entry(2),
             ],
         });
+        let atlas_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("glyph atlas"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            }],
+        });
         let premul = wgpu::BlendState {
             color: wgpu::BlendComponent {
                 src_factor: wgpu::BlendFactor::One,
@@ -317,7 +376,7 @@ impl Renderer {
         };
         let quad_pipeline = pipeline(
             "quads",
-            &[Some(&globals_layout)],
+            &[Some(&globals_layout), None, Some(&atlas_layout)],
             &quad_module,
             "vs_main",
             "fs_quad",
@@ -366,6 +425,8 @@ impl Renderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        // Zero-initialized: glyphs whose atlas is missing draw nothing.
+        let (_, empty_atlas) = create_atlas(device, &atlas_layout, [1, 1]);
         Renderer {
             format,
             quad_pipeline,
@@ -380,7 +441,79 @@ impl Renderer {
             instances: None,
             levels: Vec::new(),
             levels_for: (0, 0),
+            atlas_layout,
+            atlases: HashMap::new(),
+            empty_atlas,
         }
+    }
+
+    /// Applies an atlas update (see [`AtlasUpdate`] for the protocol):
+    /// reallocates the texture on a new generation or size, then writes
+    /// the region. Call before [`Renderer::render`] for the frame that
+    /// uses the new glyphs.
+    pub fn update_atlas(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        update: &AtlasUpdate,
+    ) -> Result<(), RenderError> {
+        update.validate()?;
+        let version = self
+            .atlases
+            .get(&update.atlas)
+            .map(|a| (a.generation, a.size));
+        if update.reallocates(version) {
+            let (texture, bind_group) = create_atlas(device, &self.atlas_layout, update.size);
+            self.atlases.insert(
+                update.atlas,
+                GpuAtlas {
+                    generation: update.generation,
+                    size: update.size,
+                    texture,
+                    bind_group,
+                },
+            );
+        }
+        let Some(atlas) = self.atlases.get(&update.atlas) else {
+            return Err(RenderError::Atlas("atlas missing after allocation"));
+        };
+        let [x, y, w, h] = update.region;
+        if w == 0 || h == 0 {
+            return Ok(());
+        }
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &atlas.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x, y, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &update.data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w),
+                rows_per_image: Some(h),
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+        Ok(())
+    }
+
+    /// Applies several atlas updates in order.
+    pub fn update_atlases<'a>(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        updates: impl IntoIterator<Item = &'a AtlasUpdate>,
+    ) -> Result<(), RenderError> {
+        for u in updates {
+            self.update_atlas(device, queue, u)?;
+        }
+        Ok(())
     }
 
     fn ensure_levels(&mut self, device: &wgpu::Device, w: u32, h: u32) {
@@ -564,7 +697,11 @@ impl Renderer {
                     load = wgpu::LoadOp::Load;
                     pass.set_pipeline(&self.quad_pipeline);
                     pass.set_bind_group(0, &globals_bg, &[]);
-                    while let Some(Op::Draw { start, end }) = ops.get(i) {
+                    while let Some(Op::Draw { start, end, atlas }) = ops.get(i) {
+                        let atlas_bg = atlas
+                            .and_then(|a| self.atlases.get(&a))
+                            .map_or(&self.empty_atlas, |a| &a.bind_group);
+                        pass.set_bind_group(2, atlas_bg, &[]);
                         pass.draw(0..6, *start..*end);
                         i += 1;
                     }

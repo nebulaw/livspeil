@@ -149,6 +149,7 @@ pub struct App {
     frame_requested: bool,
     frame_dt: f32,
     frame_count: u64,
+    pub(crate) text_measurer: crate::text_measure::MeasurerSlot,
 }
 
 impl fmt::Debug for App {
@@ -204,6 +205,7 @@ impl App {
             frame_requested: false,
             frame_dt: 0.0,
             frame_count: 0,
+            text_measurer: crate::text_measure::MeasurerSlot::default(),
         }
     }
 
