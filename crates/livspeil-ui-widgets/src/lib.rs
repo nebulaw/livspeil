@@ -72,6 +72,7 @@ mod slider;
 mod style;
 mod text_box;
 mod text_field;
+mod titlebar;
 mod toggle;
 mod tooltip;
 
@@ -97,5 +98,6 @@ pub use slider::{SLIDER_THUMB, Slider};
 pub use style::step_decimals;
 pub use style::{ClickFn, DISABLED_OPACITY};
 pub use text_field::{TextField, TextFn};
+pub use titlebar::{TITLEBAR_HEIGHT, TOOLBAR_HEIGHT, TRAFFIC_LIGHT_INSET, Titlebar};
 pub use toggle::{CheckState, Checkbox, Radio, RadioGroup, Toggle};
 pub use tooltip::{TOOLTIP_DELAY, Tooltip, place as place_tooltip};
