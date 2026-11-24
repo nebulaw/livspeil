@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: MPL-2.0
+
+[package]
+name = "livspeil-ui-host-winit"
+description = "Livspeil UI desktop host on winit and wgpu surfaces (macOS first)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MPL-2.0"
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+livspeil-ui-core = { path = "../livspeil-ui-core" }
+livspeil-ui-layout = { path = "../livspeil-ui-layout" }
+livspeil-ui-render = { path = "../livspeil-ui-render" }
+livspeil-ui-theme = { path = "../livspeil-ui-theme" }
+# Same feature set as livspeil-ui-render (Metal, Vulkan, GLES).
+wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "wgsl", "metal", "vulkan", "gles"] }
+pollster = "1"
+# X11 and Wayland are loaded at run time (no link-time system libraries);
+# minimal client-side decorations on Wayland without bundled fonts.
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita-notitle"] }
+# Text only (no image support).
+arboard = { version = "3.7", default-features = false }
+log = "0.4"
+
+[lints]
+workspace = true
