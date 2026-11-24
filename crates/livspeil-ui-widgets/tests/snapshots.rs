@@ -176,8 +176,8 @@ fn interaction_states() {
 
 #[test]
 fn semantics_descriptions() {
-    let mut out = String::new();
-    let mut push = |s: livspeil_ui_widgets::Semantics| out.push_str(&s.to_string());
+    let mut all: Vec<livspeil_ui_widgets::Semantics> = Vec::new();
+    let mut push = |s: livspeil_ui_widgets::Semantics| all.push(s);
     push(Button::new("Save").primary().semantics());
     push(Button::new("Off").disabled(true).semantics());
     push(IconButton::new("bx-trash", "Trash").semantics());
@@ -222,5 +222,22 @@ fn semantics_descriptions() {
             .label("Curve")
             .semantics(&app),
     );
+    let out: String = all.iter().map(ToString::to_string).collect();
     assert_golden(&golden_dir(), "semantics", &out);
+
+    // The core (and so AccessKit) role each widget role is exposed as.
+    fn roles(s: &livspeil_ui_widgets::Semantics, depth: usize, out: &mut String) {
+        let line = format!("{:?} -> {:?}", s.role, s.core_role());
+        if !out.lines().any(|l| l.trim_start() == line) {
+            out.push_str(&format!("{}{line}\n", "  ".repeat(depth)));
+        }
+        for c in &s.children {
+            roles(c, depth + 1, out);
+        }
+    }
+    let mut out = String::new();
+    for s in &all {
+        roles(s, 0, &mut out);
+    }
+    assert_golden(&golden_dir(), "core-roles", &out);
 }

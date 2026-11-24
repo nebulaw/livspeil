@@ -91,7 +91,10 @@ pub(crate) fn bubble(
         .translate(Vec2::new(0.0, if appearing { -2.0 } else { 0.0 }))
         .transition(MotionClass::Micro)
         .hit_test(false)
-        .semantics(|s| s.role(livspeil_ui_core::Role::Label).label(t.text.clone()))
+        .semantics(|s| {
+            s.role(livspeil_ui_core::Role::Tooltip)
+                .label(t.text.clone())
+        })
         .child(
             text(t.text.clone())
                 .name("tooltip-text")

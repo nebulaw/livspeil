@@ -31,8 +31,9 @@ Livspeil UI (UI spec §9). Every widget is headless and tested with the core's
   toggled/selected/expanded state, placeholder, text selection, disabled,
   focusable, supported actions, and parts as children). The same description
   is declared on the widget's element with the core accessibility builders
-  (`Semantics::apply`), so `livspeil-ui-a11y` exposes it. Roles the core
-  does not have yet map to the closest core role (see the table).
+  (`Semantics::apply`), so `livspeil-ui-a11y` exposes it. Each widget role
+  has the core (and AccessKit) role of the same name, except the
+  segmented control, exposed as a tab list of tabs (see the table).
 - **Keymap.** Widget keys are keymap actions in key contexts, installed by
   `Env::new` (`livspeil_ui_widgets::WIDGET_KEYMAP`) and rebindable in
   `keymap.toml`.
@@ -62,14 +63,14 @@ everything.
 | `IconButton` | builder | Button, named by its label | Space/Enter activate |
 | `Toggle` | builder | Switch, toggled (Switch) | Space/Enter flip |
 | `Checkbox` | builder | CheckBox, toggled incl. mixed (CheckBox) | Space/Enter: mixed/unchecked → checked → unchecked |
-| `Radio` | builder | RadioButton, selected (CheckBox, checked = selected) | Space/Enter select |
-| `RadioGroup` | builder | RadioGroup with RadioButton parts (Group) | one tab stop; arrows next/previous enabled option, wrapping; Home/End; Space/Enter select the first if none |
+| `Radio` | builder | RadioButton, selected (RadioButton, checked = selected) | Space/Enter select |
+| `RadioGroup` | builder | RadioGroup with RadioButton parts (RadioGroup) | one tab stop; arrows next/previous enabled option, wrapping; Home/End; Space/Enter select the first if none |
 | `SegmentedControl` | builder | SegmentedControl with Segment parts (TabList / Tab) | one tab stop; Left/Right (no wrap); Home/End |
 | `Slider` | view, `Model<f32>` | Slider, numeric (Slider + SetValue) | arrows ±step; Shift or Page Up/Down ×10; Home/End |
-| `NumberField` | view, `Model<f64>` | SpinButton, numeric (Slider + SetValue) | Up/Right +step, Down/Left −step, Shift ×10, Alt ×0.1, Page Up/Down ×10, Home/End; Enter/Space or a digit start typing |
+| `NumberField` | view, `Model<f64>` | SpinButton, numeric (SpinButton + SetValue) | Up/Right +step, Down/Left −step, Shift ×10, Alt ×0.1, Page Up/Down ×10, Home/End; Enter/Space or a digit start typing |
 | `TextField` | view | TextInput with value, placeholder, selection (TextInput + SetValue) | see below |
-| `Select` | view, `Model<Option<usize>>` | ComboBox, value, expanded; ListBoxOption parts (Button + expanded; ListItem) | see below |
-| `Tooltip` | attached to an element | Tooltip (bubble: Label; anchor gets the text as its description) | — |
+| `Select` | view, `Model<Option<usize>>` | ComboBox, value, expanded; ListBoxOption parts in a ListBox popup (ComboBox; ListBox; ListBoxOption) | see below |
+| `Tooltip` | attached to an element | Tooltip (bubble: Tooltip; anchor gets the text as its description) | — |
 | `Label` | builder | Label | — |
 
 Builders render with `render(&theme)` and report changes through callbacks

@@ -111,7 +111,7 @@ fn select_opens_navigates_and_chooses_with_keyboard() {
     assert!(!f.open());
     assert_eq!(f.h.app.focused(), Some(find(&f.h, "below")));
     let node = f.h.app.semantic_node(trigger).unwrap();
-    assert_eq!(node.role(), Some(Role::Button));
+    assert_eq!(node.role(), Some(Role::ComboBox));
     assert_eq!(node.label(), Some("Fruit"));
     assert_eq!(node.semantics.unwrap().get_expanded(), Some(false));
 }
@@ -123,6 +123,17 @@ fn select_popup_is_on_top_animates_and_chooses_by_pointer() {
     assert!(f.open());
     let trigger = f.h.app.bounds(find(&f.h, &f.name)).unwrap();
     let list = find(&f.h, "listbox");
+    assert_eq!(
+        f.h.app.semantic_node(list).unwrap().role(),
+        Some(Role::ListBox)
+    );
+    assert_eq!(
+        f.h.app
+            .semantic_node(find(&f.h, "option:Apple"))
+            .unwrap()
+            .role(),
+        Some(Role::ListBoxOption)
+    );
     let lb = f.h.app.bounds(list).unwrap();
     assert!(lb.y >= trigger.bottom(), "below the trigger: {lb:?}");
     assert_eq!(f.h.app.scale_of(list), Some(1.0));
@@ -192,6 +203,10 @@ fn tooltip_shows_after_delay_and_hides_on_leave_or_press() {
     assert!(env.tooltip_shown(&h.app, anchor));
     h.run_until_idle(100);
     let tip = find(&h, "tooltip");
+    assert_eq!(
+        h.app.semantic_node(tip).unwrap().role(),
+        Some(Role::Tooltip)
+    );
     let tb = h.app.bounds(tip).unwrap();
     let ab = h.app.bounds(anchor).unwrap();
     assert!(tb.y > ab.bottom(), "below the anchor");

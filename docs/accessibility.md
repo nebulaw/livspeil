@@ -24,7 +24,7 @@ An element can declare:
 
 | Property | Builder | Meaning |
 |---|---|---|
-| role | `.role(Role::Button)` | What the element is: `Window`, `Dialog`, `Group`, `Label`, `Heading`, `Button`, `Link`, `CheckBox`, `Switch`, `Slider`, `ProgressIndicator`, `TextInput`, `Image`, `List`, `ListItem`, `ScrollView`, `Menu`, `MenuItem`, `TabList`, `Tab`, `Toolbar`, `Generic` |
+| role | `.role(Role::Button)` | What the element is: `Window`, `Dialog`, `Group`, `Label`, `Heading`, `Button`, `Link`, `CheckBox`, `Switch`, `RadioButton`, `RadioGroup`, `Slider`, `SpinButton`, `ProgressIndicator`, `TextInput`, `ComboBox`, `ListBox`, `ListBoxOption`, `Tooltip`, `Image`, `List`, `ListItem`, `ScrollView`, `Menu`, `MenuItem`, `TabList`, `Tab`, `Toolbar`, `Generic` |
 | label | `s.label("Volume")` | The accessible name |
 | description | `s.description("…")` | Extra help text |
 | value | `s.value(SemanticValue::text("Ada"))` or `SemanticValue::number(v, min, max, step)` | Text or numeric value |
@@ -75,7 +75,8 @@ it:
 
 The other elements are transparent: their exposed descendants are attached
 to the nearest exposed ancestor. Buttons, links, check boxes, switches,
-sliders, progress indicators, text inputs, images, labels, headings, tabs
+radio buttons, sliders, spin buttons, progress indicators, text inputs,
+combo boxes, list box options, tooltips, images, labels, headings, tabs
 and menu items have presentational children, as in ARIA. The screen reader
 sees only the control itself. The text inside a button is not read twice.
 

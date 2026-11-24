@@ -276,30 +276,31 @@ impl fmt::Display for Semantics {
 
 /// Map to the core's accessibility semantics (`livspeil_ui_core::Semantics`).
 ///
-/// Roles the core does not have yet map to the closest one:
-/// `RadioButton` → `CheckBox` (checked = selected), `RadioGroup` → `Group`,
-/// `SegmentedControl` → `TabList`, `Segment` → `Tab`, `SpinButton` →
-/// `Slider`, `ComboBox` → `Button` (expanded, text value), `ListBox` →
-/// `List`, `ListBoxOption` → `ListItem`, `Tooltip` → `Label`.
-/// `Expand`/`Collapse`/`Click` become `Activate`; text-selection and
-/// clipboard actions have no core equivalent yet.
+/// Roles map one to one, except `SegmentedControl` → `TabList` and
+/// `Segment` → `Tab` (selected). A radio button's selection is also its
+/// checked state. `Expand`/`Collapse`/`Click` become `Activate`;
+/// text-selection and clipboard actions have no core equivalent yet.
 impl Semantics {
     /// The core role for this widget role.
     #[must_use]
     pub fn core_role(&self) -> livspeil_ui_core::Role {
         use livspeil_ui_core::Role as R;
         match self.role {
-            Role::Button | Role::ComboBox => R::Button,
+            Role::Button => R::Button,
+            Role::ComboBox => R::ComboBox,
             Role::Switch => R::Switch,
-            Role::CheckBox | Role::RadioButton => R::CheckBox,
-            Role::RadioGroup => R::Group,
+            Role::CheckBox => R::CheckBox,
+            Role::RadioButton => R::RadioButton,
+            Role::RadioGroup => R::RadioGroup,
             Role::SegmentedControl => R::TabList,
             Role::Segment => R::Tab,
-            Role::Slider | Role::SpinButton => R::Slider,
+            Role::Slider => R::Slider,
+            Role::SpinButton => R::SpinButton,
             Role::TextInput => R::TextInput,
-            Role::ListBox => R::List,
-            Role::ListBoxOption => R::ListItem,
-            Role::Tooltip | Role::Label => R::Label,
+            Role::ListBox => R::ListBox,
+            Role::ListBoxOption => R::ListBoxOption,
+            Role::Tooltip => R::Tooltip,
+            Role::Label => R::Label,
         }
     }
 
