@@ -91,6 +91,7 @@ pub(crate) fn bubble(
         .translate(Vec2::new(0.0, if appearing { -2.0 } else { 0.0 }))
         .transition(MotionClass::Micro)
         .hit_test(false)
+        .semantics(|s| s.role(livspeil_ui_core::Role::Label).label(t.text.clone()))
         .child(
             text(t.text.clone())
                 .name("tooltip-text")
@@ -137,6 +138,10 @@ impl Tooltip {
     #[must_use]
     pub fn attach(self, env: &Env, anchor: Element) -> Element {
         let env = env.clone();
+        let anchor = anchor.semantics({
+            let d = self.text.clone();
+            move |s| s.description(d)
+        });
         let entry = TooltipEntry {
             text: self.text,
             anchor: Rect::ZERO,

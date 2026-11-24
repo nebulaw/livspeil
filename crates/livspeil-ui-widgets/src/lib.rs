@@ -6,6 +6,11 @@
 
 mod button;
 mod env;
+mod label;
+mod segmented;
+mod slider;
+mod text_box;
+mod text_field;
 pub mod keymap;
 pub mod semantics;
 mod style;
@@ -19,3 +24,7 @@ pub use style::{ClickFn, DISABLED_OPACITY};
 pub use toggle::{CheckState, Checkbox, Radio, RadioGroup, Toggle};
 pub use env::{Clipboard, Env, MemoryClipboard, WidgetRoot};
 pub use tooltip::{TOOLTIP_DELAY, Tooltip, place as place_tooltip};
+pub use label::{Label, Tone};
+pub use segmented::{SEGMENT_INSET, SegmentedControl};
+pub use slider::{SLIDER_THUMB, Slider};
+pub use text_field::{TextFn, TextField};

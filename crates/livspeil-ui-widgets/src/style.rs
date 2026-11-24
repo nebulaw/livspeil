@@ -166,6 +166,19 @@ pub(crate) fn edge_enabled(enabled: &[bool], dir: isize) -> Option<usize> {
     step_enabled(enabled, None, dir, false)
 }
 
+/// Decimals needed to show multiples of `step` (0 for 1, 2 for 0.25,
+/// at most 6).
+#[must_use]
+pub fn step_decimals(step: f64) -> usize {
+    let step = step.abs();
+    (0..6)
+        .find(|&d| {
+            let scaled = step * 10f64.powi(i32::try_from(d).unwrap_or(0));
+            (scaled - scaled.round()).abs() < 1e-6
+        })
+        .unwrap_or(6)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

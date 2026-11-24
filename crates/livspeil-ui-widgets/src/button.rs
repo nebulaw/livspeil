@@ -180,7 +180,8 @@ impl Button {
     pub fn render(self, theme: &Theme) -> Element {
         let m = metrics(theme);
         let (.., fg) = palette(theme, self.variant);
-        chrome(theme, self.variant, self.disabled, self.on_click)
+        let sem = self.semantics();
+        let el = chrome(theme, self.variant, self.disabled, self.on_click)
             .name(format!("button:{}", self.label))
             .px(m.pad_x)
             .child(
@@ -189,7 +190,8 @@ impl Button {
                     .font_size(m.font)
                     .text_color(fg)
                     .hit_test(false),
-            )
+            );
+        sem.apply(el)
     }
 }
 
@@ -263,7 +265,8 @@ impl IconButton {
     pub fn render(self, theme: &Theme) -> Element {
         let m = metrics(theme);
         let (.., fg) = palette(theme, self.variant);
-        chrome(theme, self.variant, self.disabled, self.on_click)
+        let sem = self.semantics();
+        let el = chrome(theme, self.variant, self.disabled, self.on_click)
             .name(format!("icon-button:{}", self.label))
             .w(m.height)
             .child(
@@ -273,6 +276,7 @@ impl IconButton {
                     .rounded(theme.tokens.radii.xs)
                     .border(1.5, fg.with_alpha(fg.alpha * 0.8))
                     .hit_test(false),
-            )
+            );
+        sem.apply(el)
     }
 }

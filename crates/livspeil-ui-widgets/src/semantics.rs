@@ -269,3 +269,97 @@ impl fmt::Display for Semantics {
         self.write(f, 0)
     }
 }
+
+/// Map to the core's accessibility semantics (`livspeil_ui_core::Semantics`).
+///
+/// Roles the core does not have yet map to the closest one:
+/// `RadioButton` → `CheckBox` (checked = selected), `RadioGroup` → `Group`,
+/// `SegmentedControl` → `TabList`, `Segment` → `Tab`, `SpinButton` →
+/// `Slider`, `ComboBox` → `Button` (expanded, text value), `ListBox` →
+/// `List`, `ListBoxOption` → `ListItem`, `Tooltip` → `Label`.
+/// `Expand`/`Collapse`/`Click` become `Activate`; text-selection and
+/// clipboard actions have no core equivalent yet.
+impl Semantics {
+    /// The core role for this widget role.
+    #[must_use]
+    pub fn core_role(&self) -> livspeil_ui_core::Role {
+        use livspeil_ui_core::Role as R;
+        match self.role {
+            Role::Button | Role::ComboBox => R::Button,
+            Role::Switch => R::Switch,
+            Role::CheckBox | Role::RadioButton => R::CheckBox,
+            Role::RadioGroup => R::Group,
+            Role::SegmentedControl => R::TabList,
+            Role::Segment => R::Tab,
+            Role::Slider | Role::SpinButton => R::Slider,
+            Role::TextInput => R::TextInput,
+            Role::ListBox => R::List,
+            Role::ListBoxOption => R::ListItem,
+            Role::Tooltip | Role::Label => R::Label,
+        }
+    }
+
+    /// The core semantics (without children: parts declare their own).
+    #[must_use]
+    pub fn to_core(&self) -> livspeil_ui_core::Semantics {
+        use livspeil_ui_core::{SemanticAction as A, SemanticValue};
+        let mut s = livspeil_ui_core::Semantics::new(self.core_role()).disabled(self.disabled);
+        if let Some(l) = &self.label {
+            s = s.label(l.as_str());
+        }
+        if let Some(n) = self.numeric {
+            s = s.value(SemanticValue::number(n.value, n.min, n.max, n.step));
+        } else if let Some(v) = &self.value {
+            s = s.value(SemanticValue::text(v.as_str()));
+        }
+        let toggled = match (self.role, self.toggled, self.selected) {
+            (Role::RadioButton, _, Some(sel)) => Some(livspeil_ui_core::Toggled::from(sel)),
+            (_, Some(Toggled::True), _) => Some(livspeil_ui_core::Toggled::On),
+            (_, Some(Toggled::False), _) => Some(livspeil_ui_core::Toggled::Off),
+            (_, Some(Toggled::Mixed), _) => Some(livspeil_ui_core::Toggled::Mixed),
+            _ => None,
+        };
+        if let Some(t) = toggled {
+            s = s.checked(t);
+        }
+        if let Some(sel) = self.selected {
+            s = s.selected(sel);
+        }
+        if let Some(e) = self.expanded {
+            s = s.expanded(e);
+        }
+        if let Some(p) = self.placeholder.as_deref().filter(|_| self.value.as_deref() == Some("")) {
+            s = s.description(p);
+        }
+        for a in &self.actions {
+            let core = match a {
+                SemanticAction::Click | SemanticAction::Expand | SemanticAction::Collapse => {
+                    Some(A::Activate)
+                }
+                SemanticAction::Focus => Some(A::Focus),
+                SemanticAction::Increment => Some(A::Increment),
+                SemanticAction::Decrement => Some(A::Decrement),
+                SemanticAction::SetValue => Some(A::SetValue),
+                SemanticAction::SetTextSelection | SemanticAction::Clipboard => None,
+            };
+            if let Some(c) = core {
+                s = s.action(c);
+            }
+        }
+        s
+    }
+
+    /// Declare these semantics on `el` (role, label, value, state,
+    /// actions), keeping anything already declared that this does not set
+    /// (for example a tooltip's description).
+    #[must_use]
+    pub fn apply(&self, el: livspeil_ui_core::Element) -> livspeil_ui_core::Element {
+        let core = self.to_core();
+        el.semantics(move |prev| {
+            match prev.get_description().map(str::to_owned) {
+                Some(d) if core.get_description().is_none() => core.description(d),
+                _ => core,
+            }
+        })
+    }
+}

@@ -110,6 +110,7 @@ impl Toggle {
     /// Build the element (name `toggle`, children `track` > `thumb`).
     #[must_use]
     pub fn render(self, theme: &Theme) -> Element {
+        let sem = self.semantics();
         let c = theme.colors();
         let (w, h, thumb) = metrics(theme).switch;
         let inset = (h - thumb) / 2.0;
@@ -141,7 +142,7 @@ impl Toggle {
             let next = !self.on;
             row = row.on_click(move |_, cx| f(next, cx));
         }
-        row
+        sem.apply(row)
     }
 }
 
@@ -252,6 +253,7 @@ impl Checkbox {
     /// Build the element (name `checkbox`, children `box` > `mark`).
     #[must_use]
     pub fn render(self, theme: &Theme) -> Element {
+        let sem = self.semantics();
         let m = metrics(theme);
         let s = m.indicator;
         let filled = self.state != CheckState::Unchecked;
@@ -295,7 +297,7 @@ impl Checkbox {
             let next = self.state.next();
             row = row.on_click(move |_, cx| f(next, cx));
         }
-        row
+        sem.apply(row)
     }
 }
 
@@ -393,13 +395,14 @@ impl Radio {
     /// Build the element (name `radio:<label>`).
     #[must_use]
     pub fn render(self, theme: &Theme) -> Element {
+        let sem = self.semantics();
         let ind = radio_indicator(theme, self.selected, self.disabled);
         let mut row = labeled_row(theme, ind, Some(&self.label), self.disabled)
             .name(format!("radio:{}", self.label));
         if let (false, Some(f)) = (self.disabled, self.on_select) {
             row = row.on_click(move |_, cx| f(cx));
         }
-        row
+        sem.apply(row)
     }
 }
 
@@ -510,6 +513,7 @@ impl RadioGroup {
     /// Build the element (name `radio-group`).
     #[must_use]
     pub fn render(self, theme: &Theme) -> Element {
+        let sem = self.semantics();
         let m = metrics(theme);
         let mut group = div().name("radio-group").gap(m.gap).key_context("RadioGroup");
         group = if self.horizontal {
@@ -542,8 +546,12 @@ impl RadioGroup {
             if let (true, Some(f)) = (enabled, self.on_change.clone()) {
                 row = row.on_click(move |_, cx| f(i, cx));
             }
+            if let Some(part) = sem.children.get(i) {
+                row = part.apply(row);
+            }
             group = group.child(row);
         }
+        group = sem.apply(group);
         if self.disabled {
             return style::disabled(group, true);
         }
