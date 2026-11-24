@@ -7,6 +7,7 @@
 mod button;
 mod env;
 mod label;
+mod number_field;
 mod segmented;
 mod slider;
 mod text_box;
@@ -28,3 +29,5 @@ pub use label::{Label, Tone};
 pub use segmented::{SEGMENT_INSET, SegmentedControl};
 pub use slider::{SLIDER_THUMB, Slider};
 pub use text_field::{TextFn, TextField};
+pub use number_field::{NumberField, Scrub, scrub_precision};
+pub use style::step_decimals;

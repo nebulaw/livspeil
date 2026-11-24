@@ -23,7 +23,7 @@ use crate::text_box::{Outcome, TextBox};
 pub type TextFn = Rc<dyn Fn(&str, &mut App)>;
 
 /// Every action a text field handles.
-const TEXT_ACTIONS: &[&str] = &[
+pub(crate) const TEXT_ACTIONS: &[&str] = &[
     actions::MOVE_LEFT,
     actions::MOVE_RIGHT,
     actions::SELECT_LEFT,
