@@ -164,8 +164,9 @@ impl FrameTimes {
 mod tests {
     use std::time::Duration;
 
-    use livspeil_ui_core::{App, Element, FrameScheduler, Render, ViewContext, div, widgets};
+    use livspeil_ui_core::{App, Element, FrameScheduler, Render, ViewContext, div};
     use livspeil_ui_layout::Size;
+    use livspeil_ui_theme::MotionClass;
 
     use super::*;
 
@@ -236,9 +237,16 @@ mod tests {
     struct Root;
     impl Render for Root {
         fn render(&mut self, cx: &mut ViewContext<'_, Self>) -> Element {
-            div()
-                .size(300.0, 200.0)
-                .child(widgets::button(cx.theme(), "OK").key("ok"))
+            let c = cx.theme().colors();
+            // A button-like box whose hover background springs.
+            div().size(300.0, 200.0).child(
+                div()
+                    .key("ok")
+                    .size(80.0, 32.0)
+                    .bg(c.surface[2])
+                    .hover(|r| r.bg(c.surface[3]))
+                    .transition(MotionClass::Micro),
+            )
         }
     }
 

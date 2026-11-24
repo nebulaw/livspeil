@@ -79,17 +79,16 @@ sliders, progress indicators, text inputs, images, labels, headings, tabs
 and menu items have presentational children, as in ARIA. The screen reader
 sees only the control itself. The text inside a button is not read twice.
 
-### How the proof widgets declare semantics
+### How widgets declare semantics
 
-| Widget | Role | State |
-|---|---|---|
-| `widgets::button(theme, label)` | `Button` | label = the button text; Activate and Focus are inferred |
-| `widgets::toggle(theme, on)` | `Switch` | `checked(on)`; set the name with `.semantics(\|s\| s.label("Wi-Fi"))` |
-| `widgets::Slider` | `Slider` | numeric value with min, max and step; `slider.label` is the name; Increment, Decrement, Focus and Set value work (a set value snaps to the step) |
-
-When the widgets move to `livspeil-ui-widgets`, these declarations move
-with them. Each one is marked `// a11y (M1.7)`. A new widget declares its
-role and state in `render`, in the same way.
+The widgets in `livspeil-ui-widgets` describe themselves with
+`livspeil_ui_widgets::Semantics` (`semantics()` on each widget) and apply
+it to their element with the core's builders (`.role(..)`,
+`.semantics(..)`, `.on_set_value(..)`). The widget table in
+`docs/widgets.md` lists each widget's role. Callers can add to a widget's
+semantics on the rendered element, for example
+`Toggle::new(on).render(&theme).semantics(|s| s.label("Wi-Fi"))`. A new
+widget declares its role and state in `render`, in the same way.
 
 ## From the core to AccessKit
 
@@ -156,8 +155,9 @@ with `TestHost`:
 
 - **Snapshot.** `A11yTree::dump()` prints one line per node with its role,
   name, value, range, states, actions and bounds, and `*` marks the focus.
-  The sample view (proof widgets, a list, a hidden subtree, a disabled
-  button and a text input inside a transparent wrapper) is compared with
+  The sample view (`livspeil-ui-widgets` Button, Toggle and Slider, a
+  list, a hidden subtree, a disabled button and a text input inside a
+  transparent wrapper) is compared with
   `tests/golden/a11y-tree.golden`. Refresh it with `UPDATE_GOLDEN=1`.
 - **Incremental.** Changing one label sends exactly that node. A keyed
   reorder keeps ids and removes nothing. Adding and removing items, hiding
@@ -189,7 +189,7 @@ The platform side lives in the host, not in these crates:
    `handle_action`, then request a frame. On `DeactivationHandler`, call
    `A11yTree::reset`.
 2. **VoiceOver (macOS).** `accesskit_winit` uses `accesskit_macos`.
-   Manual checks: VO navigation reads every proof widget with role, name
+   Manual checks: VO navigation reads every widget with role, name
    and value, VO-Space activates, VO-Shift-Up/Down adjusts the slider, and
    the focus ring follows VoiceOver focus.
 3. **AT-SPI (Linux).** `accesskit_winit` uses `accesskit_unix` (D-Bus,

@@ -49,9 +49,10 @@ app.set_root(root);
 
 `Env` holds the font system (text layout for fields and tooltips), the
 clipboard (`Clipboard` trait; hosts install the platform clipboard,
-`MemoryClipboard` is the default) and focus tracking. `WidgetRoot` is a 1×1
-grid: the content and the overlay layer share the cell, so popups and
-tooltips paint and hit-test above everything.
+`MemoryClipboard` is the default) and focus tracking. `WidgetRoot` puts the
+content first and the overlay layer, an absolutely positioned box the size
+of the viewport, after it, so popups and tooltips paint and hit-test above
+everything.
 
 ## Widgets
 
@@ -175,5 +176,3 @@ idle again.
 - No caret blink (idle means zero frames), no cursor shapes, no IME cursor
   area reporting and no system clipboard yet: these need host hooks.
 - Popups and tooltips are removed without an exit animation.
-- The core proof widgets (`livspeil_ui_core::widgets`) remain as test
-  fixtures for the core and `livspeil-ui-a11y`.

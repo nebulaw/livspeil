@@ -19,6 +19,7 @@ livspeil-ui-layout = { path = "../livspeil-ui-layout" }
 
 [dev-dependencies]
 livspeil-testkit = { path = "../livspeil-testkit" }
+livspeil-ui-widgets = { path = "../livspeil-ui-widgets" }
 proptest = { version = "1", default-features = false, features = ["std"] }
 
 [lints]

@@ -1660,6 +1660,7 @@ dependencies = [
  "livspeil-testkit",
  "livspeil-ui-core",
  "livspeil-ui-layout",
+ "livspeil-ui-widgets",
  "proptest",
 ]
 
@@ -1681,8 +1682,10 @@ dependencies = [
  "arboard",
  "livspeil-ui-core",
  "livspeil-ui-layout",
+ "livspeil-ui-paint",
  "livspeil-ui-render",
  "livspeil-ui-theme",
+ "livspeil-ui-widgets",
  "log",
  "pollster",
  "wgpu",
@@ -1707,6 +1710,7 @@ dependencies = [
  "livspeil-ui-render",
  "livspeil-ui-text",
  "livspeil-ui-theme",
+ "livspeil-ui-widgets",
 ]
 
 [[package]]
@@ -1728,6 +1732,7 @@ dependencies = [
  "livspeil-ui-render",
  "livspeil-ui-text",
  "livspeil-ui-theme",
+ "livspeil-ui-widgets",
  "png",
 ]
 

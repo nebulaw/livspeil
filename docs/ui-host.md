@@ -17,10 +17,14 @@ cargo run -p livspeil-ui-host-winit --example hello
 ```
 
 On macOS this opens a window with a full-size content view under the
-native (transparent) titlebar, with a Button, a Toggle and a Slider on a
-dark surface. It renders through Metal. Text is not drawn yet: the example
-uses `QuadsOnlyRenderer`, a temporary renderer that draws quads only.
-`livspeil-ui-paint` will replace it.
+native (transparent) titlebar, with a `livspeil-ui-widgets` Button, Toggle
+and Slider on a Frost card over two colored shapes. It renders through
+Metal. The example's `PaintRenderer` is a complete `SceneRenderer`: the
+`livspeil-ui-paint` bridge turns each scene into a display list plus glyph
+atlas uploads, which it applies to a `livspeil-ui-render` `Renderer` before
+encoding and drawing the frame (it re-uploads the whole atlas when the
+surface format changes, and falls back to opaque material tints when the
+surface cannot be sampled for backdrop blur).
 
 Things to try: hover and click the button (the cursor becomes a pointing
 hand), click the toggle, drag the slider (grab cursor), press Tab to move

@@ -5,7 +5,6 @@
 //! `TestHost`, laid out with the bridge's text measurer) painted through
 //! `livspeil-ui-paint`, with the bundled fonts only (deterministic).
 
-use livspeil_ui_core::widgets::{Slider, button, toggle};
 use livspeil_ui_core::{
     App, Element, ElementId, Fill, Model, PaintCmd, Quad, Render, Scene as CoreScene, TestHost,
     View, ViewContext, div, text,
@@ -15,6 +14,7 @@ use livspeil_ui_paint::{FontSystem, PaintBridge, TextItem};
 use livspeil_ui_render::{Color, DisplayList};
 use livspeil_ui_text::{FontFeature, TextStyle};
 use livspeil_ui_theme::{Color as ThemeColor, Material, Theme};
+use livspeil_ui_widgets::{Button, Slider, Toggle};
 
 use crate::ShotError;
 use crate::scenes::{Scene, Shot, surface};
@@ -94,8 +94,10 @@ struct ButtonCell {
 impl Render for ButtonCell {
     fn render(&mut self, cx: &mut ViewContext<'_, Self>) -> Element {
         let theme = cx.theme().clone();
-        let b = button(&theme, "Apply").key("b");
-        let b = if self.disabled { b.opacity(0.4) } else { b };
+        let b = Button::new("Apply")
+            .disabled(self.disabled)
+            .render(&theme)
+            .key("b");
         div()
             .size(112.0, 84.0)
             .flex_col()
@@ -161,12 +163,12 @@ impl Render for Controls {
             .gap(8.0)
             .child(
                 row()
-                    .child(toggle(&theme, !self.off).key("t1"))
+                    .child(Toggle::new(!self.off).render(&theme).key("t1"))
                     .child(caption("Snap to grid")),
             )
             .child(
                 row()
-                    .child(toggle(&theme, self.off).key("t2"))
+                    .child(Toggle::new(self.off).render(&theme).key("t2"))
                     .child(caption("Reduce motion")),
             )
             .child(row().child(Element::view(&self.a)).child(caption("30%")))
@@ -176,9 +178,7 @@ impl Render for Controls {
 
 fn slider(app: &mut App, v: f32) -> View<Slider> {
     let m: Model<f32> = app.new_model(v);
-    let mut s = Slider::new(m, 0.0, 1.0, 0.01);
-    s.width = 200.0;
-    app.new_view(s)
+    app.new_view(Slider::new(m, 0.0, 1.0, 0.01).width(200.0))
 }
 
 fn toggle_slider(scale: f32) -> Result<Shot, ShotError> {
@@ -401,7 +401,7 @@ pub fn scenes() -> Vec<Scene> {
     [
         pair(
             ["button-states-1x", "button-states-2x"],
-            "Button from core: rest, hover, pressed, focused, disabled",
+            "Button (livspeil-ui-widgets): rest, hover, pressed, focused, disabled",
             576,
             100,
             button_states,

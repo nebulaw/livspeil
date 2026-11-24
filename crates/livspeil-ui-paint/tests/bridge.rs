@@ -3,7 +3,6 @@
 
 //! Scene conversion, text caching and atlas uploads.
 
-use livspeil_ui_core::widgets::button;
 use livspeil_ui_core::{
     App, Element, ElementId, PaintCmd, Quad, Render, Scene, TestHost, TextRun, ViewContext, div,
     text,
@@ -12,6 +11,7 @@ use livspeil_ui_layout::{Corners, Rect, Size, Transform2D, Vec2};
 use livspeil_ui_paint::{FontSystem, PaintBridge, PaintError, TextContext};
 use livspeil_ui_render::{BorderWidth, DisplayList, Primitive};
 use livspeil_ui_theme::{Color, Material, Theme, Tier};
+use livspeil_ui_widgets::Button;
 
 struct Demo;
 
@@ -23,7 +23,7 @@ impl Render for Demo {
             .p(16.0)
             .gap(8.0)
             .child(text("Hello, Livspeil").name("hello"))
-            .child(button(&theme, "Apply").key("apply"))
+            .child(Button::new("Apply").render(&theme).key("apply"))
     }
 }
 
