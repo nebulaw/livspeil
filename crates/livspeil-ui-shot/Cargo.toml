@@ -17,7 +17,6 @@ livspeil-ui-core = { path = "../livspeil-ui-core" }
 livspeil-ui-layout = { path = "../livspeil-ui-layout" }
 livspeil-ui-paint = { path = "../livspeil-ui-paint" }
 livspeil-ui-render = { path = "../livspeil-ui-render" }
-livspeil-ui-text = { path = "../livspeil-ui-text" }
 livspeil-ui-theme = { path = "../livspeil-ui-theme" }
 livspeil-ui-widgets = { path = "../livspeil-ui-widgets" }
 png = "0.18"

@@ -4,8 +4,8 @@
 //! [`Slider`]: a horizontal slider bound to a `Model<f32>`.
 
 use livspeil_ui_core::{
-    App, DragPhase, Element, EventCx, Model, Render, SharedString, Transition, ValueRequest, View,
-    ViewContext, actions, div, text,
+    App, DragPhase, Element, EventCx, FontFeature, Model, Render, SharedString, Transition,
+    ValueRequest, View, ViewContext, actions, div, text,
 };
 use livspeil_ui_layout::{Rect, Vec2};
 use livspeil_ui_theme::{Color, Elevation, MotionClass};
@@ -277,6 +277,7 @@ impl Render for Slider {
                     text(self.format(value))
                         .key("value")
                         .font_size(m.font)
+                        .font_feature(FontFeature::TNUM)
                         .text_color(c.text_secondary)
                         .hit_test(false),
                 )

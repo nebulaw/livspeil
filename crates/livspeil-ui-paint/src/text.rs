@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use livspeil_ui_core::TextMeasurer;
+use livspeil_ui_core::{FontSpec, TextMeasurer};
 use livspeil_ui_layout::Size;
 use livspeil_ui_render::{AtlasUpdate, GlyphSprite, Rect as RRect};
 use livspeil_ui_text::{
@@ -190,14 +190,27 @@ pub struct BridgeMeasurer {
 }
 
 impl TextMeasurer for BridgeMeasurer {
-    fn measure(&self, text: &str, font_size: f32) -> Size {
+    fn measure(&self, text: &str, font: &FontSpec) -> Size {
         // A measurer re-entered while the bridge is painting (it is not)
         // would report an empty size rather than panic.
         match self.shaper.try_borrow_mut() {
-            Ok(mut s) => s.measure_style(text, &TextStyle::sized(font_size)),
+            Ok(mut s) => s.measure_style(text, &text_style(font)),
             Err(_) => Size::new(0.0, 0.0),
         }
     }
+}
+
+/// The `livspeil-ui-text` style of a core font (UI family).
+#[must_use]
+pub fn text_style(font: &FontSpec) -> TextStyle {
+    let mut style = TextStyle::sized(font.size).with_weight(font.weight);
+    for f in &font.features {
+        style = style.with_feature(livspeil_ui_text::FontFeature {
+            tag: f.tag,
+            value: f.value,
+        });
+    }
+    style
 }
 
 /// Text placement inputs for [`TextContext::glyphs`].

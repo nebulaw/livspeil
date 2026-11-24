@@ -43,12 +43,12 @@ quad fill 12,110 39x4 r=2 fill=oklch(0.56 0.18 255 / 0.7)
 transform [1 0 0 1 31.2 0]
   quad thumb 12,104 16x16 r=8 fill=oklch(1 0 0 / 1) border=1 oklch(0.56 0.18 255 / 1) shadow=E1
 pop
-text value 138,104 13x16 "30" size=12 color=oklch(0.16 0 0 / 0.62)
+text value 138,104 13x16 "30" size=12 features=tnum=1 color=oklch(0.16 0 0 / 0.62)
 quad number 159,100 120x24 r=4 fill=oklch(0.95 0 265 / 1) border=1 oklch(0 0 0 / 0.1)
 clip 159,100 120x24 r=4
   quad fill 159,100 15x24 fill=oklch(0.56 0.18 255 / 0.18)
   text label 200,104 6x16 "X" size=12 color=oklch(0.16 0 0 / 0.62)
-  text value 212,104 27x16 "1.25" size=12 color=oklch(0.16 0 0 / 0.9)
+  text value 212,104 27x16 "1.25" size=12 features=tnum=1 color=oklch(0.16 0 0 / 0.9)
 pop
 quad text 12,132 140x24 r=4 fill=oklch(0.95 0 265 / 1) border=1 oklch(0 0 0 / 0.1)
 clip 12,132 140x24 r=4

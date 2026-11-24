@@ -1730,7 +1730,6 @@ dependencies = [
  "livspeil-ui-layout",
  "livspeil-ui-paint",
  "livspeil-ui-render",
- "livspeil-ui-text",
  "livspeil-ui-theme",
  "livspeil-ui-widgets",
  "png",

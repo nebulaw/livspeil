@@ -14,6 +14,7 @@ use livspeil_ui_layout::{Corners, Rect, Transform2D, Vec2};
 use livspeil_ui_theme::{Color, Elevation, Material, MaterialRecipe, Shadow, Theme};
 
 use crate::element::{ElementId, SharedString};
+use crate::text_measure::FontSpec;
 use crate::tree::{Tree, canvas_visible};
 
 /// A fill.
@@ -71,8 +72,8 @@ pub struct TextRun {
     pub rect: Rect,
     /// Text.
     pub text: SharedString,
-    /// Font size.
-    pub size: f32,
+    /// Font size, weight and features.
+    pub font: FontSpec,
     /// Color.
     pub color: Color,
 }
@@ -196,13 +197,21 @@ impl Scene {
                 PaintCmd::Text(t) => {
                     let _ = write!(
                         out,
-                        "text {} {} {:?} size={} color={}",
+                        "text {} {} {:?} size={}",
                         name(t.element),
                         t.rect,
                         &*t.text,
-                        num(t.size),
-                        color(t.color)
+                        num(t.font.size),
                     );
+                    if t.font.weight != FontSpec::REGULAR {
+                        let _ = write!(out, " weight={}", num(t.font.weight));
+                    }
+                    if !t.font.features.is_empty() {
+                        let f: Vec<String> =
+                            t.font.features.iter().map(ToString::to_string).collect();
+                        let _ = write!(out, " features={}", f.join(","));
+                    }
+                    let _ = write!(out, " color={}", color(t.color));
                 }
             }
             out.push('\n');
@@ -301,7 +310,7 @@ fn paint_node(input: &PaintInput<'_>, id: ElementId, scene: &mut Scene, stats: &
             element: id,
             rect: node.bounds,
             text: t.text.clone(),
-            size: t.size.unwrap_or_else(|| input.theme.metrics().body),
+            font: t.font(input.theme),
             color: t.color.unwrap_or(input.theme.colors().text_primary),
         }));
     }

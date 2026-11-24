@@ -48,7 +48,7 @@ use livspeil_ui_core::{Painter, Scene};
 use livspeil_ui_render::{Affine, AtlasUpdate, Color, DisplayList, Rect};
 pub use livspeil_ui_text::{FontSystem, TextError, TextStyle};
 
-pub use text::{BridgeMeasurer, DEFAULT_ATLAS_SIZE, TextCacheStats, TextContext};
+pub use text::{BridgeMeasurer, DEFAULT_ATLAS_SIZE, TextCacheStats, TextContext, text_style};
 
 /// Errors from painting.
 #[derive(Debug)]
@@ -85,8 +85,8 @@ pub struct PaintBridge {
     pub text: TextContext,
 }
 
-/// Text drawn directly (not from a core scene), e.g. with a weight or
-/// OpenType features the core's text elements do not carry yet.
+/// Text drawn directly (not from a core scene), e.g. overlays a host
+/// paints itself.
 #[derive(Debug, Clone)]
 pub struct TextItem<'a> {
     /// The text.

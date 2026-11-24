@@ -4,8 +4,8 @@
 //! [`NumberField`]: a numeric field with Houdini-style drag-scrub.
 
 use livspeil_ui_core::{
-    App, DRAG_THRESHOLD, Element, EventCx, Model, Modifiers, Render, SharedString, ValueRequest,
-    View, ViewContext, actions as core, div, text,
+    App, DRAG_THRESHOLD, Element, EventCx, FontFeature, Model, Modifiers, Render, SharedString,
+    ValueRequest, View, ViewContext, actions as core, div, text,
 };
 use livspeil_ui_layout::{Point, Rect};
 use livspeil_ui_theme::MotionClass;
@@ -426,6 +426,7 @@ impl Render for NumberField {
                 text(self.format(value))
                     .key("value")
                     .font_size(m.font)
+                    .font_feature(FontFeature::TNUM)
                     .text_color(c.text_primary)
                     .hit_test(false),
             );

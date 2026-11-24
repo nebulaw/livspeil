@@ -85,4 +85,4 @@ pub use semantics::{
     ActionSet, Role, SCROLL_INTO_VIEW, SemanticAction, SemanticActionError, SemanticNode,
     SemanticRequest, SemanticValue, Semantics, Toggled, ValueRequest,
 };
-pub use text_measure::TextMeasurer;
+pub use text_measure::{FontFeature, FontSpec, TextMeasurer};

@@ -19,6 +19,7 @@ use crate::anim::Easing;
 use crate::app::EventCx;
 use crate::entity::{AnyView, Render, View};
 use crate::input::{ClickEvent, DragEvent, ImeEvent, KeyEvent, PointerEvent};
+use crate::text_measure::{FontFeature, FontSpec};
 
 /// Cheaply clonable string.
 pub type SharedString = Rc<str>;
@@ -216,12 +217,26 @@ impl fmt::Debug for Handlers {
     }
 }
 
-/// Text placeholder content (until `livspeil-ui-text` lands).
+/// The content and font of a text element; unset attributes come from
+/// the theme (body size, regular weight, primary text color).
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextSpec {
     pub(crate) text: SharedString,
     pub(crate) size: Option<f32>,
+    pub(crate) weight: Option<f32>,
+    pub(crate) features: Vec<FontFeature>,
     pub(crate) color: Option<Color>,
+}
+
+impl TextSpec {
+    /// The resolved font.
+    pub(crate) fn font(&self, theme: &livspeil_ui_theme::Theme) -> FontSpec {
+        FontSpec {
+            size: self.size.unwrap_or_else(|| theme.metrics().body),
+            weight: self.weight.unwrap_or(FontSpec::REGULAR),
+            features: self.features.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -255,12 +270,15 @@ pub fn div() -> Element {
     Element::new(ElementKind::Div)
 }
 
-/// A text element (placeholder box sized by character count).
+/// A text element, sized by the installed
+/// [`TextMeasurer`](crate::TextMeasurer).
 #[must_use]
 pub fn text(text: impl Into<SharedString>) -> Element {
     Element::new(ElementKind::Text(TextSpec {
         text: text.into(),
         size: None,
+        weight: None,
+        features: Vec::new(),
         color: None,
     }))
 }
@@ -589,6 +607,26 @@ impl Element {
     pub fn font_size(mut self, size: f32) -> Self {
         if let ElementKind::Text(t) = &mut self.kind {
             t.size = Some(size);
+        }
+        self
+    }
+
+    /// Font weight, CSS 1..=1000 (text elements; default 400).
+    #[must_use]
+    pub fn font_weight(mut self, weight: f32) -> Self {
+        if let ElementKind::Text(t) = &mut self.kind {
+            t.weight = Some(weight);
+        }
+        self
+    }
+
+    /// Add an OpenType feature, e.g. [`FontFeature::TNUM`] (text
+    /// elements). A later setting of the same tag replaces an earlier one.
+    #[must_use]
+    pub fn font_feature(mut self, feature: FontFeature) -> Self {
+        if let ElementKind::Text(t) = &mut self.kind {
+            t.features.retain(|f| f.tag != feature.tag);
+            t.features.push(feature);
         }
         self
     }

@@ -4,8 +4,8 @@
 //! Scene conversion, text caching and atlas uploads.
 
 use livspeil_ui_core::{
-    App, Element, ElementId, PaintCmd, Quad, Render, Scene, TestHost, TextRun, ViewContext, div,
-    text,
+    App, Element, ElementId, FontFeature, FontSpec, PaintCmd, Quad, Render, Scene, TestHost,
+    TextRun, ViewContext, div, text,
 };
 use livspeil_ui_layout::{Corners, Rect, Size, Transform2D, Vec2};
 use livspeil_ui_paint::{FontSystem, PaintBridge, PaintError, TextContext};
@@ -96,7 +96,7 @@ fn run(text: &str, rect: Rect) -> PaintCmd {
         element: ElementId::ROOT,
         rect,
         text: text.into(),
-        size: 13.0,
+        font: FontSpec::sized(13.0),
         color: Color::WHITE,
     })
 }
@@ -263,7 +263,7 @@ fn full_atlas_is_cleared_and_repainted() {
             element: ElementId::ROOT,
             rect: Rect::new(0.0, 0.0, 800.0, 40.0),
             text: "ABCDEFGHIJKLMNOPQRSTUVWXYZ".into(),
-            size,
+            font: FontSpec::sized(size),
             color: Color::WHITE,
         }));
     }
@@ -284,4 +284,63 @@ fn full_atlas_is_cleared_and_repainted() {
     assert_eq!(updates.len(), 1);
     assert_eq!(updates[0].atlas, 3);
     assert_eq!(updates[0].region[2..], updates[0].size);
+}
+
+#[test]
+fn core_text_weight_and_features_reach_the_shaper() {
+    let mut bridge = PaintBridge::new(FontSystem::test());
+    let measurer = bridge.text.measurer();
+    let regular = measurer.measure("Semibold 1111", &FontSpec::sized(15.0));
+    let bold = measurer.measure(
+        "Semibold 1111",
+        &FontSpec {
+            weight: 600.0,
+            ..FontSpec::sized(15.0)
+        },
+    );
+    assert!(bold.width > regular.width, "{bold:?} vs {regular:?}");
+    let digits = |f: Vec<FontFeature>| {
+        measurer
+            .measure(
+                "1111",
+                &FontSpec {
+                    features: f,
+                    ..FontSpec::sized(13.0)
+                },
+            )
+            .width
+    };
+    // Inter's proportional 1 is narrower than its tabular 1.
+    assert!(digits(vec![FontFeature::TNUM]) > digits(Vec::new()));
+
+    // Runs with different fonts shape separately and both paint.
+    let rect = Rect::new(0.0, 0.0, 200.0, 20.0);
+    let scene = Scene {
+        commands: vec![
+            run("1111", rect),
+            PaintCmd::Text(TextRun {
+                element: ElementId::ROOT,
+                rect,
+                text: "1111".into(),
+                font: FontSpec {
+                    weight: 600.0,
+                    features: vec![FontFeature::TNUM],
+                    ..FontSpec::sized(13.0)
+                },
+                color: Color::WHITE,
+            }),
+        ],
+    };
+    let mut list = DisplayList::new();
+    bridge.paint_scene(&scene, 1.0, &mut list).unwrap();
+    let runs: Vec<_> = list
+        .items
+        .iter()
+        .filter_map(|i| match &i.primitive {
+            Primitive::Glyphs(g) => Some(g),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(runs.len(), 2);
+    assert_ne!(runs[0].glyphs, runs[1].glyphs);
 }
