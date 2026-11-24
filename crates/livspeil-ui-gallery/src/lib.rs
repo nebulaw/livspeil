@@ -22,7 +22,8 @@ mod pages;
 use std::rc::Rc;
 
 use livspeil_ui_core::{
-    App, Element, Keymap, Keystroke, Model, Render, Role, View, ViewContext, div, text,
+    App, Element, ElementId, Keymap, Keystroke, Model, Render, Role, View, ViewContext, actions,
+    div, text,
 };
 use livspeil_ui_layout::Rect;
 use livspeil_ui_layout::style::length;
@@ -159,8 +160,10 @@ pub struct Mounted {
     pub env: Env,
     /// The gallery view.
     pub gallery: View<Gallery>,
-    /// The root view (gallery plus overlay layer), already the app root.
+    /// The widget root (gallery plus overlay layer).
     pub root: View<WidgetRoot>,
+    /// The app root: handles the page shortcuts whatever has focus.
+    pub shell: View<Shell>,
 }
 
 /// Build the gallery showing `page` and make it the app's root. Installs
@@ -179,8 +182,58 @@ pub fn mount(app: &mut App, fonts: FontSystem, page: Page) -> Mounted {
         state: Rc::new(state),
     });
     let root = env.root(app, gallery);
-    app.set_root(root);
-    Mounted { env, gallery, root }
+    let shell = app.new_view(Shell {
+        env: env.clone(),
+        page,
+        root,
+    });
+    app.set_root(shell);
+    // Actions bubble from the focused element, and with nothing focused
+    // from the core's window element only. Start with focus on the shell
+    // (the window's first child, focusable but not a tab stop) so the page
+    // shortcuts work before anything is clicked.
+    app.focus(ElementId::ROOT.child_index(0));
+    Mounted {
+        env,
+        gallery,
+        root,
+        shell,
+    }
+}
+
+/// The app root around the [`WidgetRoot`]. Actions bubble from the focused
+/// element to the root, so with nothing focused only the root sees them:
+/// the page shortcuts and the first Tab live here, and [`mount`] focuses it.
+pub struct Shell {
+    env: Env,
+    page: Model<Page>,
+    root: View<WidgetRoot>,
+}
+
+impl std::fmt::Debug for Shell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Shell").finish_non_exhaustive()
+    }
+}
+
+impl Render for Shell {
+    fn render(&mut self, _cx: &mut ViewContext<'_, Self>) -> Element {
+        let model = self.page;
+        let mut root = div().name("gallery-shell").w_full().h_full().tab_index(-1);
+        for p in Page::ALL {
+            root = root.on_action(&p.action(), move |cx| set_page(model, cx, p));
+        }
+        let (next, prev) = (self.env.clone(), self.env.clone());
+        root.on_action(actions::FOCUS_NEXT, move |cx| {
+            cx.focus_next();
+            next.sync_focus(cx);
+        })
+        .on_action(actions::FOCUS_PREV, move |cx| {
+            cx.focus_prev();
+            prev.sync_focus(cx);
+        })
+        .child(Element::view(&self.root))
+    }
 }
 
 /// The gallery view: sidebar, toolbar and the current page.
@@ -450,17 +503,14 @@ impl Render for Gallery {
         let view = cx.view();
         let reduce_motion = cx.motion().reduce_motion;
         let content = pages::render(page, &self.state, &self.env, view, cx);
-        let mut root = div()
+        div()
             .name("gallery")
             .w_full()
             .h_full()
             .bg(theme.colors().surface[0])
             .flex_row()
-            .clip();
-        for p in Page::ALL {
-            root = root.on_action(&p.action(), move |cx| set_page(model, cx, p));
-        }
-        root.child(backdrop(&theme))
+            .clip()
+            .child(backdrop(&theme))
             .child(sidebar(&theme, page, model))
             .child(
                 div()
