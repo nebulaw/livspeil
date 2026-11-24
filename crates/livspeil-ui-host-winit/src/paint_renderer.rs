@@ -86,6 +86,35 @@ pub fn clear_color(theme: &Theme) -> render::Color {
     render::Color::oklab(bg.l, bg.a, bg.b).with_alpha(bg.alpha)
 }
 
+/// Give every text run one more logical pixel of width.
+///
+/// Layout rounds element sizes to whole pixels, so a label measured at
+/// 65.8 px can get a 65 px box; the paint bridge wraps text whose natural
+/// width exceeds its box by more than half a pixel, which would break such
+/// a label (text fields lay out their text at its measured width) onto two
+/// lines. One extra pixel absorbs the rounding; text given a real width
+/// (paragraphs) still wraps where it should. [`PaintRenderer`] applies
+/// this to every scene.
+pub fn widen_text_runs(scene: &Scene) -> std::borrow::Cow<'_, Scene> {
+    use livspeil_ui_core::PaintCmd;
+    if !scene
+        .commands
+        .iter()
+        .any(|c| matches!(c, PaintCmd::Text(t) if t.rect.width > 0.0))
+    {
+        return std::borrow::Cow::Borrowed(scene);
+    }
+    let mut s = scene.clone();
+    for c in &mut s.commands {
+        if let PaintCmd::Text(t) = c
+            && t.rect.width > 0.0
+        {
+            t.rect.width += 1.0;
+        }
+    }
+    std::borrow::Cow::Owned(s)
+}
+
 fn renderer_error(e: impl std::error::Error + Send + Sync + 'static) -> HostError {
     HostError::Renderer(Box::new(e))
 }
@@ -126,9 +155,10 @@ impl SceneRenderer for PaintRenderer {
             return Ok(());
         };
         let mut list = render::DisplayList::new();
+        let scene = widen_text_runs(scene);
         let updates = self
             .bridge
-            .paint_scene(scene, target.scale, &mut list)
+            .paint_scene(&scene, target.scale, &mut list)
             .map_err(renderer_error)?;
         if !target.usage.contains(wgpu::TextureUsages::TEXTURE_BINDING) {
             without_backdrops(&mut list);

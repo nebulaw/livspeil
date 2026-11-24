@@ -2023,6 +2023,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "livspeil-ui-gallery"
+version = "0.0.0"
+dependencies = [
+ "livspeil-ui-a11y",
+ "livspeil-ui-core",
+ "livspeil-ui-host-winit",
+ "livspeil-ui-layout",
+ "livspeil-ui-paint",
+ "livspeil-ui-text",
+ "livspeil-ui-theme",
+ "livspeil-ui-widgets",
+ "log",
+]
+
+[[package]]
 name = "livspeil-ui-host-winit"
 version = "0.0.0"
 dependencies = [
@@ -2076,6 +2091,7 @@ name = "livspeil-ui-shot"
 version = "0.0.0"
 dependencies = [
  "livspeil-ui-core",
+ "livspeil-ui-gallery",
  "livspeil-ui-layout",
  "livspeil-ui-paint",
  "livspeil-ui-render",

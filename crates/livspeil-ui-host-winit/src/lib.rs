@@ -48,7 +48,7 @@ pub use options::{
     ActionHook, HostOptions, SurfaceOptions, Titlebar, WindowOptions, pick_format, surface_config,
 };
 #[cfg(feature = "widgets")]
-pub use paint_renderer::{PaintRenderer, clear_color, without_backdrops};
+pub use paint_renderer::{PaintRenderer, clear_color, widen_text_runs, without_backdrops};
 pub use platform::{
     Clipboard, ImeState, MemoryClipboard, SystemClipboard, cursor_icon, service_clipboard,
 };
