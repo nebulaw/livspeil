@@ -10,19 +10,25 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use livspeil_ui_core::{App, CursorShape, FrameScheduler, InputEvent, Scene};
+use livspeil_ui_core::{App, CursorShape, FrameScheduler, InputEvent, Keymap, Scene};
 use livspeil_ui_render::GpuContext;
 use livspeil_ui_theme::ConfigWatcher;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize, PhysicalSize};
 use winit::event::WindowEvent;
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowAttributes, WindowId};
 
+use crate::accessibility::Accessibility;
 use crate::input::{InputTranslator, KeyInput};
-use crate::options::{HostOptions, SurfaceOptions, Titlebar, WindowOptions, surface_config};
+use crate::options::{
+    ActionHook, HostOptions, SurfaceOptions, Titlebar, WindowOptions, surface_config,
+};
 use crate::pacing::{FrameTimes, Pacer, Wake};
 use crate::platform::{Clipboard, ImeState, SystemClipboard, cursor_icon, service_clipboard};
+use crate::widget_platform::{
+    CaretBlink, apply_config_event, role_cursor, scene_without, text_focus,
+};
 use crate::{HostError, RenderTarget, SceneRenderer};
 
 /// Open a window and run `app` in it until the window is closed.
@@ -32,8 +38,11 @@ use crate::{HostError, RenderTarget, SceneRenderer};
 /// # Errors
 /// Event loop, window, surface and device creation failures.
 pub fn run<R: SceneRenderer>(app: App, renderer: R, options: HostOptions) -> Result<(), HostError> {
-    let event_loop = EventLoop::new().map_err(|e| HostError::EventLoop(e.to_string()))?;
+    let event_loop = EventLoop::<HostEvent>::with_user_event()
+        .build()
+        .map_err(|e| HostError::EventLoop(e.to_string()))?;
     let mut host = Host::new(app, renderer, options);
+    host.set_proxy(event_loop.create_proxy());
     event_loop
         .run_app(&mut host)
         .map_err(|e| HostError::EventLoop(e.to_string()))?;
@@ -51,12 +60,28 @@ pub fn run<R: SceneRenderer>(app: App, renderer: R, options: HostOptions) -> Res
     }
 }
 
+/// User events of the host's event loop: requests from the platform
+/// accessibility adapter.
+#[derive(Debug)]
+pub enum HostEvent {
+    /// An `accesskit_winit` event (initial tree request, action request,
+    /// deactivation).
+    Accessibility(accesskit_winit::Event),
+}
+
+impl From<accesskit_winit::Event> for HostEvent {
+    fn from(e: accesskit_winit::Event) -> Self {
+        HostEvent::Accessibility(e)
+    }
+}
+
 struct Gfx {
     // Field order: the surface must drop before the window.
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     gpu: GpuContext,
     window: Arc<Window>,
+    accesskit: accesskit_winit::Adapter,
 }
 
 /// The desktop host. Usually driven by [`run`]; implements winit's
@@ -79,6 +104,13 @@ pub struct Host<R> {
     last_scene: Option<Scene>,
     times: FrameTimes,
     fatal: Option<HostError>,
+    proxy: Option<EventLoopProxy<HostEvent>>,
+    a11y: Accessibility,
+    action_hook: Option<ActionHook>,
+    blink: CaretBlink,
+    caret_blink: bool,
+    role_cursors: bool,
+    base_keymap: Keymap,
 }
 
 impl<R> std::fmt::Debug for Host<R> {
@@ -100,6 +132,8 @@ impl<R: SceneRenderer> Host<R> {
             .config
             .as_ref()
             .map(|_| options.config_poll_interval);
+        let base_keymap = app.keymap().clone();
+        let a11y = Accessibility::new(options.window.title.clone());
         Host {
             app,
             renderer,
@@ -118,7 +152,26 @@ impl<R: SceneRenderer> Host<R> {
             last_scene: None,
             times: FrameTimes::default(),
             fatal: None,
+            proxy: None,
+            a11y,
+            action_hook: options.after_accessibility_action,
+            blink: CaretBlink::new(Instant::now()),
+            caret_blink: options.caret_blink,
+            role_cursors: options.role_cursors,
+            base_keymap,
         }
+    }
+
+    /// The event loop proxy the accessibility adapter sends its requests
+    /// through ([`run`] sets it; without one there is no adapter).
+    pub fn set_proxy(&mut self, proxy: EventLoopProxy<HostEvent>) {
+        self.proxy = Some(proxy);
+    }
+
+    /// The keymap that `keymap.toml` extends on hot reload (by default the
+    /// app's keymap when the host was created).
+    pub fn set_base_keymap(&mut self, keymap: Keymap) {
+        self.base_keymap = keymap;
     }
 
     /// Replace the clipboard (tests, sandboxes).
@@ -143,7 +196,9 @@ impl<R: SceneRenderer> Host<R> {
             .with_title(o.title.clone())
             .with_inner_size(LogicalSize::new(o.size.0, o.size.1))
             .with_resizable(o.resizable)
-            .with_transparent(o.transparent);
+            .with_transparent(o.transparent)
+            // Shown after the accessibility adapter is attached.
+            .with_visible(false);
         if let Some((w, h)) = o.min_size {
             attrs = attrs.with_min_inner_size(LogicalSize::new(w, h));
         }
@@ -172,6 +227,12 @@ impl<R: SceneRenderer> Host<R> {
                 .create_window(self.window_attributes())
                 .map_err(|e| HostError::Window(e.to_string()))?,
         );
+        let proxy = self
+            .proxy
+            .clone()
+            .ok_or(HostError::EventLoop("no event loop proxy".to_owned()))?;
+        let accesskit = accesskit_winit::Adapter::with_event_loop_proxy(event_loop, &window, proxy);
+        window.set_visible(true);
         let instance =
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle_from_env(
                 Box::new(event_loop.owned_display_handle()),
@@ -218,6 +279,7 @@ impl<R: SceneRenderer> Host<R> {
                 adapter_info,
             },
             window,
+            accesskit,
         })
     }
 
@@ -269,11 +331,20 @@ impl<R: SceneRenderer> Host<R> {
             self.scheduler.end(frame.needs_next_frame);
             needs_next = frame.needs_next_frame;
             self.last_scene = Some(frame.scene);
+            self.after_frame();
         }
         // A system redraw (expose) with nothing new re-renders the last scene.
         let Some(scene) = &self.last_scene else {
             self.times.skip();
             return;
+        };
+        let blinked;
+        let scene = match self.blink.hidden_element() {
+            Some(caret) => {
+                blinked = scene_without(scene, caret);
+                &blinked
+            }
+            None => scene,
         };
         let Some(gfx) = &self.gfx else {
             return;
@@ -318,6 +389,61 @@ impl<R: SceneRenderer> Host<R> {
         self.request_next(needs_next);
     }
 
+    /// After a frame: send accessibility changes, follow the caret.
+    fn after_frame(&mut self) {
+        let scale = self.translator.scale();
+        if let Some(update) = self.a11y.update(&self.app, scale)
+            && let Some(gfx) = &mut self.gfx
+        {
+            gfx.accesskit.update_if_active(|| update);
+        }
+        self.follow_caret();
+    }
+
+    fn follow_caret(&mut self) {
+        if !self.caret_blink {
+            return;
+        }
+        let caret = text_focus(&self.app).and_then(|t| {
+            let id = t.caret?;
+            Some((id, self.app.bounds(id)?))
+        });
+        if self.blink.set_caret(Instant::now(), caret) {
+            self.request_redraw();
+        }
+    }
+
+    fn request_redraw(&mut self) {
+        if self.pacer.want_redraw(true)
+            && let Some(gfx) = &self.gfx
+        {
+            gfx.window.request_redraw();
+        }
+    }
+
+    fn accessibility_event(&mut self, event: accesskit_winit::WindowEvent) {
+        let scale = self.translator.scale();
+        match event {
+            accesskit_winit::WindowEvent::InitialTreeRequested => {
+                let update = self.a11y.initial_tree(&self.app, scale);
+                if let Some(gfx) = &mut self.gfx {
+                    gfx.accesskit.update_if_active(|| update);
+                }
+            }
+            accesskit_winit::WindowEvent::ActionRequested(request) => {
+                match Accessibility::handle_action(&mut self.app, request) {
+                    Ok(_) => {}
+                    Err(e) => log::warn!("accessibility: {e}"),
+                }
+                if let Some(hook) = &mut self.action_hook {
+                    (hook.0)(&mut self.app);
+                }
+                self.blink.activity(Instant::now());
+            }
+            accesskit_winit::WindowEvent::AccessibilityDeactivated => self.a11y.deactivate(),
+        }
+    }
+
     fn request_next(&mut self, needs_next: bool) {
         if self.pacer.frame_done(needs_next)
             && let Some(gfx) = &self.gfx
@@ -332,22 +458,32 @@ impl<R: SceneRenderer> Host<R> {
         }
         let mut moved = false;
         let mut pointer = false;
+        let mut activity = false;
         for e in self.events.drain(..) {
             match &e {
                 InputEvent::Pointer(p) => {
                     pointer = true;
                     moved |= p.kind == livspeil_ui_core::PointerKind::Move;
+                    activity |= p.kind != livspeil_ui_core::PointerKind::Move;
                 }
                 InputEvent::PointerLeft => pointer = true,
-                _ => {}
+                _ => activity = true,
             }
             self.app.dispatch(e);
+        }
+        if activity {
+            self.blink.activity(Instant::now());
         }
         if pointer {
             let requested = self.app.take_cursor_request();
             let shape = match requested {
                 Some(s) => Some(s),
-                None if moved => Some(CursorShape::Default),
+                // Keep the shape during a press or drag.
+                None if moved && self.translator.buttons_held() => None,
+                None if moved => Some(match self.translator.pointer_position() {
+                    Some(p) if self.role_cursors => role_cursor(&self.app, p),
+                    _ => CursorShape::Default,
+                }),
                 None => None,
             };
             if let Some(shape) = shape {
@@ -373,7 +509,13 @@ impl<R: SceneRenderer> Host<R> {
     }
 
     fn sync_ime(&mut self) {
-        let want = ImeState::of(&self.app);
+        let want = match text_focus(&self.app) {
+            Some(t) => ImeState {
+                allowed: true,
+                area: Some(t.area),
+            },
+            None => ImeState::OFF,
+        };
         if want == self.ime {
             return;
         }
@@ -402,14 +544,14 @@ impl<R: SceneRenderer> Host<R> {
             return;
         };
         for event in watcher.poll_now() {
-            if let Err(e) = self.app.apply_config_event(event) {
+            if let Err(e) = apply_config_event(&mut self.app, &self.base_keymap, event) {
                 log::warn!("config: {e}");
             }
         }
     }
 }
 
-impl<R: SceneRenderer> ApplicationHandler for Host<R> {
+impl<R: SceneRenderer> ApplicationHandler<HostEvent> for Host<R> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.gfx.is_some() {
             return;
@@ -443,6 +585,9 @@ impl<R: SceneRenderer> ApplicationHandler for Host<R> {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        if let Some(gfx) = &mut self.gfx {
+            gfx.accesskit.process_event(&gfx.window, &event);
+        }
         let now = self.now();
         let out = &mut self.events;
         let t = &mut self.translator;
@@ -474,8 +619,17 @@ impl<R: SceneRenderer> ApplicationHandler for Host<R> {
         self.dispatch_events();
     }
 
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: HostEvent) {
+        match event {
+            HostEvent::Accessibility(e) => self.accessibility_event(e.window_event),
+        }
+    }
+
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.poll_config();
+        if self.blink.poll(Instant::now()) {
+            self.request_redraw();
+        }
         if let Some(text) = service_clipboard(&mut self.app, self.clipboard.as_mut()) {
             self.app.dispatch(InputEvent::Text(text));
         }
@@ -487,9 +641,14 @@ impl<R: SceneRenderer> ApplicationHandler for Host<R> {
         {
             gfx.window.request_redraw();
         }
-        event_loop.set_control_flow(match self.pacer.wake() {
-            Wake::Never => ControlFlow::Wait,
-            Wake::At(t) => ControlFlow::WaitUntil(t),
+        let wake = match (self.pacer.wake(), self.blink.deadline()) {
+            (Wake::Never, None) => None,
+            (Wake::At(t), None) | (Wake::Never, Some(t)) => Some(t),
+            (Wake::At(a), Some(b)) => Some(a.min(b)),
+        };
+        event_loop.set_control_flow(match wake {
+            None => ControlFlow::Wait,
+            Some(t) => ControlFlow::WaitUntil(t),
         });
     }
 }

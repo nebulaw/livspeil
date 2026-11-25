@@ -80,6 +80,17 @@ impl Default for SurfaceOptions {
     }
 }
 
+/// Called with the app after an accessibility action was performed (for
+/// example to let `livspeil-ui-widgets`' `Env` see focus changes:
+/// `move |app| env.sync_focus(app)`).
+pub struct ActionHook(pub Box<dyn FnMut(&mut livspeil_ui_core::App)>);
+
+impl std::fmt::Debug for ActionHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ActionHook")
+    }
+}
+
 /// Everything [`run`](crate::run) needs besides the app and renderer.
 #[derive(Debug)]
 pub struct HostOptions {
@@ -92,6 +103,15 @@ pub struct HostOptions {
     pub config: Option<ConfigWatcher>,
     /// How often the config files are polled.
     pub config_poll_interval: Duration,
+    /// Derive cursor shapes from the role of the element under the pointer
+    /// when no handler asks for one (pointing hand for buttons, I-beam for
+    /// text fields, east-west resize for sliders and scrub fields). On by
+    /// default.
+    pub role_cursors: bool,
+    /// Blink the caret of the focused text input. On by default.
+    pub caret_blink: bool,
+    /// See [`ActionHook`].
+    pub after_accessibility_action: Option<ActionHook>,
 }
 
 impl Default for HostOptions {
@@ -101,6 +121,9 @@ impl Default for HostOptions {
             surface: SurfaceOptions::default(),
             config: None,
             config_poll_interval: Duration::from_millis(500),
+            role_cursors: true,
+            caret_blink: true,
+            after_accessibility_action: None,
         }
     }
 }
@@ -124,6 +147,23 @@ impl HostOptions {
     #[must_use]
     pub fn present_mode(mut self, mode: wgpu::PresentMode) -> Self {
         self.surface.present_mode = mode;
+        self
+    }
+
+    /// Set the minimum logical size.
+    #[must_use]
+    pub fn min_size(mut self, width: f64, height: f64) -> Self {
+        self.window.min_size = Some((width, height));
+        self
+    }
+
+    /// Run `f` after each accessibility action (see [`ActionHook`]).
+    #[must_use]
+    pub fn after_accessibility_action(
+        mut self,
+        f: impl FnMut(&mut livspeil_ui_core::App) + 'static,
+    ) -> Self {
+        self.after_accessibility_action = Some(ActionHook(Box::new(f)));
         self
     }
 

@@ -266,6 +266,12 @@ impl InputTranslator {
         self.position
     }
 
+    /// Whether a mouse button is held (a press or drag is in progress).
+    #[must_use]
+    pub fn buttons_held(&self) -> bool {
+        !self.buttons.is_empty()
+    }
+
     /// Whether an IME composition (non-empty preedit) is in progress.
     #[must_use]
     pub fn is_composing(&self) -> bool {
