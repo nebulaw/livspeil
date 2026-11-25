@@ -922,7 +922,7 @@ impl Render for MenuPopup {
                         }
                         row = row.child(
                             div().key("arrow").w(MARK).hit_test(false).child(
-                                text(if arrow { "▸" } else { "" })
+                                text(if arrow { "›" } else { "" })
                                     .font_size(m.font)
                                     .text_color(fg),
                             ),
