@@ -152,6 +152,13 @@ impl Render for MinimapNodes {
     }
 }
 
+/// What the minimap shows: the graph with a margin of half its size (so
+/// the viewport frame stays readable around it).
+fn minimap_bounds(cache: &GraphCache) -> Rect {
+    let b = graph_bounds(cache);
+    b.inflate(b.width.max(b.height) * 0.15)
+}
+
 /// Maps graph bounds into the minimap: `(scale, offset)` with
 /// `minimap = canvas × scale + offset`.
 #[must_use]
@@ -620,7 +627,7 @@ fn port_drag<M: NodeGraphModel>(
 fn minimap_jump<M: NodeGraphModel>(view: View<NodeCanvas<M>>, cx: &mut App, at: Point, mini: Rect) {
     view.update(cx, |s, vcx| {
         let Some(cache) = &s.cache else { return };
-        let (k, off) = minimap_mapping(graph_bounds(cache), MINIMAP, 8.0);
+        let (k, off) = minimap_mapping(minimap_bounds(cache), MINIMAP, 8.0);
         let local = at - mini.origin();
         let c = (local - off) * (1.0 / k);
         s.canvas.pan = Vec2::new(s.size.width / 2.0, s.size.height / 2.0) - c * s.canvas.zoom;
@@ -762,6 +769,7 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
             .key(format!("node-{id}"))
             .name(format!("node:{}", n.title))
             .absolute(n.rect)
+            .flex_col()
             .rounded(theme.tokens.radii.sm + 2.0)
             .bg(col.surface[1].with_alpha(0.97))
             .border(
@@ -1055,7 +1063,7 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
 
         // Minimap.
         if self.show_minimap && !cache.nodes.is_empty() {
-            let bounds = graph_bounds(&cache);
+            let bounds = minimap_bounds(&cache);
             let (k, off) = minimap_mapping(bounds, MINIMAP, 8.0);
             let sel_count = self.selection.len();
             let rects: Vec<(Rect, bool)> = cache

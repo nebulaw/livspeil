@@ -187,6 +187,16 @@ impl Env {
         })
     }
 
+    /// Focus the widget root itself (no focus ring), so app-wide keys
+    /// handled by [`WidgetRoot`] (F10, Alt+letter for the menu bar) work
+    /// before anything else has focus. Hosts call this once at startup;
+    /// pressing anywhere in the window has the same effect.
+    pub fn focus_root(&self, app: &mut App) {
+        if let Some(root) = app.find("widget-root") {
+            self.focus(app, root);
+        }
+    }
+
     /// Focus `id` and let focus-aware widgets know.
     pub fn focus(&self, app: &mut App, id: ElementId) {
         app.focus(id);

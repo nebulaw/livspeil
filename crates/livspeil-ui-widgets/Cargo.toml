@@ -3,7 +3,7 @@
 
 [package]
 name = "livspeil-ui-widgets"
-description = "Livspeil UI widgets: buttons, toggles, sliders, number and text fields, select, tooltip"
+description = "Livspeil UI widgets: controls, fields, select, tooltip, scroll views, docks, menus, titlebar, node canvas"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,8 +19,13 @@ livspeil-ui-text = { path = "../livspeil-ui-text" }
 livspeil-ui-theme = { path = "../livspeil-ui-theme" }
 
 [dev-dependencies]
+criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
 livspeil-testkit = { path = "../livspeil-testkit" }
 proptest = "1"
+
+[[bench]]
+name = "node_canvas"
+harness = false
 
 [lints]
 workspace = true

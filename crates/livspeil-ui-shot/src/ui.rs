@@ -18,7 +18,7 @@ use livspeil_ui_widgets::{Button, Slider, Toggle};
 use crate::ShotError;
 use crate::scenes::{Scene, Shot, surface};
 
-fn paint_err(e: impl std::fmt::Display) -> ShotError {
+pub(crate) fn paint_err(e: impl std::fmt::Display) -> ShotError {
     ShotError::Scene(e.to_string())
 }
 
@@ -59,7 +59,7 @@ fn translated(scene: CoreScene, dx: f32, dy: f32, out: &mut CoreScene) {
     out.commands.push(PaintCmd::PopTransform);
 }
 
-fn finish(
+pub(crate) fn finish(
     mut bridge: PaintBridge,
     scene: &CoreScene,
     scale: f32,
@@ -358,7 +358,7 @@ fn dark() -> Color {
 }
 
 /// A scene at 1x and 2x (`names` are the two scene names).
-fn pair(
+pub(crate) fn pair(
     names: [&'static str; 2],
     description: &'static str,
     width: u32,
