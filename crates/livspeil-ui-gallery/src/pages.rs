@@ -16,6 +16,7 @@ use livspeil_ui_widgets::{
     SegmentedControl, Select, Slider, TextField, Toggle, Tooltip,
 };
 
+use crate::containers::{self, Containers};
 use crate::{Gallery, Page, edit_motion, edit_theme, tier_control};
 
 /// Models and stateful widgets of every page.
@@ -74,6 +75,8 @@ pub struct State {
     pub locked_layer: Model<bool>,
     /// Theme page: density sample values.
     pub blend: Model<usize>,
+    /// The container pages (scroll, dock, menus, node canvas).
+    pub containers: Containers,
 }
 
 impl std::fmt::Debug for State {
@@ -217,11 +220,12 @@ impl State {
             visible: app.new_model(true),
             locked_layer: app.new_model(false),
             blend: app.new_model(0),
+            containers: Containers::new(app, env),
         }
     }
 }
 
-fn set<T: PartialEq + 'static>(m: Model<T>, app: &mut App, v: T) {
+pub(crate) fn set<T: PartialEq + 'static>(m: Model<T>, app: &mut App, v: T) {
     if *m.read(app) != v {
         m.update(app, |x, cx| {
             *x = v;
@@ -232,14 +236,14 @@ fn set<T: PartialEq + 'static>(m: Model<T>, app: &mut App, v: T) {
 
 // ---- building blocks -------------------------------------------------
 
-fn caption(theme: &Theme, s: impl Into<String>) -> Element {
+pub(crate) fn caption(theme: &Theme, s: impl Into<String>) -> Element {
     text(s.into())
         .font_size(theme.tokens.type_scale.sizes[1])
         .text_color(theme.colors().text_secondary)
 }
 
 /// A Solid card with a small heading.
-fn card(theme: &Theme, title: &'static str) -> Element {
+pub(crate) fn card(theme: &Theme, title: &'static str) -> Element {
     div()
         .flex_col()
         .gap(12.0)
@@ -255,12 +259,12 @@ fn card(theme: &Theme, title: &'static str) -> Element {
         )
 }
 
-fn row() -> Element {
+pub(crate) fn row() -> Element {
     div().flex_row().items_center().gap(12.0)
 }
 
 /// Two equal columns.
-fn columns(left: Element, right: Element) -> Element {
+pub(crate) fn columns(left: Element, right: Element) -> Element {
     let col = |e: Element| {
         e.grow().style(|s| {
             s.flex_basis = length(0.0);
@@ -274,7 +278,7 @@ fn columns(left: Element, right: Element) -> Element {
         .child(col(right))
 }
 
-fn column() -> Element {
+pub(crate) fn column() -> Element {
     div().flex_col().gap(16.0)
 }
 
@@ -303,6 +307,10 @@ pub(crate) fn render(
         Page::Sliders => sliders(&theme, state, cx),
         Page::TextFields => text_fields(&theme, state, cx),
         Page::Select => selects(&theme, state, env),
+        Page::Scroll => containers::scroll(&theme, &state.containers),
+        Page::Dock => containers::dock(&theme, &state.containers, view, cx),
+        Page::Menus => containers::menus(&theme, &state.containers, env, cx),
+        Page::NodeCanvas => containers::node_canvas(&theme, &state.containers, cx),
         Page::Materials => materials(&theme),
         Page::Typography => typography(&theme),
         Page::Motion => motion(&theme, state, view, cx),
