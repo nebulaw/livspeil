@@ -341,8 +341,8 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
         self.cache.as_deref()
     }
 
-    /// The canvas element's window origin and size (as of the last pointer
-    /// event; the window size before any).
+    /// The canvas element's window origin and size (from the last layout
+    /// or pointer event; the window size before either).
     #[must_use]
     pub fn frame(&self) -> (Point, Size) {
         (self.origin, self.size)
@@ -661,6 +661,7 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
         cx: &mut ViewContext<'_, Self>,
         node: NodeId,
         index: usize,
+        name: &SharedString,
         value: ParamValue,
     ) -> Option<Element> {
         let ParamValue::Number {
@@ -679,6 +680,7 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
                 let f = cx.new_view(
                     NumberField::new(&self.env, m, min, max, step)
                         .width(84.0)
+                        .accessible_label(name.clone())
                         .name(format!("param:{node}:{index}")),
                 );
                 let graph = self.model;
@@ -765,21 +767,14 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
         let m = metrics(theme);
         let cm = c.cache.metrics;
         let id = n.id;
+        let radius = theme.tokens.radii.sm + 2.0;
         let mut card = div()
             .key(format!("node-{id}"))
             .name(format!("node:{}", n.title))
             .absolute(n.rect)
             .flex_col()
-            .rounded(theme.tokens.radii.sm + 2.0)
+            .rounded(radius)
             .bg(col.surface[1].with_alpha(0.97))
-            .border(
-                if c.selected { 2.0 } else { 1.0 },
-                if c.selected {
-                    theme.accent()
-                } else {
-                    style::hairline(theme).with_alpha(0.12)
-                },
-            )
             .on_pointer_down(move |ev, cx| {
                 if matches!(ev.kind, PointerKind::Down(MouseButton::Left)) {
                     node_down(view, id, cx);
@@ -803,11 +798,13 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
                 if c.selected { theme.accent() } else { tint },
             ));
         }
-        card = card.elevation(if c.selected {
-            Elevation::E2
-        } else {
-            Elevation::E1
-        });
+        card = card
+            .border(1.0, style::hairline(theme).with_alpha(0.12))
+            .elevation(if c.selected {
+                Elevation::E2
+            } else {
+                Elevation::E1
+            });
         let header = div()
             .key("header")
             .h(cm.header)
@@ -859,7 +856,7 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
             }
             for (i, p) in n.params.iter().enumerate() {
                 let control = match p.value {
-                    ParamValue::Number { .. } => self.param_field(cx, id, i, p.value),
+                    ParamValue::Number { .. } => self.param_field(cx, id, i, &p.name, p.value),
                     ParamValue::Toggle(on) => {
                         let graph = self.model;
                         Some(
@@ -888,6 +885,19 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
                 }
                 card = card.child(row.children(control));
             }
+        }
+        if c.selected {
+            // The selection ring paints above the header and rows (which
+            // would cover a border drawn with the card's own quad), below
+            // the port dots.
+            card = card.child(
+                div()
+                    .key("selection-ring")
+                    .style(fill)
+                    .rounded(radius)
+                    .border(2.0, theme.accent())
+                    .hit_test(false),
+            );
         }
         for side in [PortSide::Input, PortSide::Output] {
             for index in 0..n.ports(side).len() {
@@ -937,6 +947,13 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
             }
         }
 
+        // The canvas's own size from the last layout (re-rendered when it
+        // changes), so culling and the minimap are right before any
+        // pointer event.
+        if let Some(b) = cx.layout_bounds().filter(|b| b.width > 0.0) {
+            self.origin = b.origin();
+            self.size = b.size();
+        }
         let size = if self.size.width > 0.0 {
             self.size
         } else {

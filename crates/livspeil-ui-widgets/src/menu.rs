@@ -1085,6 +1085,19 @@ impl MenuBar {
         self
     }
 
+    /// Replace menu `index` (for example to update check marks after a
+    /// choice); an open popup keeps showing the old menu until reopened.
+    /// Returns whether `index` exists.
+    pub fn replace_menu(&mut self, index: usize, menu: Menu) -> bool {
+        match self.menus.get_mut(index) {
+            Some(slot) => {
+                slot.1 = Rc::new(menu);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The open menu's index.
     #[must_use]
     pub fn open_menu(&self) -> Option<usize> {
@@ -1162,8 +1175,12 @@ impl MenuBar {
     }
 
     /// Open the menu whose title starts with `c` (Alt+letter); returns
-    /// whether one matched.
+    /// whether one matched. A bar that is not in the tree (registered but
+    /// not shown) opens nothing.
     pub fn open_mnemonic(view: View<MenuBar>, app: &mut App, c: char) -> bool {
+        if app.find(view.read(app).element_name()).is_none() {
+            return false;
+        }
         let hit = view.read(app).menus.iter().position(|(t, _)| {
             t.chars()
                 .next()

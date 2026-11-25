@@ -373,3 +373,22 @@ fn menu_semantics() {
     let bar = f.bar.read(&f.h.app).semantics().to_string();
     assert!(bar.starts_with("MenuBar"), "{bar}");
 }
+
+#[test]
+fn a_registered_bar_that_is_not_shown_ignores_mnemonics() {
+    let mut out = None;
+    let (mut h, env) = host_sized(Size::new(400.0, 300.0), |app, env| {
+        let bar =
+            app.new_view(MenuBar::new(env).menu("Edit", Menu::new().item(MenuItem::new("Undo"))));
+        env.set_menubar(bar);
+        out = Some(bar);
+        Box::new(|_| div().name("other").size(100.0, 40.0).focusable())
+    });
+    h.run_until_idle(100);
+    env.focus_root(&mut h.app);
+    h.key("alt-e");
+    h.run_until_idle(100);
+    let bar = out.unwrap();
+    assert_eq!(bar.read(&h.app).open_menu(), None);
+    assert!(env.menus().is_none_or(|p| !p.read(&h.app).is_open()));
+}

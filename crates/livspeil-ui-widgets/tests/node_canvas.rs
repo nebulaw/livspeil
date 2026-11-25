@@ -420,3 +420,46 @@ fn parameters_edit_the_model() {
     };
     assert!((value - 0.51).abs() < 1e-9, "{value}");
 }
+
+#[test]
+fn selection_ring_paints_above_the_header_and_frame_comes_from_layout() {
+    let mut out = None;
+    let (mut h, _) = host_sized(Size::new(900.0, 600.0), |app, env| {
+        let graph = app.new_model(DemoGraph::sample());
+        let view = app.new_view(NodeCanvas::new(env, graph));
+        out = Some(view);
+        Box::new(move |_| div().w_full().h_full().p(20.0).child(Element::view(&view)))
+    });
+    let view = out.unwrap();
+    h.run_until_idle(100);
+    // No pointer event yet: the frame is the canvas's laid-out box.
+    let (origin, size) = view.read(&h.app).frame();
+    assert_eq!(
+        (origin, size),
+        (Point::new(20.0, 20.0), Size::new(860.0, 560.0))
+    );
+    view.update(&mut h.app, |v, cx| {
+        v.set_selection([3]);
+        cx.notify();
+    });
+    h.run_until_idle(100);
+    let card = find(&h, "node:Mix");
+    let kids: Vec<String> = h
+        .app
+        .children_of(card)
+        .into_iter()
+        .filter_map(|c| h.app.label(c))
+        .collect();
+    let header = kids.iter().position(|k| k == "header").unwrap();
+    let ring = kids.iter().position(|k| k == "selection-ring").unwrap();
+    let first_port = kids.iter().position(|k| k.starts_with("port:")).unwrap();
+    assert!(header < ring && ring < first_port, "{kids:?}");
+    // The parameter field is named for assistive technology.
+    let field = find(&h, "param:3:0");
+    assert_eq!(
+        h.app
+            .semantic_node(field)
+            .and_then(|n| n.label().map(str::to_owned)),
+        Some("Factor".to_owned())
+    );
+}
