@@ -10,12 +10,19 @@ use livspeil_ui_render::{
     Quad, Radii, Rect, RenderError, Renderer, RgbaImage, Shadow, TARGET_FORMAT, encode, render_cpu,
     render_cpu_with,
 };
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
-fn gpu() -> Option<(GpuContext, Renderer)> {
+/// Software Vulkan (lavapipe in CI) can crash when several devices are
+/// created and dropped on parallel test threads, so GPU tests hold this
+/// lock for their whole run.
+static GPU_LOCK: Mutex<()> = Mutex::new(());
+
+fn gpu() -> Option<(MutexGuard<'static, ()>, GpuContext, Renderer)> {
+    let guard = GPU_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
     match GpuContext::headless() {
         Ok(ctx) => {
             let r = Renderer::new(&ctx.device, TARGET_FORMAT);
-            Some((ctx, r))
+            Some((guard, ctx, r))
         }
         Err(RenderError::NoAdapter(e)) => {
             eprintln!("SKIPPING GPU test: no wgpu adapter ({e})");
@@ -151,7 +158,7 @@ fn mixed_list() -> DisplayList {
 
 #[test]
 fn gpu_matches_cpu() {
-    let Some((ctx, mut renderer)) = gpu() else {
+    let Some((_gpu, ctx, mut renderer)) = gpu() else {
         return;
     };
     eprintln!("adapter: {:?}", ctx.adapter_info);
@@ -171,7 +178,7 @@ fn gpu_matches_cpu() {
 
 #[test]
 fn backdrop_first_and_empty_frames() {
-    let Some((ctx, mut renderer)) = gpu() else {
+    let Some((_gpu, ctx, mut renderer)) = gpu() else {
         return;
     };
     let mut list = DisplayList::new();
@@ -334,7 +341,7 @@ fn glyphs_gpu_matches_cpu() {
         assert_eq!(cpu.pixel(21, 7), Some([0, 0, 0, 255]));
         // Without the atlas no text is drawn.
         assert_eq!(render_cpu(&frame).pixel(21, 7), Some([255, 255, 255, 255]));
-        let Some((ctx, mut renderer)) = gpu() else {
+        let Some((_gpu, ctx, mut renderer)) = gpu() else {
             return;
         };
         renderer
