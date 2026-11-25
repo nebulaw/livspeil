@@ -11,6 +11,9 @@
 //!   [`Tooltip`].
 //! - Views with editing or popup state: [`Slider`], [`NumberField`],
 //!   [`TextField`], [`Select`].
+//! - Containers and chrome: [`ScrollView`] / [`VirtualList`], [`Panel`],
+//!   [`DockView`], [`Menu`] / [`MenuBar`] / [`ContextMenu`], [`Titlebar`].
+//! - [`NodeCanvas`]: the node editor over any [`NodeGraphModel`].
 //! - [`Env`] holds fonts, the clipboard and focus tracking, and installs the
 //!   widget keymap; [`Env::root`] wraps the content in a [`WidgetRoot`]
 //!   whose overlay layer hosts popups and tooltips.

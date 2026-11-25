@@ -25,7 +25,7 @@ use crate::ui::{finish, pair};
 
 /// A root view built by a closure.
 struct Content {
-    build: Box<dyn Fn(&mut ViewContext<'_, Content>) -> Element>,
+    build: Build,
 }
 
 impl Render for Content {
