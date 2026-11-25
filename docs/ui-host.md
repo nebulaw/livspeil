@@ -10,7 +10,11 @@ The desktop host runs a `livspeil-ui-core` `App` in a native window: winit
 first; Linux (X11 and Wayland, both loaded at run time) also works. It
 backs the gallery and the Dream Mode app (UI spec, section 11).
 
-## Running the example
+## Running the gallery and the example
+
+The component gallery (`crates/livspeil-ui-gallery`) is the fully wired
+host app: `cargo run -p livspeil-ui-gallery` (see `README.md`, "Try the
+gallery").
 
 ```sh
 cargo run -p livspeil-ui-host-winit --example hello
@@ -19,16 +23,11 @@ cargo run -p livspeil-ui-host-winit --example hello
 On macOS this opens a window with a full-size content view under the
 native (transparent) titlebar, with a `livspeil-ui-widgets` Button, Toggle
 and Slider on a Frost card over two colored shapes. It renders through
-Metal. The example's `PaintRenderer` is a complete `SceneRenderer`: the
-`livspeil-ui-paint` bridge turns each scene into a display list plus glyph
-atlas uploads, which it applies to a `livspeil-ui-render` `Renderer` before
-encoding and drawing the frame (it re-uploads the whole atlas when the
-surface format changes, and falls back to opaque material tints when the
-surface cannot be sampled for backdrop blur).
+Metal, through the library's `PaintRenderer`.
 
 Things to try: hover and click the button (the cursor becomes a pointing
-hand), click the toggle, drag the slider (grab cursor), press Tab to move
-focus, and use the arrow keys on the slider. When nothing moves, the
+hand), click the toggle, drag the slider (east-west resize cursor), press
+Tab to move focus, and use the arrow keys on the slider. When nothing moves, the
 process uses no CPU and draws no frames.
 
 If `~/.config/livspeil/ui/` exists, `theme.toml`, `motion.toml` and
@@ -43,8 +42,31 @@ cargo build -p livspeil-ui-host-winit --examples
 ## Using the host
 
 ```rust
-livspeil_ui_host_winit::run(app, my_scene_renderer, HostOptions::default().title("Gallery"))?;
+let renderer = PaintRenderer::for_theme(PaintBridge::new(FontSystem::new()), app.theme());
+renderer.install_measurer(&mut app); // layout and paint share one shaping cache
+let env = Env::new(&mut app, FontSystem::new());
+WidgetClipboard::install_system(&env); // copy/paste in text fields
+// ... mount views ...
+let options = HostOptions::default()
+    .title("Gallery") // also the accessibility root's name
+    .after_accessibility_action(move |app| env.sync_focus(app));
+livspeil_ui_host_winit::run(app, renderer, options)?;
 ```
+
+### `PaintRenderer` (feature `widgets`, on by default)
+
+The standard `SceneRenderer`: the `livspeil-ui-paint` bridge turns each
+scene into a display list plus glyph atlas uploads, which it applies to a
+`livspeil-ui-render` `Renderer` before encoding and drawing the frame.
+It rebuilds the GPU renderer (and re-uploads the whole glyph atlas) when
+the surface format changes, and when the surface cannot be sampled
+(no `TEXTURE_BINDING`) it replaces every backdrop with an opaque quad of
+its tint (`without_backdrops`: the T0 / Reduce transparency look). It
+also widens each text run by one pixel (`widen_text_runs`): layout rounds
+boxes to whole pixels, and the paint bridge wraps text that exceeds its
+box by more than half a pixel, which would break labels laid out at their
+measured width. Without the feature the host has no `livspeil-ui-paint`
+or `livspeil-ui-widgets` dependency.
 
 - `HostOptions`: `WindowOptions` (title, logical size, minimum size,
   resizable, `transparent` (a hook for later), and the macOS `Titlebar`:
@@ -107,11 +129,68 @@ or the text is a control character. Option-produced characters are text.
 Each frame's pointer events carry a monotonic `time`, which the core uses
 for velocity.
 
+## Accessibility
+
+`accesskit_winit` (0.34, AccessKit 0.25) is attached to the window. The
+window is created hidden, the adapter is attached, then the window is
+shown (an AccessKit requirement). Adapter requests arrive as
+`HostEvent::Accessibility` user events through an event loop proxy (the
+event loop is `EventLoop<HostEvent>`, and `Host` implements
+`ApplicationHandler<HostEvent>`).
+
+The logic is in `Accessibility`, which needs no window and is tested with
+real widgets (`tests/glue.rs`):
+
+- Initial tree request (VoiceOver on, Cmd+F5): the full tree from
+  `livspeil-ui-a11y`'s `A11yTree`. Before the app has a root, a single
+  window node is sent.
+- After every frame, while active: only the nodes that changed (or
+  nothing). Focus changes are part of the update.
+- Action requests (press, focus, blur, increment, decrement, set value,
+  scroll into view) go to `livspeil_ui_a11y::handle_action`. Failures are
+  logged. `HostOptions::after_accessibility_action` runs afterwards, for
+  example so the widgets' `Env` sees a focus change.
+- Deactivation stops updates; the next activation sends everything again.
+- The window title names the root node unless the app labels it.
+
+## Widget platform glue
+
+`widget_platform` derives what widgets need from the retained tree, with
+no window (tested headlessly):
+
+- **Focused text input**: `text_focus(&app)` uses `App::text_input()` if
+  a widget reported one, otherwise the focused element with the
+  `TextInput` role (or a `SpinButton` being edited, which draws a caret or
+  selection) and its descendant keyed `caret`. Its caret rectangle (the
+  field's bounds while a selection is shown) places the IME candidate
+  window, and IME is allowed only while there is such an input.
+- **Caret blink** (`CaretBlink`): a 530 ms timer that runs only while a
+  caret is drawn. Input and caret moves show the caret and restart the
+  period. After 15 s without input it stops with the caret shown, so an
+  idle window does not wake. While hidden, the caret element's paint
+  commands are left out of the re-rendered last scene (no app frame is
+  drawn for a blink). `HostOptions::caret_blink` turns it off.
+- **Cursor shapes**: when no handler requested a cursor, `role_cursor`
+  picks one from the nearest ancestor with a role: pointing hand for
+  buttons, links, check boxes, switches, radios, tabs, combo boxes,
+  options and menu items; I-beam for text inputs (and a number field
+  being edited); east-west resize for sliders and number fields (drag and
+  scrub); the arrow for disabled controls. While a button is held the
+  shape does not change. `HostOptions::role_cursors` turns it off.
+- **Clipboard for widgets**: `WidgetClipboard` adapts a host `Clipboard`
+  to the widgets' `Env` clipboard; `WidgetClipboard::install_system(&env)`
+  installs the system clipboard.
+- **Keymap hot reload**: `keymap.toml` extends the app's keymap as it was
+  when the host was created (defaults, widget keymap, app shortcuts), not
+  the bare defaults; removing the file restores it
+  (`Host::set_base_keymap` changes the base).
+
 ## IME
 
 - The core reports the focused text input through `App::set_text_input`
   (or `EventCx::set_text_caret(rect)` from a handler). `App::text_input()`
-  returns it only while that element has focus.
+  returns it only while that element has focus. Widgets that do not
+  report one are found by role (see "Widget platform glue").
 - After each event batch the host calls `Window::set_ime_allowed(true)` when
   a text input is focused (and `false` otherwise). It also calls
   `Window::set_ime_cursor_area` with the caret rectangle, so the candidate
@@ -131,13 +210,15 @@ for velocity.
 - Cursor: handlers call `App::request_cursor(shape)` during pointer events.
   The first request wins, so with bubbling the innermost element decides.
   `Element::cursor(shape)` installs such a handler. After a pointer move with
-  no request the host shows the default arrow. `CursorShape::None` hides the
+  no request the host shows the shape for the role under the pointer
+  (`role_cursor`), or the default arrow. `CursorShape::None` hides the
   cursor.
 - Clipboard: `App::set_clipboard_text` queues a copy, and
   `App::request_paste` makes the host read the clipboard and dispatch its
   text as `InputEvent::Text`. The system clipboard uses `arboard`, text
   only. If it cannot be opened, an in-process clipboard is used.
-  `Host::set_clipboard` swaps it.
+  `Host::set_clipboard` swaps it. Text widgets use their `Env`
+  clipboard directly; install `WidgetClipboard` there.
 
 ## Frame pacing
 
@@ -159,8 +240,10 @@ and tested by simulating the event loop with the real `FrameScheduler`.
    system redraw (expose) with nothing dirty re-renders the last scene.
 4. Occluded or zero-size (minimized) windows draw nothing. When they
    become visible again, the next batch requests a frame if one is needed.
-5. Control flow is `Wait`. The only timer is the config poll
-   (`WaitUntil`), and only when config files are watched.
+5. Control flow is `Wait`. The only timers are the config poll, only when
+   config files are watched, and the caret blink, only while a text input
+   shows a caret and has had input in the last 15 s (`WaitUntil` the
+   earlier of the two).
 
 Latency: the surface uses a maximum frame latency of 1, and input
 handled before a redraw is visible in that frame.

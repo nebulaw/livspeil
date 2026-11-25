@@ -59,7 +59,7 @@ fn translated(scene: CoreScene, dx: f32, dy: f32, out: &mut CoreScene) {
     out.commands.push(PaintCmd::PopTransform);
 }
 
-fn finish(
+pub(crate) fn finish(
     mut bridge: PaintBridge,
     scene: &CoreScene,
     scale: f32,

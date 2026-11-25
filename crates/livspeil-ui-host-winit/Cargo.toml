@@ -17,6 +17,10 @@ livspeil-ui-core = { path = "../livspeil-ui-core" }
 livspeil-ui-layout = { path = "../livspeil-ui-layout" }
 livspeil-ui-render = { path = "../livspeil-ui-render" }
 livspeil-ui-theme = { path = "../livspeil-ui-theme" }
+livspeil-ui-a11y = { path = "../livspeil-ui-a11y" }
+# `PaintRenderer` and the widgets' clipboard (feature `widgets`).
+livspeil-ui-paint = { path = "../livspeil-ui-paint", optional = true }
+livspeil-ui-widgets = { path = "../livspeil-ui-widgets", optional = true }
 # Same feature set as livspeil-ui-render (Metal, Vulkan, GLES).
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "wgsl", "metal", "vulkan", "gles"] }
 pollster = "1"
@@ -26,10 +30,22 @@ winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "
 # Text only (no image support).
 arboard = { version = "3.7", default-features = false }
 log = "0.4"
+# Platform accessibility (VoiceOver, AT-SPI, UIA) for the winit window.
+accesskit_winit = { version = "0.34.2", default-features = false, features = ["accesskit_unix", "async-io", "rwh_06"] }
+
+[features]
+default = ["widgets"]
+# `PaintRenderer` (livspeil-ui-paint) and the clipboard bridge for
+# livspeil-ui-widgets' `Env`.
+widgets = ["dep:livspeil-ui-paint", "dep:livspeil-ui-widgets"]
 
 [dev-dependencies]
 livspeil-ui-paint = { path = "../livspeil-ui-paint" }
 livspeil-ui-widgets = { path = "../livspeil-ui-widgets" }
+
+[[example]]
+name = "hello"
+required-features = ["widgets"]
 
 [lints]
 workspace = true

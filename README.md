@@ -27,7 +27,8 @@ Status: **Phase 0 (kernel) and Phase 1 (UI toolkit)**. This repository holds the
 | `crates/livspeil-ui-widgets` | Widgets: buttons, toggles, check boxes, radios, segmented control, slider, number and text fields, select, tooltip |
 | `crates/livspeil-ui-a11y` | Accessibility: incremental AccessKit trees from the UI core and action routing |
 | `crates/livspeil-ui-shot` | Headless screenshots of UI scenes and the golden-image diff harness |
-| `crates/livspeil-ui-host-winit` | Desktop host: winit window, wgpu surface, frame pacing, input and IME (macOS first) |
+| `crates/livspeil-ui-host-winit` | Desktop host: winit window, wgpu surface and `PaintRenderer`, frame pacing, input, IME, cursors, clipboard and AccessKit (macOS first) |
+| `crates/livspeil-ui-gallery` | Component gallery: every widget, material, the type scale and motion settings, live (app and headless pages) |
 | `sdk/python` | Python SDK for scripts (MPL-2.0, standard library only) |
 | `xtask` | Project automation (`cargo xtask check`) |
 | `specs/` | Design specs |
@@ -277,6 +278,43 @@ handshake timeout, per-handler timeouts (cancel, then kill), a total run
 time and a message size limit. Capabilities scope the kernel API; they are
 not an OS sandbox yet. Exit code 4 means the script failed; the room is
 then not saved.
+
+## Try the gallery
+
+```sh
+cargo run -p livspeil-ui-gallery            # opens on Buttons
+cargo run -p livspeil-ui-gallery -- motion  # or any page: buttons, toggles, radios, sliders,
+                                            # text-fields, select, materials, typography, motion, theme
+```
+
+A window with a Frost sidebar of pages and a toolbar opens (Metal on
+macOS). Things to look at:
+
+- **Toolbar**: Dark/Light, Simple/Pro density, material tier T0/T1/T2,
+  Reduce motion and Reduce transparency. Everything changes live.
+- **Keyboard**: Tab and Shift+Tab reach every control (focus ring);
+  Space/Enter press; arrows step sliders, radios and segments;
+  Cmd+1..9 and Cmd+0 (Ctrl on Linux) switch pages.
+- **Pointer**: a pointing hand over buttons and toggles, an I-beam over
+  text fields, a resize cursor over sliders and number fields. Drag a
+  number field sideways to scrub (Shift ×10, Alt ×0.1) and watch the
+  preview box move.
+- **Text fields**: the caret blinks only while a field is focused (and
+  stops after 15 s without input); IME candidates appear at the caret;
+  copy and paste use the system clipboard. Georgian and Arabic samples.
+- **Materials**: Solid, Frost, Glass and Ink over stripes; switch tiers
+  and Reduce transparency to compare.
+- **Motion**: drag Response and Damping, press Animate; change the
+  profile, the global speed and Reduce motion.
+- **VoiceOver** (macOS): press Cmd+F5. The window is named "Livspeil
+  Gallery"; pages are tabs, every control has a name, value and state,
+  and VoiceOver actions (press, increment, set value, focus) work.
+- **Hot reload**: edit `~/.config/livspeil/ui/{theme,motion,keymap}.toml`
+  (see `docs/ui-config.md`) while it runs; the toolbar follows.
+- **Idle**: when nothing moves the process draws no frames.
+
+Screenshots of every page (no window needed): `cargo xtask shot
+gallery-buttons-1x` (or `--list`), written to `target/shots/`.
 
 ## Develop
 
