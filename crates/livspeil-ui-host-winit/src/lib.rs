@@ -8,8 +8,9 @@
 //! ([`pacing`]: idle = no frames and no timers), and hands each frame's
 //! [`Scene`](livspeil_ui_core::Scene) to a [`SceneRenderer`], which owns
 //! all GPU work. The host also applies the app's platform requests: cursor
-//! shape, IME enablement and candidate window position, and clipboard
-//! copy/paste, and polls config files for hot reload when asked to.
+//! shape, IME enablement and candidate window position, clipboard
+//! copy/paste and window requests (move, zoom, minimize from a custom
+//! titlebar), and polls config files for hot reload when asked to.
 //!
 //! ```no_run
 //! use livspeil_ui_core::{App, Scene};
@@ -50,7 +51,8 @@ pub use options::{
 #[cfg(feature = "widgets")]
 pub use paint_renderer::{PaintRenderer, clear_color, widen_text_runs, without_backdrops};
 pub use platform::{
-    Clipboard, ImeState, MemoryClipboard, SystemClipboard, cursor_icon, service_clipboard,
+    Clipboard, ImeState, MemoryClipboard, SystemClipboard, WindowAction, cursor_icon,
+    service_clipboard, window_action,
 };
 pub use renderer::{RenderTarget, SceneRenderer};
 #[cfg(feature = "widgets")]

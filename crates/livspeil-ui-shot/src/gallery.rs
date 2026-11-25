@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: MPL-2.0
 
 //! Gallery scenes: every page of `livspeil-ui-gallery` (the same library
-//! views as the app) at 1x and 2x in dark Simple, plus the Theme page in
-//! light Pro. Bundled fonts only (deterministic).
+//! views as the app) at 1x and 2x in dark Simple with system window
+//! chrome, plus the Theme page in light Pro and the Buttons page with the
+//! macOS titlebar. Bundled fonts only (deterministic).
 
 use livspeil_ui_core::{App, PaintCmd, Scene as CoreScene, TestHost};
-use livspeil_ui_gallery::{Page, WINDOW_SIZE, mount};
+use livspeil_ui_gallery::{Chrome, Page, WINDOW_SIZE, mount_with};
 use livspeil_ui_layout::Size;
 use livspeil_ui_paint::{FontSystem, PaintBridge};
 use livspeil_ui_render::Color;
@@ -18,10 +19,20 @@ use crate::ui::finish;
 
 /// The settled scene of `page` with `theme`, measured with `bridge`.
 pub fn settle_page(bridge: &PaintBridge, page: Page, theme: Theme) -> Result<CoreScene, ShotError> {
+    settle_page_with(bridge, page, theme, Chrome::System)
+}
+
+/// [`settle_page`] with the given window chrome.
+pub fn settle_page_with(
+    bridge: &PaintBridge,
+    page: Page,
+    theme: Theme,
+    chrome: Chrome,
+) -> Result<CoreScene, ShotError> {
     let mut app = App::new();
     app.set_text_measurer(bridge.text.measurer());
     app.set_theme(theme);
-    mount(&mut app, FontSystem::test(), page);
+    mount_with(&mut app, FontSystem::test(), page, chrome);
     let mut host = TestHost::new(app, Size::new(WINDOW_SIZE.0, WINDOW_SIZE.1));
     host.run_until_idle(300);
     host.scene()
@@ -43,8 +54,12 @@ fn widen_text_runs(scene: &mut CoreScene) {
 }
 
 fn shoot(page: Page, theme: Theme, scale: f32) -> Result<Shot, ShotError> {
+    shoot_with(page, theme, Chrome::System, scale)
+}
+
+fn shoot_with(page: Page, theme: Theme, chrome: Chrome, scale: f32) -> Result<Shot, ShotError> {
     let bridge = PaintBridge::new(FontSystem::test());
-    let mut scene = settle_page(&bridge, page, theme)?;
+    let mut scene = settle_page_with(&bridge, page, theme, chrome)?;
     widen_text_runs(&mut scene);
     finish(bridge, &scene, scale, |_, _| Ok(()))
 }
@@ -62,25 +77,35 @@ fn theme_light_pro(scale: f32) -> Result<Shot, ShotError> {
     shoot(Page::Theme, theme, scale)
 }
 
+/// The macOS chrome: our titlebar (no traffic lights: the system draws
+/// those).
+fn macos_titlebar(scale: f32) -> Result<Shot, ShotError> {
+    shoot_with(Page::Buttons, Theme::default(), Chrome::Titlebar, scale)
+}
+
 fn dark() -> Color {
     surface(0)
 }
 
 /// Scene names `gallery-<slug>-1x` / `-2x`, in page order.
-const NAMES: [[&str; 2]; 10] = [
+const NAMES: [[&str; 2]; 14] = [
     ["gallery-buttons-1x", "gallery-buttons-2x"],
     ["gallery-toggles-1x", "gallery-toggles-2x"],
     ["gallery-radios-1x", "gallery-radios-2x"],
     ["gallery-sliders-1x", "gallery-sliders-2x"],
     ["gallery-text-fields-1x", "gallery-text-fields-2x"],
     ["gallery-select-1x", "gallery-select-2x"],
+    ["gallery-scroll-1x", "gallery-scroll-2x"],
+    ["gallery-dock-1x", "gallery-dock-2x"],
+    ["gallery-menus-1x", "gallery-menus-2x"],
+    ["gallery-node-canvas-1x", "gallery-node-canvas-2x"],
     ["gallery-materials-1x", "gallery-materials-2x"],
     ["gallery-typography-1x", "gallery-typography-2x"],
     ["gallery-motion-1x", "gallery-motion-2x"],
     ["gallery-theme-1x", "gallery-theme-2x"],
 ];
 
-const BUILDS: [fn(f32) -> Result<Shot, ShotError>; 10] = [
+const BUILDS: [fn(f32) -> Result<Shot, ShotError>; 14] = [
     page_shot::<0>,
     page_shot::<1>,
     page_shot::<2>,
@@ -91,6 +116,10 @@ const BUILDS: [fn(f32) -> Result<Shot, ShotError>; 10] = [
     page_shot::<7>,
     page_shot::<8>,
     page_shot::<9>,
+    page_shot::<10>,
+    page_shot::<11>,
+    page_shot::<12>,
+    page_shot::<13>,
 ];
 
 /// The gallery scenes.
@@ -118,6 +147,15 @@ pub fn scenes() -> Vec<Scene> {
         height,
         scale: 1.0,
         build: theme_light_pro,
+        clear: dark,
+    });
+    v.push(Scene {
+        name: "gallery-macos-titlebar",
+        description: "the gallery with its own titlebar (macOS full-size content), dark Simple",
+        width,
+        height,
+        scale: 1.0,
+        build: macos_titlebar,
         clear: dark,
     });
     v

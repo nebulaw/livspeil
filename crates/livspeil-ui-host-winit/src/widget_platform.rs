@@ -99,6 +99,7 @@ pub fn cursor_for_role(role: Role) -> Option<CursorShape> {
         | Role::ComboBox
         | Role::ListBoxOption
         | Role::MenuItem
+        | Role::MenuItemCheckBox
         | Role::Tab => CursorShape::Pointer,
         Role::TextInput => CursorShape::Text,
         Role::Slider | Role::SpinButton => CursorShape::ResizeEw,
@@ -403,6 +404,10 @@ mod tests {
         assert_eq!(
             cursor_for_role(Role::SpinButton),
             Some(CursorShape::ResizeEw)
+        );
+        assert_eq!(
+            cursor_for_role(Role::MenuItemCheckBox),
+            Some(CursorShape::Pointer)
         );
         assert_eq!(cursor_for_role(Role::Label), None);
         assert_eq!(cursor_for_role(Role::Window), None);

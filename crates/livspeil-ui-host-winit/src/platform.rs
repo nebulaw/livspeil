@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Livspeil contributors
 // SPDX-License-Identifier: MPL-2.0
 
-//! Cursor shapes, IME placement and the clipboard.
+//! Cursor shapes, window requests, IME placement and the clipboard.
 
-use livspeil_ui_core::CursorShape;
+use livspeil_ui_core::{CursorShape, WindowRequest};
 use livspeil_ui_layout::Rect;
 use winit::window::CursorIcon;
 
@@ -32,6 +32,29 @@ pub fn cursor_icon(shape: CursorShape) -> Option<CursorIcon> {
         CursorShape::ZoomOut => CursorIcon::ZoomOut,
         CursorShape::None => return None,
     })
+}
+
+/// What the host does to its window for a [`WindowRequest`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowAction {
+    /// `Window::drag_window`: the window manager moves the window with the
+    /// pressed pointer (and usually swallows the release).
+    Drag,
+    /// `Window::set_maximized`.
+    SetMaximized(bool),
+    /// `Window::set_minimized(true)`.
+    Minimize,
+}
+
+/// The action for `request` on a window that is `maximized` or not (zoom
+/// toggles, like a double-click on a native titlebar).
+#[must_use]
+pub fn window_action(request: WindowRequest, maximized: bool) -> WindowAction {
+    match request {
+        WindowRequest::Drag => WindowAction::Drag,
+        WindowRequest::Zoom => WindowAction::SetMaximized(!maximized),
+        WindowRequest::Minimize => WindowAction::Minimize,
+    }
 }
 
 /// What the window's IME should look like: allowed or not, and where the
@@ -171,6 +194,41 @@ mod tests {
             Some(CursorIcon::EwResize)
         );
         assert_eq!(cursor_icon(CursorShape::None), None);
+    }
+
+    #[test]
+    fn window_requests_map_to_actions() {
+        assert_eq!(
+            window_action(WindowRequest::Drag, false),
+            WindowAction::Drag
+        );
+        assert_eq!(
+            window_action(WindowRequest::Zoom, false),
+            WindowAction::SetMaximized(true)
+        );
+        assert_eq!(
+            window_action(WindowRequest::Zoom, true),
+            WindowAction::SetMaximized(false)
+        );
+        assert_eq!(
+            window_action(WindowRequest::Minimize, true),
+            WindowAction::Minimize
+        );
+    }
+
+    #[test]
+    fn resize_cursors() {
+        for (shape, icon) in [
+            (CursorShape::ResizeNs, CursorIcon::NsResize),
+            (CursorShape::ResizeNesw, CursorIcon::NeswResize),
+            (CursorShape::ResizeNwse, CursorIcon::NwseResize),
+            (CursorShape::ResizeColumn, CursorIcon::ColResize),
+            (CursorShape::ResizeRow, CursorIcon::RowResize),
+            (CursorShape::Grab, CursorIcon::Grab),
+            (CursorShape::Grabbing, CursorIcon::Grabbing),
+        ] {
+            assert_eq!(cursor_icon(shape), Some(icon));
+        }
     }
 
     #[test]

@@ -10,37 +10,71 @@
 //! (`TestHost`) and the screenshot harness (`cargo xtask shot gallery-*`)
 //! render the same views.
 //!
-//! - A Frost sidebar lists the [`Page`]s (Cmd/Ctrl+1..9 and Cmd/Ctrl+0
-//!   switch pages; the bindings live in the keymap as `gallery.page-<n>`).
+//! - A Frost sidebar lists the [`Page`]s in [`Group`]s (Controls,
+//!   Containers, System) and scrolls when the window is short. Cmd/Ctrl+1..9
+//!   and Cmd/Ctrl+0 switch to the first ten pages (the bindings live in
+//!   the keymap as `gallery.page-<n>`).
+//! - [`Chrome`]: system window decorations, or (macOS) the gallery's own
+//!   [`Titlebar`](livspeil_ui_widgets::Titlebar) under a transparent
+//!   native one ([`mount_with`]).
 //! - The toolbar switches theme (dark/light), density (Simple/Pro),
 //!   material tier (T0/T1/T2), Reduce motion and Reduce transparency.
 //!   It reads and writes the app's theme and motion configuration, so hot
 //!   reloaded `theme.toml` / `motion.toml` show up in it too.
 
+mod containers;
 mod pages;
 
 use std::rc::Rc;
 
 use livspeil_ui_core::{
-    App, Element, ElementId, Keymap, Keystroke, Model, Render, Role, View, ViewContext, actions,
-    div, text,
+    App, Element, ElementId, Key, Keymap, Keystroke, Model, Phase, Render, Role, View, ViewContext,
+    actions, div, text,
 };
 use livspeil_ui_layout::Rect;
 use livspeil_ui_layout::style::length;
 use livspeil_ui_text::FontSystem;
 use livspeil_ui_theme::{Color, Density, Material, Scheme, Theme, Tier};
-use livspeil_ui_widgets::{Env, Label, SegmentedControl, Toggle, Tone, WidgetRoot};
+use livspeil_ui_widgets::keymap::actions as widget_actions;
+use livspeil_ui_widgets::{
+    Env, Label, MenuBar, ScrollView, SegmentedControl, Titlebar, Toggle, Tone, WidgetRoot,
+};
 
+pub use containers::{Containers, LAYERS, MenuChecks, STRESS_NODES, VIRTUAL_ROWS, row_title};
 pub use pages::State;
 
 /// The window's logical size (also the screenshot size).
 pub const WINDOW_SIZE: (f32, f32) = (1000.0, 640.0);
 /// Sidebar width including its margin.
 pub const SIDEBAR_WIDTH: f32 = 220.0;
-/// Space left free at the top for the macOS titlebar (traffic lights).
-pub const TOP_INSET: f32 = 28.0;
 /// Action prefix of the page shortcuts: `gallery.page-1` … `gallery.page-10`.
 pub const PAGE_ACTION: &str = "gallery.page-";
+
+/// A sidebar group.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Group {
+    /// Buttons, toggles, fields and other controls.
+    Controls,
+    /// Scroll views, docks, menus and the node canvas.
+    Containers,
+    /// Materials, type, motion and theme.
+    System,
+}
+
+impl Group {
+    /// Every group in sidebar order.
+    pub const ALL: [Group; 3] = [Group::Controls, Group::Containers, Group::System];
+
+    /// The sidebar heading.
+    #[must_use]
+    pub fn title(self) -> &'static str {
+        match self {
+            Group::Controls => "Controls",
+            Group::Containers => "Containers",
+            Group::System => "System",
+        }
+    }
+}
 
 /// A gallery page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -57,6 +91,14 @@ pub enum Page {
     TextFields,
     /// Selects and tooltips.
     Select,
+    /// A scroll view over long content and a virtual list of 100 000 rows.
+    Scroll,
+    /// Panels in a dock: splitters and collapsible sides.
+    Dock,
+    /// A menu bar and a context menu.
+    Menus,
+    /// The node canvas over a sample graph or a 500-node stress graph.
+    NodeCanvas,
     /// Solid, Frost, Glass and Ink over a colorful background.
     Materials,
     /// Type scale, weights and tabular digits.
@@ -69,13 +111,17 @@ pub enum Page {
 
 impl Page {
     /// Every page in sidebar order.
-    pub const ALL: [Page; 10] = [
+    pub const ALL: [Page; 14] = [
         Page::Buttons,
         Page::Toggles,
         Page::Radios,
         Page::Sliders,
         Page::TextFields,
         Page::Select,
+        Page::Scroll,
+        Page::Dock,
+        Page::Menus,
+        Page::NodeCanvas,
         Page::Materials,
         Page::Typography,
         Page::Motion,
@@ -92,6 +138,10 @@ impl Page {
             Page::Sliders => "Sliders & numbers",
             Page::TextFields => "Text fields",
             Page::Select => "Select & tooltips",
+            Page::Scroll => "Scrolling",
+            Page::Dock => "Panels & dock",
+            Page::Menus => "Menus",
+            Page::NodeCanvas => "Node canvas",
             Page::Materials => "Materials",
             Page::Typography => "Typography",
             Page::Motion => "Motion",
@@ -109,10 +159,29 @@ impl Page {
             Page::Sliders => "sliders",
             Page::TextFields => "text-fields",
             Page::Select => "select",
+            Page::Scroll => "scroll",
+            Page::Dock => "dock",
+            Page::Menus => "menus",
+            Page::NodeCanvas => "node-canvas",
             Page::Materials => "materials",
             Page::Typography => "typography",
             Page::Motion => "motion",
             Page::Theme => "theme",
+        }
+    }
+
+    /// The sidebar group.
+    #[must_use]
+    pub fn group(self) -> Group {
+        match self {
+            Page::Buttons
+            | Page::Toggles
+            | Page::Radios
+            | Page::Sliders
+            | Page::TextFields
+            | Page::Select => Group::Controls,
+            Page::Scroll | Page::Dock | Page::Menus | Page::NodeCanvas => Group::Containers,
+            Page::Materials | Page::Typography | Page::Motion | Page::Theme => Group::System,
         }
     }
 
@@ -122,20 +191,50 @@ impl Page {
         Page::ALL.iter().position(|p| *p == self).unwrap_or(0)
     }
 
-    /// The shortcut digit (1..9, then 0).
+    /// The shortcut digit of the first ten pages (1..9, then 0).
     #[must_use]
-    pub fn shortcut(self) -> char {
+    pub fn shortcut(self) -> Option<char> {
         match self.index() {
-            9 => '0',
+            9 => Some('0'),
             // Indices 0..=8 map to '1'..='9'.
-            i => char::from_digit(u32::try_from(i + 1).unwrap_or(1), 10).unwrap_or('1'),
+            i @ 0..=8 => char::from_digit(u32::try_from(i + 1).ok()?, 10),
+            _ => None,
         }
     }
 
-    /// The page's shortcut action.
+    /// The page's action (`gallery.page-<n>`, 1-based; bound to a shortcut
+    /// for the first ten pages).
     #[must_use]
     pub fn action(self) -> String {
         format!("{PAGE_ACTION}{}", self.index() + 1)
+    }
+}
+
+/// How the window's title area is drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Chrome {
+    /// The system draws the titlebar (window decorations on Linux and
+    /// Windows, a standard macOS titlebar): the gallery starts at the top.
+    #[default]
+    System,
+    /// The gallery draws a [`Titlebar`](livspeil_ui_widgets::Titlebar)
+    /// (a window drag region with the traffic-light inset) for a macOS
+    /// window with a transparent, full-size-content titlebar.
+    Titlebar,
+}
+
+impl Chrome {
+    /// What suits the platform the gallery was built for: our titlebar on
+    /// macOS, system decorations elsewhere (X11 and Wayland behave
+    /// natively: server-side decorations, or winit's client-side ones
+    /// where the compositor has none).
+    #[must_use]
+    pub fn native() -> Chrome {
+        if cfg!(target_os = "macos") {
+            Chrome::Titlebar
+        } else {
+            Chrome::System
+        }
     }
 }
 
@@ -144,8 +243,11 @@ impl Page {
 pub fn keymap() -> Keymap {
     let mut km = Keymap::default();
     for page in Page::ALL {
+        let Some(digit) = page.shortcut() else {
+            continue;
+        };
         for m in ["cmd", "ctrl"] {
-            if let Ok(k) = Keystroke::parse(&format!("{m}-{}", page.shortcut())) {
+            if let Ok(k) = Keystroke::parse(&format!("{m}-{digit}")) {
                 km.bind(k, &page.action(), None);
             }
         }
@@ -166,19 +268,36 @@ pub struct Mounted {
     pub shell: View<Shell>,
 }
 
-/// Build the gallery showing `page` and make it the app's root. Installs
-/// the widget keymap and the page shortcuts. Layout text measurement is
-/// up to the caller (`app.set_text_measurer`).
+/// Build the gallery showing `page` with system window chrome
+/// ([`Chrome::System`]) and make it the app's root. See [`mount_with`].
 pub fn mount(app: &mut App, fonts: FontSystem, page: Page) -> Mounted {
+    mount_with(app, fonts, page, Chrome::System)
+}
+
+/// Build the gallery showing `page` with `chrome` and make it the app's
+/// root. Installs the widget keymap and the page shortcuts. Layout text
+/// measurement is up to the caller (`app.set_text_measurer`).
+pub fn mount_with(app: &mut App, fonts: FontSystem, page: Page, chrome: Chrome) -> Mounted {
     let env = Env::new(app, fonts);
     let mut km = app.keymap().clone();
     km.extend(&keymap());
     app.set_keymap(km);
     let state = State::new(app, &env);
+    let menubar = state.containers.menubar;
     let page = app.new_model(page);
+    let sidebar = app.new_view(
+        ScrollView::new(&env, move |app, _| {
+            sidebar_list(app.theme(), *page.read(app), page)
+        })
+        .name("sidebar-scroll")
+        .label("Pages")
+        .focusable(false),
+    );
     let gallery = app.new_view(Gallery {
         env: env.clone(),
         page,
+        chrome,
+        sidebar,
         state: Rc::new(state),
     });
     let root = env.root(app, gallery);
@@ -186,6 +305,7 @@ pub fn mount(app: &mut App, fonts: FontSystem, page: Page) -> Mounted {
         env: env.clone(),
         page,
         root,
+        menubar,
     });
     app.set_root(shell);
     // Actions bubble from the focused element, and with nothing focused
@@ -203,11 +323,13 @@ pub fn mount(app: &mut App, fonts: FontSystem, page: Page) -> Mounted {
 
 /// The app root around the [`WidgetRoot`]. Actions bubble from the focused
 /// element to the root, so with nothing focused only the root sees them:
-/// the page shortcuts and the first Tab live here, and [`mount`] focuses it.
+/// the page shortcuts, the first Tab, and F10 / Alt+letter for the Menus
+/// page's menu bar live here, and [`mount`] focuses it.
 pub struct Shell {
     env: Env,
     page: Model<Page>,
     root: View<WidgetRoot>,
+    menubar: View<MenuBar>,
 }
 
 impl std::fmt::Debug for Shell {
@@ -219,6 +341,7 @@ impl std::fmt::Debug for Shell {
 impl Render for Shell {
     fn render(&mut self, _cx: &mut ViewContext<'_, Self>) -> Element {
         let model = self.page;
+        let bar = self.menubar;
         let mut root = div().name("gallery-shell").w_full().h_full().tab_index(-1);
         for p in Page::ALL {
             root = root.on_action(&p.action(), move |cx| set_page(model, cx, p));
@@ -232,6 +355,20 @@ impl Render for Shell {
             cx.focus_prev();
             prev.sync_focus(cx);
         })
+        // The widget root handles these once focus is inside it; the menu
+        // bar ignores them while the Menus page is not shown.
+        .on_action(widget_actions::FOCUS_MENUBAR, move |cx| {
+            MenuBar::focus(bar, cx);
+        })
+        .on_key(Phase::Bubble, move |ev, cx| {
+            let m = ev.modifiers;
+            if let (true, true, false, false, Key::Char(c)) =
+                (ev.pressed, m.alt, m.ctrl, m.cmd, ev.key)
+                && MenuBar::open_mnemonic(bar, cx, c)
+            {
+                cx.stop_propagation();
+            }
+        })
         .child(Element::view(&self.root))
     }
 }
@@ -240,6 +377,8 @@ impl Render for Shell {
 pub struct Gallery {
     env: Env,
     page: Model<Page>,
+    chrome: Chrome,
+    sidebar: View<ScrollView>,
     state: Rc<State>,
 }
 
@@ -265,6 +404,18 @@ impl Gallery {
     #[must_use]
     pub fn state(&self) -> &State {
         &self.state
+    }
+
+    /// The window chrome.
+    #[must_use]
+    pub fn chrome(&self) -> Chrome {
+        self.chrome
+    }
+
+    /// The sidebar's scroll view.
+    #[must_use]
+    pub fn sidebar(&self) -> View<ScrollView> {
+        self.sidebar
     }
 }
 
@@ -300,51 +451,83 @@ pub(crate) fn edit_motion<V: Render>(
     }
 }
 
-fn sidebar(theme: &Theme, current: Page, model: Model<Page>) -> Element {
+fn group_heading(theme: &Theme, group: Group) -> Element {
+    div()
+        .key(group.title())
+        .px(10.0)
+        .style(|s| {
+            s.padding.top = length(10.0);
+            s.padding.bottom = length(2.0);
+        })
+        .child(
+            text(group.title().to_uppercase())
+                .font_size(11.0)
+                .font_weight(600.0)
+                .text_color(theme.colors().text_tertiary),
+        )
+}
+
+/// The page list (the sidebar scroll view's content).
+fn sidebar_list(theme: &Theme, current: Page, model: Model<Page>) -> Element {
     let c = theme.colors();
     let row_h = theme.metrics().row_height;
     let mut list = div()
         .name("pages")
         .flex_col()
         .gap(2.0)
+        .px(8.0)
+        .style(|s| {
+            s.padding.top = length(2.0);
+            s.padding.bottom = length(12.0);
+        })
         .semantics(|s| s.role(Role::TabList).label("Pages"));
-    for page in Page::ALL {
-        let selected = page == current;
-        let mut row = div()
-            .key(page.slug())
-            .name(format!("page:{}", page.title()))
-            .h(row_h)
-            .px(10.0)
-            .flex_row()
-            .items_center()
-            .gap(8.0)
-            .rounded(theme.tokens.radii.sm)
-            .focusable()
-            .on_click(move |_, cx| set_page(model, cx, page))
-            .semantics(|s| s.role(Role::Tab).label(page.title()).selected(selected))
-            .child(
-                text(page.title())
-                    .font_size(theme.metrics().body)
-                    .font_weight(if selected { 600.0 } else { 400.0 })
-                    .text_color(if selected {
-                        c.text_primary
-                    } else {
-                        c.text_secondary
-                    })
-                    .grow(),
-            )
-            .child(
-                text(page.shortcut().to_string())
-                    .font_size(11.0)
-                    .text_color(c.text_tertiary),
-            );
-        row = if selected {
-            row.bg(theme.accent().with_alpha(0.24))
-        } else {
-            row.hover(|r| r.bg(c.text_primary.with_alpha(0.06)))
-        };
-        list = list.child(row);
+    for group in Group::ALL {
+        list = list.child(group_heading(theme, group));
+        for page in Page::ALL.into_iter().filter(|p| p.group() == group) {
+            let selected = page == current;
+            let mut row = div()
+                .key(page.slug())
+                .name(format!("page:{}", page.title()))
+                .h(row_h)
+                .style(|s| s.flex_shrink = 0.0)
+                .px(10.0)
+                .flex_row()
+                .items_center()
+                .gap(8.0)
+                .rounded(theme.tokens.radii.sm)
+                .focusable()
+                .on_click(move |_, cx| set_page(model, cx, page))
+                .semantics(|s| s.role(Role::Tab).label(page.title()).selected(selected))
+                .child(
+                    text(page.title())
+                        .font_size(theme.metrics().body)
+                        .font_weight(if selected { 600.0 } else { 400.0 })
+                        .text_color(if selected {
+                            c.text_primary
+                        } else {
+                            c.text_secondary
+                        })
+                        .grow(),
+                );
+            if let Some(digit) = page.shortcut() {
+                row = row.child(
+                    text(digit.to_string())
+                        .font_size(11.0)
+                        .text_color(c.text_tertiary),
+                );
+            }
+            row = if selected {
+                row.bg(theme.accent().with_alpha(0.24))
+            } else {
+                row.hover(|r| r.bg(c.text_primary.with_alpha(0.06)))
+            };
+            list = list.child(row);
+        }
     }
+    list
+}
+
+fn sidebar(theme: &Theme, scroll: View<ScrollView>) -> Element {
     div()
         .key("sidebar")
         .w(SIDEBAR_WIDTH)
@@ -357,22 +540,9 @@ fn sidebar(theme: &Theme, current: Page, model: Model<Page>) -> Element {
                 .h_full()
                 .material(Material::Frost)
                 .rounded(theme.tokens.radii.lg)
-                .flex_col()
-                .px(8.0)
-                .style(|s| {
-                    s.padding.top = length(TOP_INSET + 12.0);
-                    s.padding.bottom = length(12.0);
-                })
-                .gap(8.0)
-                .child(
-                    div().px(10.0).child(
-                        text("COMPONENTS")
-                            .font_size(11.0)
-                            .font_weight(600.0)
-                            .text_color(c.text_tertiary),
-                    ),
-                )
-                .child(list),
+                .clip()
+                .style(|s| s.padding.top = length(4.0))
+                .child(Element::view(&scroll)),
         )
 }
 
@@ -499,47 +669,60 @@ impl Render for Gallery {
     fn render(&mut self, cx: &mut ViewContext<'_, Self>) -> Element {
         let theme = cx.theme().clone();
         let page = *self.page.read(cx);
-        let model = self.page;
         let view = cx.view();
         let reduce_motion = cx.motion().reduce_motion;
         let content = pages::render(page, &self.state, &self.env, view, cx);
-        div()
+        let main = div()
+            .key("main")
+            .grow()
+            .h_full()
+            .style(|s| s.min_size.width = length(0.0))
+            .flex_col()
+            .child(toolbar(&theme, reduce_motion, view))
+            .child(
+                div()
+                    .key(page.slug())
+                    .name("page")
+                    .grow()
+                    .flex_col()
+                    .px(24.0)
+                    .style(|s| {
+                        s.padding.bottom = length(20.0);
+                        s.min_size.height = length(0.0);
+                    })
+                    .gap(16.0)
+                    .clip()
+                    .child(
+                        Label::new(page.title())
+                            .tone(Tone::Primary)
+                            .render(&theme)
+                            .font_size(theme.tokens.type_scale.sizes[5])
+                            .font_weight(600.0)
+                            .semantics(|s| s.role(Role::Heading)),
+                    )
+                    .child(content),
+            );
+        let body = div()
+            .key("body")
+            .w_full()
+            .grow()
+            .style(|s| s.min_size.height = length(0.0))
+            .flex_row()
+            .child(sidebar(&theme, self.sidebar))
+            .child(main);
+        let mut root = div()
             .name("gallery")
             .w_full()
             .h_full()
             .bg(theme.colors().surface[0])
-            .flex_row()
+            .flex_col()
             .clip()
-            .child(backdrop(&theme))
-            .child(sidebar(&theme, page, model))
-            .child(
-                div()
-                    .key("main")
-                    .grow()
-                    .h_full()
-                    .style(|s| s.min_size.width = length(0.0))
-                    .flex_col()
-                    .child(toolbar(&theme, reduce_motion, view))
-                    .child(
-                        div()
-                            .key(page.slug())
-                            .name("page")
-                            .grow()
-                            .flex_col()
-                            .px(24.0)
-                            .style(|s| s.padding.bottom = length(20.0))
-                            .gap(16.0)
-                            .clip()
-                            .child(
-                                Label::new(page.title())
-                                    .tone(Tone::Primary)
-                                    .render(&theme)
-                                    .font_size(theme.tokens.type_scale.sizes[5])
-                                    .font_weight(600.0)
-                                    .semantics(|s| s.role(Role::Heading)),
-                            )
-                            .child(content),
-                    ),
-            )
+            .child(backdrop(&theme));
+        if self.chrome == Chrome::Titlebar {
+            // Under a transparent macOS titlebar: the traffic lights sit in
+            // the bar's left inset, and the bar is the window's drag region.
+            root = root.child(Titlebar::new("Livspeil Gallery").render(&theme));
+        }
+        root.child(body)
     }
 }

@@ -25,7 +25,10 @@ use crate::options::{
     ActionHook, HostOptions, SurfaceOptions, Titlebar, WindowOptions, surface_config,
 };
 use crate::pacing::{FrameTimes, Pacer, Wake};
-use crate::platform::{Clipboard, ImeState, SystemClipboard, cursor_icon, service_clipboard};
+use crate::platform::{
+    Clipboard, ImeState, SystemClipboard, WindowAction, cursor_icon, service_clipboard,
+    window_action,
+};
 use crate::widget_platform::{
     CaretBlink, apply_config_event, role_cursor, scene_without, text_focus,
 };
@@ -438,6 +441,7 @@ impl<R: SceneRenderer> Host<R> {
                 if let Some(hook) = &mut self.action_hook {
                     (hook.0)(&mut self.app);
                 }
+                self.apply_window_requests();
                 self.blink.activity(Instant::now());
             }
             accesskit_winit::WindowEvent::AccessibilityDeactivated => self.a11y.deactivate(),
@@ -474,6 +478,7 @@ impl<R: SceneRenderer> Host<R> {
         if activity {
             self.blink.activity(Instant::now());
         }
+        self.apply_window_requests();
         if pointer {
             let requested = self.app.take_cursor_request();
             let shape = match requested {
@@ -488,6 +493,37 @@ impl<R: SceneRenderer> Host<R> {
             };
             if let Some(shape) = shape {
                 self.set_cursor(shape);
+            }
+        }
+    }
+
+    /// Apply the app's window requests (a custom titlebar's drag region:
+    /// move, zoom, minimize). Called right after dispatching input, while
+    /// the press that asked for a move is still the current event, as
+    /// Wayland and X11 require for `drag_window`.
+    fn apply_window_requests(&mut self) {
+        let requests = self.app.take_window_requests();
+        let Some(gfx) = &self.gfx else {
+            return;
+        };
+        let mut dragged = false;
+        for r in requests {
+            match window_action(r, gfx.window.is_maximized()) {
+                WindowAction::Drag => match gfx.window.drag_window() {
+                    Ok(()) => dragged = true,
+                    Err(e) => log::warn!("window drag: {e}"),
+                },
+                WindowAction::SetMaximized(on) => gfx.window.set_maximized(on),
+                WindowAction::Minimize => gfx.window.set_minimized(true),
+            }
+        }
+        if dragged {
+            // The window manager owns the pointer until the move ends and
+            // usually swallows the release: release the buttons now.
+            let mut release = Vec::new();
+            self.translator.release_buttons(self.now(), &mut release);
+            for e in release {
+                self.app.dispatch(e);
             }
         }
     }

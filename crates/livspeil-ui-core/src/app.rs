@@ -131,6 +131,8 @@ pub struct App {
     flushing: bool,
     pub(crate) dirty_views: BTreeSet<EntityId>,
     pub(crate) view_slots: HashMap<EntityId, ElementId>,
+    /// Views that read their own layout bounds, with the bounds they saw.
+    layout_watch: HashMap<EntityId, Option<Rect>>,
     render_counts: HashMap<EntityId, usize>,
     renders_this_frame: usize,
     root_view: Option<AnyView>,
@@ -187,6 +189,7 @@ impl App {
             flushing: false,
             dirty_views: BTreeSet::new(),
             view_slots: HashMap::new(),
+            layout_watch: HashMap::new(),
             render_counts: HashMap::new(),
             renders_this_frame: 0,
             root_view: None,
@@ -237,6 +240,7 @@ impl App {
         self.entities.remove(&id);
         self.views.remove(&id);
         self.dirty_views.remove(&id);
+        self.layout_watch.remove(&id);
         self.subscriptions.remove(&id);
         if let Some(observed) = self.deps.remove(&id) {
             for m in observed {
@@ -530,6 +534,9 @@ impl App {
                 layout = true;
             }
         }
+        if layout {
+            self.notify_layout_watchers(&tree);
+        }
         self.tree = tree;
         if layout {
             self.refresh_hover();
@@ -555,6 +562,32 @@ impl App {
                 animating: self.driver.active.len(),
                 paint: paint_stats,
             },
+        }
+    }
+
+    /// The bounds of `view`'s root element as of the last layout, and
+    /// re-render the view whenever they change (see
+    /// [`ViewContext::layout_bounds`](crate::ViewContext::layout_bounds)).
+    pub(crate) fn watch_layout(&mut self, view: EntityId) -> Option<Rect> {
+        *self.layout_watch.entry(view).or_insert(None)
+    }
+
+    /// After a layout: mark the watching views whose root bounds changed
+    /// dirty, so they render once more with their real size.
+    fn notify_layout_watchers(&mut self, tree: &Tree) {
+        for (vid, seen) in &mut self.layout_watch {
+            let Some(node) = self
+                .view_slots
+                .get(vid)
+                .and_then(|slot| tree.nodes.get(slot))
+                .filter(|n| n.view == Some(*vid))
+            else {
+                continue;
+            };
+            if *seen != Some(node.bounds) {
+                *seen = Some(node.bounds);
+                self.dirty_views.insert(*vid);
+            }
         }
     }
 

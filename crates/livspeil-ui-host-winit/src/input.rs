@@ -361,6 +361,19 @@ impl InputTranslator {
         }
     }
 
+    /// Release every held button (`Up` events at the last position): after
+    /// `Window::drag_window` the window manager owns the pointer and the
+    /// release usually never reaches the window. A later release of the
+    /// same button is dropped.
+    pub fn release_buttons(&mut self, time: Duration, out: &mut Vec<InputEvent>) {
+        let held = std::mem::take(&mut self.buttons);
+        if let Some(p) = self.position {
+            for b in held {
+                out.push(self.pointer(PointerKind::Up(b), p, time));
+            }
+        }
+    }
+
     /// `WindowEvent::MouseWheel`. Line deltas (mouse wheels) stay lines;
     /// pixel deltas (trackpads, precise wheels) become logical pixels. Signs
     /// follow winit: positive moves the content right and down.
@@ -775,6 +788,32 @@ mod tests {
         assert!(!t.is_composing());
         out.clear();
         t.focused(true, T, &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn window_drag_releases_buttons_once() {
+        let (mut t, mut out) = translator();
+        t.cursor_moved(PhysicalPosition::new(10.0, 10.0), T, &mut out);
+        t.mouse_input(
+            ElementState::Pressed,
+            winit::event::MouseButton::Left,
+            T,
+            &mut out,
+        );
+        out.clear();
+        t.release_buttons(T, &mut out);
+        assert_eq!(out.len(), 1);
+        assert_eq!(ptr(&out[0]).kind, PointerKind::Up(MouseButton::Left));
+        assert!(!t.buttons_held());
+        // The window manager's late release is dropped.
+        out.clear();
+        t.mouse_input(
+            ElementState::Released,
+            winit::event::MouseButton::Left,
+            T,
+            &mut out,
+        );
         assert!(out.is_empty());
     }
 

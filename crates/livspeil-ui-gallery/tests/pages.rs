@@ -175,11 +175,19 @@ fn every_control_is_reachable_with_tab() {
 #[test]
 fn shortcuts_switch_pages() {
     let (mut h, m) = host(Page::Buttons);
-    for page in Page::ALL {
-        h.key(&format!("ctrl-{}", page.shortcut()));
+    // The first ten pages have Ctrl/Cmd+1..9, 0; the rest only the sidebar.
+    let with_digit: Vec<Page> = Page::ALL
+        .into_iter()
+        .filter(|p| p.shortcut().is_some())
+        .collect();
+    assert_eq!(with_digit, Page::ALL[..10]);
+    for page in with_digit {
+        let digit = page.shortcut().unwrap();
+        h.key(&format!("ctrl-{digit}"));
         h.run_until_idle(300);
-        assert_eq!(current(&h, &m), page, "ctrl-{}", page.shortcut());
+        assert_eq!(current(&h, &m), page, "ctrl-{digit}");
     }
+    assert_eq!(Page::NodeCanvas.shortcut(), Some('0'));
     h.key("cmd-3");
     h.run_until_idle(300);
     assert_eq!(current(&h, &m), Page::Radios);
@@ -212,6 +220,23 @@ fn toolbar_control(h: &TestHost, label: &str) -> ElementId {
         stack.extend(h.app.children_of(id));
     }
     panic!("no toolbar control {label}");
+}
+
+/// The switch, segmented control or button on the current page with
+/// accessible name `label`.
+fn page_control(h: &TestHost, label: &str) -> ElementId {
+    use livspeil_ui_core::Role;
+    let mut stack = vec![h.app.find("page").unwrap()];
+    while let Some(id) = stack.pop() {
+        if h.app.semantic_node(id).is_some_and(|n| {
+            n.label() == Some(label)
+                && matches!(n.role(), Some(Role::Switch | Role::TabList | Role::Button))
+        }) {
+            return id;
+        }
+        stack.extend(h.app.children_of(id));
+    }
+    panic!("no control {label} on the page");
 }
 
 fn segment(h: &TestHost, control: ElementId, index: usize) -> (f32, f32) {
@@ -309,4 +334,223 @@ fn the_shell_starts_focused() {
     let (h, _) = host(Page::Buttons);
     assert_eq!(h.app.focused(), h.app.find("gallery-shell"));
     assert!(!h.app.focus_visible());
+}
+
+#[test]
+fn sidebar_groups_pages_and_scrolls() {
+    use livspeil_ui_gallery::Group;
+    let groups: Vec<Group> = Page::ALL.iter().map(|p| p.group()).collect();
+    // Groups are contiguous, in heading order.
+    let mut seen: Vec<Group> = Vec::new();
+    for g in groups {
+        if seen.last() != Some(&g) {
+            assert!(!seen.contains(&g), "{g:?} split");
+            seen.push(g);
+        }
+    }
+    assert_eq!(seen, Group::ALL);
+    // In a short window the sidebar scrolls; Tab reveals the last page.
+    let mut app = App::new();
+    let bridge = PaintBridge::new(livspeil_ui_paint::FontSystem::test());
+    app.set_text_measurer(bridge.text.measurer());
+    let m = mount(&mut app, FontSystem::test(), Page::Buttons);
+    let mut h = TestHost::new(app, Size::new(WINDOW_SIZE.0, 400.0));
+    h.run_until_idle(300);
+    let theme_row = h.app.find("page:Theme").unwrap();
+    let sb = h.app.find("sidebar-scroll").unwrap();
+    let view = h.app.bounds(sb).unwrap();
+    assert!(h.app.bounds(theme_row).unwrap().bottom() > view.bottom());
+    let typo = h.app.find("page:Typography").unwrap();
+    m.env.focus(&mut h.app, typo);
+    for _ in 0..2 {
+        h.key("tab");
+        h.run_until_idle(300);
+    }
+    assert_eq!(h.app.focused(), Some(theme_row));
+    // Layout bounds do not include the scroll translation.
+    let offset = m.gallery.read(&h.app).sidebar().read(&h.app).offset();
+    let r = h.app.bounds(theme_row).unwrap();
+    let shown = r.bottom() - offset.y;
+    assert!(
+        offset.y > 0.0 && shown <= view.bottom() + 0.5,
+        "{r:?} - {offset:?} in {view:?}"
+    );
+    // A click on it (where it is shown) still switches pages.
+    h.click(r.center().x, r.center().y - offset.y);
+    h.run_until_idle(300);
+    assert_eq!(current(&h, &m), Page::Theme);
+}
+
+#[test]
+fn virtual_list_builds_only_visible_rows() {
+    let (mut h, m) = host(Page::Scroll);
+    let list = m.gallery.read(&h.app).state().containers.list;
+    let rows = |h: &TestHost| {
+        let spacer = h.app.find("virtual-list").unwrap();
+        h.app.children_of(spacer).len()
+    };
+    let n = rows(&h);
+    assert!((5..40).contains(&n), "{n} rows mounted");
+    // End jumps to the last of the 100 000 rows.
+    let sv = h.app.find("virtual-list-scroll").unwrap();
+    m.env.focus(&mut h.app, sv);
+    h.key("end");
+    h.run_until_idle(600);
+    assert!(rows(&h) < 40);
+    let last = h.app.find("virtual-list").unwrap().child("row-99999");
+    assert!(h.app.bounds(last).is_some(), "last row mounted");
+    assert!(list.read(&h.app).offset().y > 2_700_000.0);
+    assert_eq!(livspeil_ui_gallery::row_title(0), "Aurora ember");
+}
+
+#[test]
+fn scroll_view_scrolls_with_the_wheel() {
+    let (mut h, m) = host(Page::Scroll);
+    let sv = h.app.find("long-scroll").unwrap();
+    let c = h.app.bounds(sv).unwrap().center();
+    h.pointer_move(c.x, c.y);
+    h.app.dispatch(livspeil_ui_core::InputEvent::Pointer(
+        livspeil_ui_core::PointerEvent {
+            kind: livspeil_ui_core::PointerKind::Scroll(livspeil_ui_core::ScrollDelta::Lines(
+                livspeil_ui_layout::Vec2::new(0.0, -5.0),
+            )),
+            position: c,
+            modifiers: livspeil_ui_core::Modifiers::NONE,
+            time: h.now(),
+        },
+    ));
+    h.run_until_idle(600);
+    let long = m.gallery.read(&h.app).state().containers.long;
+    assert!(long.read(&h.app).offset().y > 100.0);
+    assert!(!h.app.needs_frame());
+}
+
+#[test]
+fn dock_splitters_resize_and_sides_collapse() {
+    use livspeil_ui_core::CursorShape;
+    use livspeil_ui_layout::DockEdge;
+    use livspeil_ui_widgets::DockView;
+    let (mut h, m) = host(Page::Dock);
+    let dock = m.gallery.read(&h.app).state().containers.dock;
+    let before = dock.read(&h.app).size(DockEdge::Left).unwrap();
+    let s = h.app.find("splitter:left").unwrap();
+    let p = h.app.bounds(s).unwrap().center();
+    h.pointer_move(p.x, p.y);
+    assert_eq!(h.app.take_cursor_request(), Some(CursorShape::ResizeEw));
+    h.drag(p, livspeil_ui_layout::Point::new(p.x + 40.0, p.y), 6);
+    h.run_until_idle(300);
+    let after = dock.read(&h.app).size(DockEdge::Left).unwrap();
+    assert!((after - before - 40.0).abs() < 1.0, "{before} -> {after}");
+    // The Inspector switch collapses the right side (animated).
+    let toggle = page_control(&h, "Inspector");
+    let c = h.app.bounds(toggle).unwrap().center();
+    h.click(c.x, c.y);
+    h.run_until_idle(600);
+    assert!(dock.read(&h.app).is_collapsed(DockEdge::Right));
+    assert!(dock.read(&h.app).shown_size(DockEdge::Right) < 0.5);
+    assert!(h.app.find("panel:Inspector").is_none());
+    DockView::toggle(dock, &mut h.app, DockEdge::Right);
+    h.run_until_idle(600);
+    assert!(h.app.find("panel:Inspector").is_some());
+    // Selecting a layer updates the inspector.
+    click_named(&mut h, "layer:Sun");
+    let layer = m.gallery.read(&h.app).state().containers.layer;
+    assert_eq!(*layer.read(&h.app), 1);
+    assert!(!h.app.needs_frame());
+    check_tree(&h.app, Page::Dock);
+}
+
+#[test]
+fn menu_bar_and_context_menu_work() {
+    let (mut h, m) = host(Page::Menus);
+    let state = m.gallery.read(&h.app).state();
+    let (last, checks) = (state.containers.last_command, state.containers.checks);
+    // F10 from the shell focuses the bar; Down opens File.
+    h.key("f10");
+    h.run_until_idle(300);
+    assert_eq!(h.app.focused(), h.app.find("gallery-menubar"));
+    h.key("right");
+    h.key("down");
+    h.run_until_idle(300);
+    let popup = m.env.menus().expect("a menu opened");
+    assert!(popup.read(&h.app).is_open());
+    h.key("enter"); // New Scene
+    h.run_until_idle(300);
+    assert_eq!(last.read(&h.app), "File › New Scene");
+    // Alt+V, then Show Grid (the first item) flips its check mark.
+    assert!(*checks.grid.read(&h.app));
+    h.key("alt-v");
+    h.run_until_idle(300);
+    h.key("enter");
+    h.run_until_idle(300);
+    assert!(!*checks.grid.read(&h.app));
+    assert_eq!(last.read(&h.app), "View › Show Grid");
+    // The context menu opens on the area with Shift+F10.
+    let area = h.app.find("context-area").unwrap();
+    m.env.focus(&mut h.app, area);
+    h.key("shift-f10");
+    h.run_until_idle(300);
+    assert!(popup.read(&h.app).is_open());
+    h.key("escape");
+    h.run_until_idle(300);
+    assert!(!popup.read(&h.app).is_open());
+    assert!(!h.app.needs_frame());
+}
+
+#[test]
+fn menu_mnemonics_do_nothing_on_other_pages() {
+    let (mut h, m) = host(Page::Buttons);
+    h.key("alt-f");
+    h.run_until_idle(300);
+    assert!(m.env.menus().is_none_or(|p| !p.read(&h.app).is_open()));
+    assert_eq!(current(&h, &m), Page::Buttons);
+}
+
+#[test]
+fn node_canvas_switches_to_the_stress_graph() {
+    let (mut h, m) = host(Page::NodeCanvas);
+    assert!(h.app.find("node:Mix").is_some());
+    let state = m.gallery.read(&h.app).state();
+    let graph = state.containers.graph;
+    let stress = state.containers.canvases[1];
+    let control = page_control(&h, "Graph");
+    let (x, y) = segment(&h, control, 1);
+    h.click(x, y);
+    h.run_until_idle(600);
+    assert_eq!(*graph.read(&h.app), 1);
+    assert!(h.app.find("node:Node 0").is_some());
+    let built = stress.read(&h.app).stats().visible_nodes;
+    assert!(built > 20 && built < 200, "{built} cards built");
+    assert!(!h.app.needs_frame());
+    check_tree(&h.app, Page::NodeCanvas);
+}
+
+#[test]
+fn titlebar_chrome_is_a_drag_region() {
+    use livspeil_ui_core::WindowRequest;
+    use livspeil_ui_gallery::{Chrome, mount_with};
+    let mut app = App::new();
+    let bridge = PaintBridge::new(livspeil_ui_paint::FontSystem::test());
+    app.set_text_measurer(bridge.text.measurer());
+    let m = mount_with(
+        &mut app,
+        FontSystem::test(),
+        Page::Buttons,
+        Chrome::Titlebar,
+    );
+    let mut h = TestHost::new(app, Size::new(WINDOW_SIZE.0, WINDOW_SIZE.1));
+    h.run_until_idle(300);
+    assert_eq!(m.gallery.read(&h.app).chrome(), Chrome::Titlebar);
+    let bar = h.app.bounds(h.app.find("titlebar").unwrap()).unwrap();
+    assert!(bar.y.abs() < 0.5 && bar.width > 900.0);
+    h.click(bar.center().x, bar.center().y);
+    assert_eq!(h.app.take_window_requests(), vec![WindowRequest::Drag]);
+    h.advance(std::time::Duration::from_millis(100));
+    h.click(bar.center().x, bar.center().y);
+    assert_eq!(h.app.take_window_requests(), vec![WindowRequest::Zoom]);
+    // The sidebar starts below the bar; with system chrome there is none.
+    let pages = h.app.bounds(h.app.find("pages").unwrap()).unwrap();
+    assert!(pages.y > bar.bottom());
+    let (h2, _) = host(Page::Buttons);
+    assert!(h2.app.find("titlebar").is_none());
 }

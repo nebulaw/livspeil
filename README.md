@@ -283,35 +283,91 @@ then not saved.
 
 ```sh
 cargo run -p livspeil-ui-gallery            # opens on Buttons
-cargo run -p livspeil-ui-gallery -- motion  # or any page: buttons, toggles, radios, sliders,
-                                            # text-fields, select, materials, typography, motion, theme
+cargo run -p livspeil-ui-gallery -- dock    # or any page by its slug (below)
 ```
 
 A window with a Frost sidebar of pages and a toolbar opens (Metal on
-macOS). Things to look at:
+macOS, Vulkan or OpenGL ES on Linux). The sidebar is grouped and scrolls
+when the window is short:
+
+| Group | Pages (slug) |
+|---|---|
+| Controls | `buttons`, `toggles`, `radios`, `sliders`, `text-fields`, `select` |
+| Containers | `scroll`, `dock`, `menus`, `node-canvas` |
+| System | `materials`, `typography`, `motion`, `theme` |
+
+Things to look at:
 
 - **Toolbar**: Dark/Light, Simple/Pro density, material tier T0/T1/T2,
   Reduce motion and Reduce transparency. Everything changes live.
 - **Keyboard**: Tab and Shift+Tab reach every control (focus ring);
   Space/Enter press; arrows step sliders, radios and segments;
-  Cmd+1..9 and Cmd+0 (Ctrl on Linux) switch pages.
+  Cmd+1..9 and Cmd+0 (Ctrl on Linux) switch to the first ten pages
+  (Buttons to Node canvas).
 - **Pointer**: a pointing hand over buttons and toggles, an I-beam over
-  text fields, a resize cursor over sliders and number fields. Drag a
-  number field sideways to scrub (Shift ×10, Alt ×0.1) and watch the
-  preview box move.
+  text fields, a resize cursor over sliders, number fields and dock
+  splitters. Drag a number field sideways to scrub (Shift ×10, Alt ×0.1)
+  and watch the preview box move.
 - **Text fields**: the caret blinks only while a field is focused (and
   stops after 15 s without input); IME candidates appear at the caret;
   copy and paste use the system clipboard. Georgian and Arabic samples.
+- **Scrolling**: a scroll view (trackpads move 1:1 with rubber banding and
+  momentum, wheels and keys glide, overlay scrollbars) next to a virtual
+  list of 100,000 rows that only builds the rows in view. Focus the list
+  and press End.
+- **Panels & dock**: a mini editor (layers, viewport, inspector,
+  timeline). Drag the splitters, double-click one to reset it, and use the
+  switches to collapse a side.
+- **Menus**: a menu bar (shortcuts, check marks, a submenu, disabled
+  items; F10 and Alt+F/E/V from the keyboard) and an area with a context
+  menu (right-click, or focus it and press Shift+F10).
+- **Node canvas**: the sample graph (pan with Space-drag or two fingers,
+  Ctrl/Cmd+scroll to zoom, drag from a port to connect); switch the toolbar
+  to "Stress · 500" for 500 nodes and 750 links, then Fit.
 - **Materials**: Solid, Frost, Glass and Ink over stripes; switch tiers
   and Reduce transparency to compare.
 - **Motion**: drag Response and Damping, press Animate; change the
   profile, the global speed and Reduce motion.
-- **VoiceOver** (macOS): press Cmd+F5. The window is named "Livspeil
-  Gallery"; pages are tabs, every control has a name, value and state,
-  and VoiceOver actions (press, increment, set value, focus) work.
+- **Screen readers**: VoiceOver on macOS (Cmd+F5); Orca on Linux (below).
+  The window is named "Livspeil Gallery"; pages are tabs, every control
+  has a name, value and state, and actions (press, increment, set value,
+  focus) work.
 - **Hot reload**: edit `~/.config/livspeil/ui/{theme,motion,keymap}.toml`
   (see `docs/ui-config.md`) while it runs; the toolbar follows.
 - **Idle**: when nothing moves the process draws no frames.
+- **Window**: on macOS the gallery draws its own titlebar under the
+  transparent native one (drag it to move the window, double-click to
+  zoom). On Linux the window keeps the system's decorations.
+
+### On Linux
+
+The window works on Wayland and X11. Packages (plus a Rust toolchain and a
+C toolchain with `pkg-config` for the build):
+
+- **Arch**: `vulkan-icd-loader`, the Vulkan driver for your GPU
+  (`vulkan-radeon` for AMD, `vulkan-intel` for Intel, `nvidia-utils` for
+  NVIDIA), and `fontconfig`. `mesa` provides the OpenGL ES fallback.
+- **Debian/Ubuntu**: `mesa-vulkan-drivers libfontconfig1-dev` (plus your
+  vendor's driver on NVIDIA).
+
+winit 0.30 picks the backend itself: Wayland when `WAYLAND_DISPLAY` (or
+`WAYLAND_SOCKET`) is set and not empty, otherwise X11 through `DISPLAY`.
+There is no `WINIT_UNIX_BACKEND` any more. To use X11 (XWayland) from a
+Wayland session, clear the Wayland variables for the run:
+
+```sh
+WAYLAND_DISPLAY= WAYLAND_SOCKET= cargo run -p livspeil-ui-gallery
+```
+
+In an X11-only session, or an `env -u WAYLAND_DISPLAY` shell, X11 is used
+anyway. On compositors without server-side decorations (GNOME) winit draws
+its own title bar (without a title text: no fonts are bundled for it).
+`WINIT_X11_SCALE_FACTOR` overrides the scale factor on X11.
+
+Accessibility uses AccessKit's AT-SPI support: start Orca (Super+Alt+S on
+GNOME, or run `orca`; Arch package `orca`, which pulls in `at-spi2-core`)
+before or after opening the gallery. The tree is sent once a screen reader
+enables the accessibility bus.
 
 Screenshots of every page (no window needed): `cargo xtask shot
 gallery-buttons-1x` (or `--list`), written to `target/shots/`.

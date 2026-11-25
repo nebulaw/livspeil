@@ -381,3 +381,41 @@ fn rerender_with_same_output_does_not_relayout() {
         "measured {delta} of {first_layout}"
     );
 }
+
+#[test]
+fn layout_bounds_reach_the_view_without_events() {
+    use livspeil_ui_layout::Rect;
+
+    struct Sized {
+        seen: Vec<Option<Rect>>,
+    }
+    impl Render for Sized {
+        fn render(&mut self, cx: &mut ViewContext<'_, Self>) -> Element {
+            self.seen.push(cx.layout_bounds());
+            div().name("sized").w_full().h_full()
+        }
+    }
+    struct Outer(View<Sized>);
+    impl Render for Outer {
+        fn render(&mut self, _cx: &mut ViewContext<'_, Self>) -> Element {
+            div()
+                .w_full()
+                .h_full()
+                .p(10.0)
+                .child(div().size(300.0, 200.0).child(Element::view(&self.0)))
+        }
+    }
+    let mut app = App::new();
+    let inner = app.new_view(Sized { seen: Vec::new() });
+    let outer = app.new_view(Outer(inner));
+    app.set_root(outer);
+    let mut h = TestHost::new(app, Size::new(400.0, 300.0));
+    h.run_until_idle(10);
+    let seen = inner.read(&h.app).seen.clone();
+    assert_eq!(seen, vec![None, Some(Rect::new(10.0, 10.0, 300.0, 200.0))]);
+    assert!(!h.app.needs_frame());
+    // A new window size re-renders it once more; nothing else does.
+    h.app.set_viewport(Size::new(500.0, 300.0));
+    h.run_until_idle(10);
+    assert_eq!(inner.read(&h.app).seen.len(), 2);
+}

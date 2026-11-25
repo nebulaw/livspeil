@@ -128,6 +128,9 @@ label (`show_value`).
 - **Display:** the step's decimals (or `decimals(n)`), plus up to three more
   when the value is finer (Alt scrubbing). The editor lays out digits with
   tabular figures (`tnum`). A fill bar shows the position in a finite range.
+- **Name:** `label(...)` shows an inline label and names the field;
+  `accessible_label(...)` only names it (for fields labelled by a separate
+  text, as in node cards).
 
 ### TextField
 
@@ -243,6 +246,9 @@ item (left at the window edge); pressing outside closes.
 hovering another title switches. Register it with `Env::set_menubar` for
 F10 (focus the bar) and Alt+letter (open the menu starting with the
 letter); `Env::focus_root` makes these work before anything has focus.
+A registered bar that is not in the tree (another page is shown) ignores
+both. `MenuBar::replace_menu` swaps a menu, for example to update check
+marks after a choice.
 `ContextMenu::new(menu).attach(&env, el)` opens on secondary press at the
 pointer (Shift+F10 at the element's center), flipped left/up and clamped so
 it stays on screen (`place_menu`).
@@ -256,7 +262,8 @@ lights, the title centered in the window, optional Frost surface. The bar
 is a window drag region (`Element::window_drag_region` in the core): a
 press on empty space or the title requests `WindowRequest::Drag`, a double
 press `WindowRequest::Zoom`; buttons keep their clicks. Hosts read the
-requests with `App::take_window_requests` (not wired to winit yet).
+requests with `App::take_window_requests`; `livspeil-ui-host-winit` applies
+them (`docs/ui-host.md`, "Window chrome and window requests").
 
 ### NodeCanvas
 
@@ -280,8 +287,12 @@ equal type names on different nodes), `type_color`, and edit requests
   compatible port within 24 view px; incompatible ports dim; release on a
   snapped port connects (from inputs too, backward).
 - Cards: header, port rows with colored dots, `NumberField` and `Toggle`
-  parameter rows. Level of detail: full from zoom 0.6, header and dots from
+  parameter rows (named by the parameter for assistive technology). The
+  selection ring is drawn above the header and rows, below the port dots. Level of detail: full from zoom 0.6, header and dots from
   0.3, plain blocks below.
+- The canvas learns its size from layout (`ViewContext::layout_bounds`
+  in the core: a view that reads it renders again when its bounds
+  change), so culling and the minimap are right before any pointer event.
 - Virtualization: only nodes and wires intersecting the view plus 96 px
   overscan are built, from a uniform-grid `CanvasIndex`; the Glass minimap
   (bottom right, click or drag to move the view) is a child view rebuilt
@@ -309,13 +320,13 @@ pixel fade instead of disappearing.
 - Focus changes made directly with `App::focus` are noticed by text and
   number fields only at the next `Env::sync_focus` (pointer press, Tab,
   key event). Use `Env::focus` in code.
-- No caret blink (idle means zero frames), no cursor shapes, no IME cursor
-  area reporting and no system clipboard yet: these need host hooks.
+- Caret blink, cursor shapes, IME placement, the system clipboard and
+  window requests come from `livspeil-ui-host-winit` (`docs/ui-host.md`);
+  headless hosts have none of them.
 - Popups and tooltips are removed without an exit animation.
 - Scroll release is inferred from a 60 ms pause in pixel deltas (no touch
   phases from hosts yet); Alt alone does not focus the menu bar (no
   modifier-only key events), use F10.
-- `WindowRequest`s and cursor shapes are not applied by the winit host yet.
 - NodeCanvas: no link removal by dragging off an input, no deleting nodes,
   no keyboard navigation between nodes; a pan frame rebuilds the visible
   cards (the benchmark above is the budget to beat).

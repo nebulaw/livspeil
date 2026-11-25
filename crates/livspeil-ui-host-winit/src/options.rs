@@ -9,7 +9,10 @@ use livspeil_ui_theme::ConfigWatcher;
 
 use crate::HostError;
 
-/// The titlebar on macOS (ignored elsewhere for now).
+/// The titlebar on macOS. Elsewhere the window keeps the system's
+/// decorations (X11 window manager frames; on Wayland server-side
+/// decorations, or winit's client-side ones where the compositor offers
+/// none), whatever this says.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Titlebar {
     /// The standard titlebar above the content.
@@ -19,8 +22,9 @@ pub enum Titlebar {
     /// [`Titlebar::MACOS_INSET`] logical pixels free at the top.
     #[default]
     FullSizeContent,
-    /// Like `FullSizeContent` with the title hidden (for a custom
-    /// titlebar widget; a later hook).
+    /// Like `FullSizeContent` with the title hidden, for a custom
+    /// titlebar widget (`livspeil_ui_widgets::Titlebar`) that draws the
+    /// title and is the window's drag region.
     Hidden,
 }
 
@@ -154,6 +158,13 @@ impl HostOptions {
     #[must_use]
     pub fn min_size(mut self, width: f64, height: f64) -> Self {
         self.window.min_size = Some((width, height));
+        self
+    }
+
+    /// Set the macOS titlebar style (see [`Titlebar`]).
+    #[must_use]
+    pub fn titlebar(mut self, titlebar: Titlebar) -> Self {
+        self.window.titlebar = titlebar;
         self
     }
 

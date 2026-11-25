@@ -113,6 +113,8 @@ pub struct NumberField {
     pub width: f32,
     env: Env,
     label: Option<SharedString>,
+    /// Accessible name without an inline label.
+    accessible: Option<SharedString>,
     decimals: Option<usize>,
     disabled: bool,
     name: Option<SharedString>,
@@ -150,6 +152,7 @@ impl NumberField {
             width: 120.0,
             env: env.clone(),
             label: None,
+            accessible: None,
             decimals: None,
             disabled: false,
             name: None,
@@ -162,6 +165,14 @@ impl NumberField {
     #[must_use]
     pub fn label(mut self, l: impl Into<SharedString>) -> Self {
         self.label = Some(l.into());
+        self
+    }
+
+    /// Accessible name only, for fields labelled by a separate text
+    /// (an inline [`NumberField::label`] takes precedence).
+    #[must_use]
+    pub fn accessible_label(mut self, l: impl Into<SharedString>) -> Self {
+        self.accessible = Some(l.into());
         self
     }
 
@@ -270,7 +281,7 @@ impl NumberField {
     pub fn semantics(&self, app: &App) -> Semantics {
         let v = *self.value.read(app);
         Semantics::new(Role::SpinButton)
-            .label_opt(self.label.as_deref())
+            .label_opt(self.label.as_deref().or(self.accessible.as_deref()))
             .value(self.format(v))
             .numeric(v, self.min, self.max, self.step)
             .interactive(

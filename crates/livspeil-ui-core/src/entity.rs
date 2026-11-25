@@ -277,6 +277,16 @@ impl<V: Render> ViewContext<'_, V> {
         self.app.theme()
     }
 
+    /// This view's root element bounds (window logical pixels) as of the
+    /// last layout; `None` before the view was first laid out. Calling it
+    /// subscribes the view to its layout: when the bounds change it
+    /// renders again in the next frame (once per change), so views that
+    /// size their content to the space they get (canvases, virtual lists)
+    /// do not need a pointer event to learn it.
+    pub fn layout_bounds(&mut self) -> Option<livspeil_ui_layout::Rect> {
+        self.app.watch_layout(self.id)
+    }
+
     /// The motion configuration.
     #[must_use]
     pub fn motion(&self) -> &MotionConfig {
