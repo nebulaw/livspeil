@@ -8,11 +8,11 @@ The CLA ([CLA.md](CLA.md)) lets the project keep its licensing flexible (for exa
 
 ## 2. Licensing of your contribution
 
-Your contribution is licensed under the license of the part you modify: GPL-3.0-or-later by default, MPL-2.0 for `crates/livspeil-node-api`, CC BY 4.0 for docs and specs. Every file needs SPDX headers (`SPDX-FileCopyrightText` and `SPDX-License-Identifier`) or an entry in `REUSE.toml`. Dependencies must pass `cargo deny check`. Details: [docs/licensing.md](docs/licensing.md).
+Your contribution is licensed under the license of the part you modify: GPL-3.0-or-later by default, MPL-2.0 for `crates/livspeil-node-api`, every `crates/livspeil-ui-*` crate and `sdk/python`, CC BY 4.0 for docs and specs. Every file needs SPDX headers (`SPDX-FileCopyrightText` and `SPDX-License-Identifier`) or an entry in `REUSE.toml`. Dependencies must pass `cargo deny check`. Details: [docs/licensing.md](docs/licensing.md).
 
 ## 3. AI-assisted contributions
 
-Using AI tools is welcome. You remain responsible: you must understand and have reviewed what you submit, and by submitting you confirm you have the right to submit it under the project's licenses. Say so in the pull request when a substantial part was generated. Tool-added `Co-Authored-By` trailers are kept for transparency.
+Using AI tools is welcome. You remain responsible: you must understand and have reviewed what you submit, and by submitting you confirm you have the right to submit it under the project's licenses. Say so in the pull request when a substantial part was generated. Tool-added `Co-Authored-By` trailers are kept for transparency. The repository ships a Claude Code setup (`.claude/`: shared permissions, `implementer` and `reviewer` agents, `/start-round`, `/land-branch` and `/fix-ci`); how it is used is in [docs/claude-code-playbook.md](docs/claude-code-playbook.md).
 
 ## 4. Workflow
 

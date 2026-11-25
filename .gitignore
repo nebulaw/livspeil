@@ -28,3 +28,6 @@ rustc-ice-*.txt
 *.swp
 .idea/
 .vscode/
+
+# Personal Claude Code settings
+.claude/settings.local.json

@@ -33,6 +33,7 @@ Status: **Phase 0 (kernel) and Phase 1 (UI toolkit)**. This repository holds the
 | `xtask` | Project automation (`cargo xtask check`) |
 | `specs/` | Design specs |
 | `docs/` | Licensing, contribution and component documentation (nodes, scripting, UI host, widgets, accessibility, known upstream issues) |
+| `.claude/` | Claude Code setup: shared permissions, agents and skills; see [docs/claude-code-playbook.md](docs/claude-code-playbook.md) |
 
 ## Command line
 
