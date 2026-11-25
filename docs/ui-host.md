@@ -23,7 +23,10 @@ cargo run -p livspeil-ui-host-winit --example hello
 On macOS this opens a window with a full-size content view under the
 native (transparent) titlebar, with a `livspeil-ui-widgets` Button, Toggle
 and Slider on a Frost card over two colored shapes. It renders through
-Metal, through the library's `PaintRenderer`.
+Metal, through the library's `PaintRenderer`. On Linux it opens a
+decorated Wayland or X11 window and renders through Vulkan (OpenGL ES
+when no Vulkan driver is installed); packages and backend selection are
+in `README.md`, "On Linux".
 
 Things to try: hover and click the button (the cursor becomes a pointing
 hand), click the toggle, drag the slider (east-west resize cursor), press
@@ -205,6 +208,33 @@ no window (tested headlessly):
   the IME is allowed, ordinary typing also arrives as commits. Text widgets
   must therefore handle both `on_text_input` and `on_ime`.
 
+## Window chrome and window requests
+
+- **Linux (Wayland and X11)**: the window always has the system's
+  decorations, so moving, resizing, snapping, the window menu and the
+  title behave as in every other app. On Wayland the compositor draws them
+  through `xdg-decoration` when it offers it (KDE, Sway, Hyprland);
+  otherwise (GNOME) winit draws client-side decorations
+  (`wayland-csd-adwaita-notitle`: no title text, as no fonts are bundled
+  for it). `WindowOptions::titlebar` is ignored there, so an app never
+  needs to draw its own titlebar on Linux.
+- **macOS**: `Titlebar::FullSizeContent` (default) puts the content under
+  a transparent native titlebar; `Titlebar::Hidden` also hides the native
+  title, for apps that draw `livspeil_ui_widgets::Titlebar`
+  (`HostOptions::titlebar`). The gallery uses `Hidden` with its own
+  titlebar (`Chrome::native()` picks it on macOS and system chrome
+  elsewhere).
+- **Window requests**: after dispatching input (and after accessibility
+  actions) the host takes `App::take_window_requests()` and applies them
+  through `platform::window_action`: `Drag` calls `Window::drag_window`
+  while the press is still the current event (Wayland and X11 need that),
+  `Zoom` toggles `set_maximized` (like a double-click on a native
+  titlebar), `Minimize` calls `set_minimized(true)`. After a successful
+  drag the held buttons are released at once (`InputTranslator::
+  release_buttons`), because the window manager owns the pointer until the
+  move ends and the release usually never arrives; a late release is
+  dropped.
+
 ## Cursor and clipboard
 
 - Cursor: handlers call `App::request_cursor(shape)` during pointer events.
@@ -212,7 +242,11 @@ no window (tested headlessly):
   `Element::cursor(shape)` installs such a handler. After a pointer move with
   no request the host shows the shape for the role under the pointer
   (`role_cursor`), or the default arrow. `CursorShape::None` hides the
-  cursor.
+  cursor. Every core shape maps to a winit cursor (`cursor_icon`),
+  including the resize shapes (`ResizeEw`/`Ns`/`Nesw`/`Nwse`, column and
+  row resize) that dock splitters request; menu items and check-mark
+  items show the pointing hand. On Wayland the cursor theme comes from
+  `XCURSOR_THEME`/`XCURSOR_SIZE`.
 - Clipboard: `App::set_clipboard_text` queues a copy, and
   `App::request_paste` makes the host read the clipboard and dispatch its
   text as `InputEvent::Text`. The system clipboard uses `arboard`, text
@@ -268,7 +302,10 @@ Frame times (CPU time from redraw to present) are collected in
 
 ## Deferred
 
-- Window-level damage rectangles, and a custom titlebar widget (`Titlebar::Hidden` is the hook).
+- Window-level damage rectangles.
+- Close and resize requests from custom titlebars (only move, zoom and
+  minimize exist), and a client-drawn titlebar on Linux for setups without
+  any decorations (winit always provides them on Wayland).
 - Touch and pen input, and gesture events (pinch and rotate). Scroll momentum
   phases are not forwarded.
 - Wayland `text-input-v3` specifics beyond what winit provides, and
