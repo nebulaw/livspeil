@@ -2127,6 +2127,7 @@ dependencies = [
 name = "livspeil-ui-widgets"
 version = "0.0.0"
 dependencies = [
+ "criterion",
  "livspeil-testkit",
  "livspeil-ui-core",
  "livspeil-ui-layout",

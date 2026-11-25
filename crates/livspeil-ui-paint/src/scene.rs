@@ -3,7 +3,7 @@
 
 //! `Scene` (core paint commands) to `DisplayList` (render primitives).
 
-use livspeil_ui_core::{Border, Fill, PaintCmd, Quad, Scene, TextRun};
+use livspeil_ui_core::{Border, Fill, PaintCmd, Quad, Scene, TextRun, Wire};
 use livspeil_ui_layout::{Corners, Rect as LRect, Transform2D};
 use livspeil_ui_render::{
     Affine, Backdrop, BorderWidth, Color, CornerStyle, DisplayList, Fill as RFill, GradientStop,
@@ -172,6 +172,7 @@ pub(crate) fn convert(
             }
             PaintCmd::Quad(q) => quad(q, &st, layer, list),
             PaintCmd::Text(t) => text_run(t, &st, text, scale, layer, list)?,
+            PaintCmd::Wire(w) => wire(w, &st, scale, layer, list),
         }
     }
     if stack.is_empty() {
@@ -274,6 +275,56 @@ fn backdrop(
         clip: st.clip,
         opacity: st.opacity,
         transform: st.transform,
+    }
+}
+
+/// Screen pixels per flattened wire segment.
+const WIRE_SEGMENT_PX: f32 = 10.0;
+
+/// Strokes a wire: the curve is flattened into segments about
+/// [`WIRE_SEGMENT_PX`] screen pixels long, each drawn as a thin quad with
+/// round ends (pill radii) rotated onto the segment, so joints are round.
+/// Overlapping ends double up under partial opacity; wires are drawn
+/// opaque in practice.
+fn wire(w: &Wire, st: &State, scale: f32, layer: i32, list: &mut DisplayList) {
+    if w.color.alpha <= 0.0 || st.opacity <= 0.0 || w.width <= 0.0 {
+        return;
+    }
+    let ppu = local_scale(scale, st.transform) / scale.max(1e-6);
+    let pts = w.flatten(WIRE_SEGMENT_PX / ppu.max(1e-3));
+    // Keep a stroke at least one physical pixel wide; thinner wires fade.
+    let min_w = 1.0 / (scale * ppu).max(1e-3);
+    let (width, alpha) = if w.width < min_w {
+        (min_w, w.width / min_w)
+    } else {
+        (w.width, 1.0)
+    };
+    let c = color(w.color);
+    let c = c.with_alpha(c.alpha * alpha);
+    let r = width * 0.5;
+    for seg in pts.windows(2) {
+        let (a, b) = (seg[0], seg[1]);
+        let d = b - a;
+        let len = d.length();
+        if len <= 1e-4 {
+            continue;
+        }
+        let (cos, sin) = (d.x / len, d.y / len);
+        // Local x runs along the segment, y across; rect from -r to len + r.
+        let local = Affine {
+            m: [cos, sin, -sin, cos, a.x, a.y],
+        };
+        list.push(
+            layer,
+            RQuad {
+                radii: Radii::all(r),
+                corners: CornerStyle::Circular,
+                clip: st.clip,
+                opacity: st.opacity,
+                transform: st.transform.then_after(local),
+                ..RQuad::new(Rect::new(-r, -r, len + 2.0 * r, width), c)
+            },
+        );
     }
 }
 

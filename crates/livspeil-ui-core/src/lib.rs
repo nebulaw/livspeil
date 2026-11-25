@@ -61,6 +61,8 @@ mod platform;
 mod semantics;
 mod text_measure;
 mod tree;
+mod window;
+mod wire;
 
 pub use anim::{Animatable, Animated, Easing, TransformParts, spring_step};
 pub use app::{
@@ -86,3 +88,5 @@ pub use semantics::{
     SemanticRequest, SemanticValue, Semantics, Toggled, ValueRequest,
 };
 pub use text_measure::{FontFeature, FontSpec, TextMeasurer};
+pub use window::{DOUBLE_PRESS_SLOP, DOUBLE_PRESS_TIME, WindowRequest};
+pub use wire::Wire;

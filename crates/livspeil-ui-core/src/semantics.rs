@@ -98,6 +98,13 @@ pub enum Role {
     Tab,
     /// A toolbar.
     Toolbar,
+    /// A horizontal bar of [`Role::MenuItem`]s that open menus.
+    MenuBar,
+    /// A menu item with a check mark (`checked` holds its state).
+    MenuItemCheckBox,
+    /// A separator between groups (menu separators; focusable separators
+    /// are splitters).
+    Separator,
 }
 
 impl Role {
@@ -125,6 +132,8 @@ impl Role {
                 | Role::Heading
                 | Role::Tab
                 | Role::MenuItem
+                | Role::MenuItemCheckBox
+                | Role::Separator
         )
     }
 }

@@ -19,6 +19,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod containers;
 pub mod gallery;
 pub mod scenes;
 pub mod ui;

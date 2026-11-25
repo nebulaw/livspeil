@@ -80,6 +80,10 @@ pub fn map_role(role: Role) -> accesskit::Role {
         Role::TabList => R::TabList,
         Role::Tab => R::Tab,
         Role::Toolbar => R::Toolbar,
+        Role::MenuBar => R::MenuBar,
+        Role::MenuItemCheckBox => R::MenuItemCheckBox,
+        // AccessKit's splitter is ARIA `separator`.
+        Role::Separator => R::Splitter,
         // `Role` is non-exhaustive; `Generic` and future roles.
         _ => R::GenericContainer,
     }

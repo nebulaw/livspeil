@@ -102,6 +102,10 @@ struct EnvInner {
     overlay: Model<OverlayState>,
     /// The focused element and its name, as of the last sync.
     focus: Model<Option<(ElementId, String)>>,
+    /// The open-menu popup (one menu system at a time).
+    menu_popup: RefCell<Option<View<crate::menu::MenuPopup>>>,
+    /// The menu bar F10 and Alt+letter go to.
+    menubar: RefCell<Option<View<crate::menu::MenuBar>>>,
 }
 
 /// Shared widget environment. Cheap to clone (a reference-counted handle).
@@ -138,6 +142,8 @@ impl Env {
                 clipboard: RefCell::new(Box::new(MemoryClipboard::default())),
                 overlay,
                 focus,
+                menu_popup: RefCell::new(None),
+                menubar: RefCell::new(None),
             }),
         }
     }
@@ -181,6 +187,16 @@ impl Env {
         })
     }
 
+    /// Focus the widget root itself (no focus ring), so app-wide keys
+    /// handled by [`WidgetRoot`] (F10, Alt+letter for the menu bar) work
+    /// before anything else has focus. Hosts call this once at startup;
+    /// pressing anywhere in the window has the same effect.
+    pub fn focus_root(&self, app: &mut App) {
+        if let Some(root) = app.find("widget-root") {
+            self.focus(app, root);
+        }
+    }
+
     /// Focus `id` and let focus-aware widgets know.
     pub fn focus(&self, app: &mut App, id: ElementId) {
         app.focus(id);
@@ -209,6 +225,32 @@ impl Env {
             Some((id, label)) => app.focused() == Some(*id) && label == name,
             None => false,
         }
+    }
+
+    pub(crate) fn menu_popup(&self) -> Option<View<crate::menu::MenuPopup>> {
+        *self.inner.menu_popup.borrow()
+    }
+
+    pub(crate) fn set_menu_popup(&self, v: View<crate::menu::MenuPopup>) {
+        *self.inner.menu_popup.borrow_mut() = Some(v);
+    }
+
+    /// Register the menu bar that F10 focuses and Alt+letter opens.
+    pub fn set_menubar(&self, bar: View<crate::menu::MenuBar>) {
+        *self.inner.menubar.borrow_mut() = Some(bar);
+    }
+
+    /// The open-menu popup, if a menu was ever opened.
+    #[must_use]
+    pub fn menus(&self) -> Option<View<crate::menu::MenuPopup>> {
+        self.menu_popup()
+    }
+
+    /// The id an overlay child keyed `key` has (or will have once
+    /// rendered), so popups can take focus as they open.
+    pub(crate) fn overlay_child(&self, app: &App, key: &str) -> Option<ElementId> {
+        app.find("widget-root")
+            .map(|root| root.child("overlay").child(key))
     }
 
     pub(crate) fn overlay(&self) -> Model<OverlayState> {
@@ -282,6 +324,13 @@ impl Env {
         for k in gone {
             self.hide_overlay(cx, k);
         }
+    }
+}
+
+/// Ask scroll containers to bring the focused element into view.
+fn reveal_focus(cx: &mut App) {
+    if let Some(f) = cx.focused() {
+        cx.dispatch_action_at(f, livspeil_ui_core::SCROLL_INTO_VIEW);
     }
 }
 
@@ -362,17 +411,39 @@ impl Render for WidgetRoot {
             .on_pointer(PointerFilter::Move, Phase::Capture, move |_, cx| {
                 e3.hide_tooltips(cx, |app, anchor| app.is_hovered(anchor));
             })
-            .on_key(Phase::Bubble, move |_, cx| e4.sync_focus(cx))
+            .on_key(Phase::Bubble, move |ev, cx| {
+                e4.sync_focus(cx);
+                // Alt+letter opens the menu bar menu starting with it.
+                let m = ev.modifiers;
+                if let (true, true, false, false, livspeil_ui_core::Key::Char(c)) =
+                    (ev.pressed, m.alt, m.ctrl, m.cmd, ev.key)
+                    && let Some(bar) = *e4.inner.menubar.borrow()
+                    && crate::menu::MenuBar::open_mnemonic(bar, cx, c)
+                {
+                    cx.stop_propagation();
+                }
+            })
+            .on_action(crate::keymap::actions::FOCUS_MENUBAR, {
+                let env = e5.clone();
+                move |cx| {
+                    let bar = *env.inner.menubar.borrow();
+                    if let Some(bar) = bar {
+                        crate::menu::MenuBar::focus(bar, cx);
+                    }
+                }
+            })
             .on_action(actions::FOCUS_NEXT, {
                 let env = e5.clone();
                 move |cx| {
                     cx.focus_next();
                     env.sync_focus(cx);
+                    reveal_focus(cx);
                 }
             })
             .on_action(actions::FOCUS_PREV, move |cx| {
                 cx.focus_prev();
                 e5.sync_focus(cx);
+                reveal_focus(cx);
             })
             .child(
                 div()

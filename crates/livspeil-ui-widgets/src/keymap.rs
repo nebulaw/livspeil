@@ -19,6 +19,14 @@ pub mod actions {
     pub const LAST: &str = "ui.last";
     /// Open a popup (select).
     pub const OPEN: &str = "ui.open";
+    /// Open the highlighted submenu, or the next menu bar menu (Right).
+    pub const MENU_RIGHT: &str = "menu.right";
+    /// Close a submenu, or open the previous menu bar menu (Left).
+    pub const MENU_LEFT: &str = "menu.left";
+    /// Focus the registered menu bar (F10).
+    pub const FOCUS_MENUBAR: &str = "menu.focus_bar";
+    /// Open the focused element's context menu (Shift+F10).
+    pub const CONTEXT_MENU: &str = "menu.context";
     /// Fine step up (number field, ×0.1).
     pub const INCREMENT_SMALL: &str = "ui.increment_small";
     /// Fine step down (number field, ×0.1).
@@ -78,6 +86,26 @@ pub mod actions {
 
 /// Default widget bindings (TOML, same format as `keymap.toml`).
 pub const WIDGET_KEYMAP: &str = r#"
+[bindings]
+"f10" = "menu.focus_bar"
+"shift-f10" = "menu.context"
+
+[contexts.Menu]
+"down" = "ui.next"
+"up" = "ui.prev"
+"home" = "ui.first"
+"end" = "ui.last"
+"right" = "menu.right"
+"left" = "menu.left"
+
+[contexts.NodeCanvas]
+"ctrl-a" = "edit.select_all"
+"cmd-a" = "edit.select_all"
+
+[contexts.MenuBar]
+"right" = "ui.next"
+"left" = "ui.prev"
+"down" = "ui.open"
 [contexts.TextField]
 "space" = "text.key"
 "enter" = "text.submit"
@@ -164,6 +192,16 @@ pub const WIDGET_KEYMAP: &str = r#"
 "home" = "ui.first"
 "end" = "ui.last"
 "alt-down" = "ui.open"
+
+[contexts.ScrollView]
+"up" = "scroll.line_up"
+"down" = "scroll.line_down"
+"left" = "scroll.line_left"
+"right" = "scroll.line_right"
+"pageup" = "scroll.page_up"
+"pagedown" = "scroll.page_down"
+"home" = "scroll.top"
+"end" = "scroll.bottom"
 "#;
 
 /// The default widget bindings.

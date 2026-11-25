@@ -119,6 +119,11 @@ fn new_roles_map_to_accesskit() {
         (Role::ListBox, R::ListBox),
         (Role::ListBoxOption, R::ListBoxOption),
         (Role::Tooltip, R::Tooltip),
+        (Role::MenuBar, R::MenuBar),
+        (Role::Menu, R::Menu),
+        (Role::MenuItem, R::MenuItem),
+        (Role::MenuItemCheckBox, R::MenuItemCheckBox),
+        (Role::Separator, R::Splitter),
     ] {
         assert_eq!(map_role(core), ak, "{core:?}");
     }

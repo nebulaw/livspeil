@@ -345,3 +345,34 @@ fn core_text_weight_and_features_reach_the_shaper() {
     assert_eq!(runs.len(), 2);
     assert_ne!(runs[0].glyphs, runs[1].glyphs);
 }
+
+#[test]
+fn wires_become_rotated_round_quads() {
+    use livspeil_ui_core::Wire;
+    use livspeil_ui_layout::Point;
+    let w = Wire::link(
+        Point::new(10.0, 10.0),
+        Point::new(150.0, 80.0),
+        2.0,
+        Color::WHITE,
+    );
+    let scene = Scene {
+        commands: vec![PaintCmd::Wire(w)],
+    };
+    let mut bridge = PaintBridge::new(FontSystem::test());
+    let mut list = DisplayList::new();
+    bridge.paint_scene(&scene, 2.0, &mut list).unwrap();
+    assert!(list.len() >= 4, "{}", list.len());
+    for item in &list.items {
+        let livspeil_ui_render::Primitive::Quad(q) = &item.primitive else {
+            panic!("not a quad");
+        };
+        assert_eq!(q.rect.h, 2.0);
+        assert_eq!(q.radii.tl, 1.0);
+    }
+    // The first segment starts at the wire's start (local origin).
+    let livspeil_ui_render::Primitive::Quad(first) = &list.items[0].primitive else {
+        unreachable!()
+    };
+    assert_eq!(first.transform.apply(0.0, 0.0), (10.0, 10.0));
+}

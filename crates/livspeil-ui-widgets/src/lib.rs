@@ -11,6 +11,9 @@
 //!   [`Tooltip`].
 //! - Views with editing or popup state: [`Slider`], [`NumberField`],
 //!   [`TextField`], [`Select`].
+//! - Containers and chrome: [`ScrollView`] / [`VirtualList`], [`Panel`],
+//!   [`DockView`], [`Menu`] / [`MenuBar`] / [`ContextMenu`], [`Titlebar`].
+//! - [`NodeCanvas`]: the node editor over any [`NodeGraphModel`].
 //! - [`Env`] holds fonts, the clipboard and focus tracking, and installs the
 //!   widget keymap; [`Env::root`] wraps the content in a [`WidgetRoot`]
 //!   whose overlay layer hosts popups and tooltips.
@@ -58,10 +61,14 @@
 //! ```
 
 mod button;
+mod dock;
 mod env;
 pub mod keymap;
 mod label;
+mod menu;
+mod node_canvas;
 mod number_field;
+mod scroll;
 mod segmented;
 mod select;
 pub mod semantics;
@@ -69,14 +76,31 @@ mod slider;
 mod style;
 mod text_box;
 mod text_field;
+mod titlebar;
 mod toggle;
 mod tooltip;
 
 pub use button::{Button, ButtonVariant, IconButton};
+pub use dock::{DockView, PANEL_SCOPE, Panel, PanelMaterial, SlotFn};
 pub use env::{Clipboard, Env, MemoryClipboard, WidgetRoot};
 pub use keymap::{WIDGET_KEYMAP, keymap};
 pub use label::{Label, Tone};
+pub use menu::{
+    ContextMenu, Menu, MenuAnchor, MenuBar, MenuCallback, MenuEntry, MenuItem, MenuPopup,
+    SUBMENU_DELAY, close_menu, format_keystroke, open_menu, place_below, place_menu, place_submenu,
+    shortcut_for,
+};
+pub use node_canvas::{
+    CANVAS_SCOPE, CanvasStats, CardMetrics, DemoGraph, DemoNode, GraphCache, LOD_COMPACT, LOD_FULL,
+    Link, Lod, MINIMAP, NODE_WIDTH, NodeCanvas, NodeGeom, NodeGraphModel, NodeId, PORT_DOT,
+    ParamInfo, ParamValue, PortInfo, PortRef, PortSide, SNAP_RADIUS, WIRE_WIDTH, find_snap,
+    graph_bounds, minimap_mapping, oriented, palette_color, rect_from, rubber_select,
+};
 pub use number_field::{NumberField, Scrub, scrub_precision};
+pub use scroll::{
+    OVERSCAN, SCROLL_SCOPE, ScrollAxis, ScrollContent, ScrollInfo, ScrollPhysics, ScrollView,
+    Scroller, VirtualList, rubber_band, scroll_actions, visible_range,
+};
 pub use segmented::{SEGMENT_INSET, SegmentedControl};
 pub use select::Select;
 pub use semantics::{NumericValue, Role, SemanticAction, Semantics, Toggled};
@@ -84,5 +108,6 @@ pub use slider::{SLIDER_THUMB, Slider};
 pub use style::step_decimals;
 pub use style::{ClickFn, DISABLED_OPACITY};
 pub use text_field::{TextField, TextFn};
+pub use titlebar::{TITLEBAR_HEIGHT, TOOLBAR_HEIGHT, TRAFFIC_LIGHT_INSET, Titlebar};
 pub use toggle::{CheckState, Checkbox, Radio, RadioGroup, Toggle};
 pub use tooltip::{TOOLTIP_DELAY, Tooltip, place as place_tooltip};
