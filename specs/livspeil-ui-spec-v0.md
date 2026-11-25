@@ -23,7 +23,7 @@ Naming: Rust crates `livspeil-ui-*`; npm scope `@livspeil/ui` reserved; config u
 | `livspeil-ui-theme` | tokens, materials, motion profiles, config loading and hot reload |
 | `livspeil-ui-widgets` | the widget set |
 | `livspeil-ui-a11y` | AccessKit tree building and actions |
-| `livspeil-ui-host-winit` | desktop host (macOS first) for the gallery and Dream Mode app |
+| `livspeil-ui-host-winit` | desktop host (Linux and macOS) for the gallery and Dream Mode app |
 | `livspeil-ui-host-bevy` | render-graph node and input bridge for the World |
 | `livspeil-ui-host-wayland` | layer-shell host for the Shell; Linux only |
 | `livspeil-ui-gallery` | component gallery app |
@@ -97,7 +97,7 @@ Button, IconButton, Toggle, Checkbox, Radio, Slider, NumberField with drag-scrub
 Pointer, touch, keyboard; configurable keymaps (TOML actions); visible focus ring; full keyboard navigation; drag and drop; cursor shapes. AccessKit tree built incrementally with stable ids. Reduce motion, reduce transparency, high contrast, text scale.
 
 ## 11. Hosts
-winit (macOS first) for gallery and Dream Mode; Bevy render-graph node; Wayland layer-shell for the Shell (Linux, uses ext-background-effect-v1).
+winit for gallery and Dream Mode, first-class on Linux (Wayland and X11) and macOS (D51); Bevy render-graph node; Wayland layer-shell for the Shell (Linux, uses ext-background-effect-v1).
 
 ## 12. Performance targets (hypotheses)
 UI CPU per dirty frame < 1 ms on an M-series Mac; GPU < 1.5 ms at 1080p on Intel Xe with T1; idle = zero frames; 120 fps scroll and drag.
@@ -107,3 +107,21 @@ UI CPU per dirty frame < 1 ms on an M-series Mac; GPU < 1.5 ms at 1080p on Intel
 
 ## 14. Milestones
 M1.1 renderer (quad SDF, shadows, hairline, gradients, first Frost panel) · M1.2 text, layout, input, focus; Button and TextField · M1.3 animation driver, motion config, hot reload · M1.4 AccessKit · M1.5 screenshot harness and goldens · M1.6 Dock/Panel/Menu/Titlebar; NodeCanvas prototype.
+
+## 15. Status as built (2026-11-25)
+The original milestone plan above was re-cut into smaller PRs. Built and merged:
+
+| Milestone | PR | What |
+|---|---|---|
+| M1.1 | #27 | renderer: SDF quads, shadows, gradients, dual-Kawase Frost/Glass blur, CPU reference; screenshot harness |
+| M1.2 | #29 | text on Parley 0.13 (skrifa/zeno), editor with IME, glyph atlas |
+| M1.3 | #28, #34 | core (models, views, input, focus, springs), Taffy 0.16 layout with bug workarounds, theme and motion config with hot reload |
+| M1.4 | #32 | paint bridge: scene to display list, cached shaping, atlas uploads |
+| M1.5 | #31 | winit 0.30 host: pacing, IME, cursors, clipboard |
+| M1.6 | #33 | controls: Button, Toggle, Checkbox, Radio, SegmentedControl, Slider, NumberField scrub, TextField, Select, Tooltip |
+| M1.7 | #30 | AccessKit 0.25 incremental trees and actions |
+| M1.9 | #35 | gallery app; host fully wired (PaintRenderer, AccessKit adapter) |
+| M1.10 | #36 | ScrollView, VirtualList, Panel, DockView, Menu/MenuBar/ContextMenu, Titlebar, Bézier wires, NodeCanvas |
+
+Not built yet (from section 9 and 11): IconButton, Tabs, Tree, Table, Popover, Dialog/Sheet, Toast, ColorPicker, CurveEditor, Viewport, auto-generated inspector; Bevy and Wayland layer-shell hosts; damage tracking and blur caching (principle 6); high contrast and text scale. NodeCanvas misses the section 12 CPU target (4.7–9.5 ms per frame at 2000 nodes on a shared VM). Component details: `docs/widgets.md`, `docs/ui-host.md`, `docs/accessibility.md`, `docs/ui-config.md`.
+
