@@ -100,3 +100,18 @@ t.set_children(inner, &[leaf]).unwrap();
 t.compute_layout(root, Size::MAX_CONTENT).unwrap();
 assert_eq!(t.layout(leaf).unwrap().size, Size::ZERO); // fails: still 30×20
 ```
+
+## AccessKit's Linux adapter depends on the retired zbus 5 helper crates
+
+**Status:** as of 2026-11-26. `accesskit_unix` 0.24.1 (the latest release)
+depends on zbus 5 and `atspi`. The three advisories are ignored by id in
+`deny.toml`.
+
+RUSTSEC-2026-0370 (`zvariant`), -0371 (`zbus_names`) and -0372
+(`zvariant_derive`) mark these crates as unmaintained: they were merged
+into `zbus` 6.0. They are not vulnerability reports. No `cargo update` can
+remove them, and dropping them would mean dropping screen-reader support on
+Linux.
+
+Remove the ignores when an `accesskit_unix` release builds on zbus 6.
+

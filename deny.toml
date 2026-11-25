@@ -3,6 +3,13 @@ all-features = true
 
 [advisories]
 version = 2
+# Unmaintained notices only (no vulnerability), with no upgrade path yet; see
+# docs/known-issues.md. Remove once AccessKit's Linux adapter is on zbus 6.
+ignore = [
+  { id = "RUSTSEC-2026-0370", reason = "zvariant, via accesskit_unix and atspi" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names, via accesskit_unix and atspi" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive, via accesskit_unix and atspi" },
+]
 
 [licenses]
 version = 2
