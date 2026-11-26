@@ -32,7 +32,9 @@
 
 mod accessibility;
 mod error;
+pub mod frame_stats;
 mod host;
+pub mod hud;
 pub mod input;
 mod options;
 pub mod pacing;
@@ -45,8 +47,10 @@ pub mod widget_platform;
 pub use accessibility::Accessibility;
 pub use error::HostError;
 pub use host::{Host, HostEvent, run};
+pub use hud::HudOptions;
 pub use options::{
-    ActionHook, HostOptions, SurfaceOptions, Titlebar, WindowOptions, pick_format, surface_config,
+    ActionHook, FRAME_LATENCY_ENV, HostOptions, PRESENT_MODE_ENV, SurfaceOptions, Titlebar,
+    WindowOptions, parse_present_mode, pick_format, surface_config,
 };
 #[cfg(feature = "widgets")]
 pub use paint_renderer::{PaintRenderer, clear_color, widen_text_runs, without_backdrops};
@@ -54,7 +58,7 @@ pub use platform::{
     Clipboard, ImeState, MemoryClipboard, SystemClipboard, WindowAction, cursor_icon,
     service_clipboard, window_action,
 };
-pub use renderer::{RenderTarget, SceneRenderer};
+pub use renderer::{RenderTarget, RenderTimings, SceneRenderer};
 #[cfg(feature = "widgets")]
 pub use widget_platform::WidgetClipboard;
 

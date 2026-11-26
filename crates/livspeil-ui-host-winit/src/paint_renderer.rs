@@ -10,7 +10,9 @@ use livspeil_ui_paint::PaintBridge;
 use livspeil_ui_render as render;
 use livspeil_ui_theme::Theme;
 
-use crate::{HostError, RenderTarget, SceneRenderer};
+use std::time::Instant;
+
+use crate::{HostError, RenderTarget, RenderTimings, SceneRenderer};
 
 /// Draws scenes with the paint bridge: each scene becomes a display list
 /// plus glyph atlas uploads, applied to the GPU renderer before the frame.
@@ -28,6 +30,9 @@ pub struct PaintRenderer {
     bridge: PaintBridge,
     clear: render::Color,
     renderer: Option<(wgpu::TextureFormat, render::Renderer)>,
+    list: render::DisplayList,
+    frame: render::Frame,
+    timings: RenderTimings,
 }
 
 impl std::fmt::Debug for PaintRenderer {
@@ -47,6 +52,19 @@ impl PaintRenderer {
             bridge,
             clear,
             renderer: None,
+            list: render::DisplayList::new(),
+            frame: render::Frame {
+                options: render::FrameOptions {
+                    width: 1,
+                    height: 1,
+                    scale: 1.0,
+                    clear,
+                },
+                clear: [0.0; 4],
+                instances: Vec::new(),
+                ops: Vec::new(),
+            },
+            timings: RenderTimings::default(),
         }
     }
 
@@ -93,8 +111,9 @@ pub fn clear_color(theme: &Theme) -> render::Color {
 /// width exceeds its box by more than half a pixel, which would break such
 /// a label (text fields lay out their text at its measured width) onto two
 /// lines. One extra pixel absorbs the rounding; text given a real width
-/// (paragraphs) still wraps where it should. [`PaintRenderer`] applies
-/// this to every scene.
+/// (paragraphs) still wraps where it should. [`PaintRenderer`] gets the
+/// same effect without copying the scene from
+/// `TextContext::width_slack`; this function is for other renderers.
 pub fn widen_text_runs(scene: &Scene) -> std::borrow::Cow<'_, Scene> {
     use livspeil_ui_core::PaintCmd;
     if !scene
@@ -154,27 +173,46 @@ impl SceneRenderer for PaintRenderer {
         let Some((_, renderer)) = &mut self.renderer else {
             return Ok(());
         };
-        let mut list = render::DisplayList::new();
-        let scene = widen_text_runs(scene);
+        // Buffers are reused frame to frame (the list and the encoded
+        // instances are megabytes in a busy scene).
+        let t0 = Instant::now();
+        self.list.items.clear();
+        self.bridge.text.width_slack = 1.0;
         let updates = self
             .bridge
-            .paint_scene(&scene, target.scale, &mut list)
+            .paint_scene(scene, target.scale, &mut self.list)
             .map_err(renderer_error)?;
         if !target.usage.contains(wgpu::TextureUsages::TEXTURE_BINDING) {
-            without_backdrops(&mut list);
+            without_backdrops(&mut self.list);
         }
         renderer.update_atlases(&gpu.device, &gpu.queue, &updates)?;
-        let frame = render::encode(
-            &list,
+        let t1 = Instant::now();
+        render::encode_into(
+            &self.list,
             render::FrameOptions {
                 width: target.size_px.0,
                 height: target.size_px.1,
                 scale: target.scale,
                 clear: self.clear,
             },
+            &mut self.frame,
         )?;
-        renderer.render(&gpu.device, &gpu.queue, &frame, target.texture)?;
+        let t2 = Instant::now();
+        renderer.render(&gpu.device, &gpu.queue, &self.frame, target.texture)?;
+        self.timings = RenderTimings {
+            paint: t1 - t0,
+            encode: t2 - t1,
+            submit: t2.elapsed(),
+            items: self.list.items.len(),
+            instances: self.frame.instances.len(),
+            draw_calls: self.frame.draw_calls(),
+            upload_bytes: self.frame.instance_byte_len(),
+        };
         Ok(())
+    }
+
+    fn take_timings(&mut self) -> RenderTimings {
+        std::mem::take(&mut self.timings)
     }
 }
 
