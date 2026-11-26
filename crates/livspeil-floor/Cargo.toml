@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "livspeil-floor"
+description = "Livspeil Floor: Wayland compositor spike (Linux only)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "GPL-3.0-or-later"
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+# The Floor is Linux only. Everything that touches Smithay, Wayland, GL or
+# DRM lives behind `cfg(target_os = "linux")` and the dependencies below are
+# target-gated, so on macOS the crate compiles to the platform-independent
+# geometry/theme math only (and its unit tests still run there).
+
+[features]
+default = []
+# Bare-metal session: DRM/KMS, libseat, libinput, udev (needs libseat,
+# libgbm, libinput, libudev development packages at build time).
+tty = [
+  "smithay/backend_drm",
+  "smithay/backend_gbm",
+  "smithay/backend_libinput",
+  "smithay/backend_udev",
+  "smithay/backend_session_libseat",
+]
+
+[[bin]]
+name = "floor-nested"
+path = "src/bin/floor-nested.rs"
+
+[[bin]]
+name = "floor-tty"
+path = "src/bin/floor-tty.rs"
+
+[[bin]]
+name = "floor-test-client"
+path = "src/bin/floor-test-client.rs"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+smithay = { version = "0.7", default-features = false, features = [
+  "backend_winit",
+  "renderer_gl",
+  "wayland_frontend",
+  "desktop",
+] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi"] }
+
+# Test client (fixture for the demo and for protocol tests).
+smithay-client-toolkit = { version = "0.19", default-features = false }
+wayland-client = "0.31"
+png = "0.17"
+
+[lints]
+workspace = true
