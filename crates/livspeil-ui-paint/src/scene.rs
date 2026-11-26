@@ -346,7 +346,12 @@ fn text_run(
     // Labels are laid out at their measured width; only wrap when the box
     // is narrower than the text (a paragraph given a width by its view).
     let natural = text.natural_width(&t.text, &style);
-    let max_width = (t.rect.width > 0.0 && natural > t.rect.width + 0.5).then_some(t.rect.width);
+    let width = if t.rect.width > 0.0 {
+        t.rect.width + text.width_slack
+    } else {
+        0.0
+    };
+    let max_width = (width > 0.0 && natural > width + 0.5).then_some(width);
     draw_text(
         text,
         &t.text,

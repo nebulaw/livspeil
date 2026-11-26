@@ -4,6 +4,8 @@
 //! The rendering boundary: the host owns the window, surface and frame
 //! pacing; a [`SceneRenderer`] turns a [`Scene`] into GPU work.
 
+use std::time::Duration;
+
 use livspeil_ui_core::Scene;
 use livspeil_ui_render::GpuContext;
 
@@ -28,6 +30,27 @@ pub struct RenderTarget<'a> {
     pub scale: f32,
 }
 
+/// Where a renderer spent the last frame (all zero when it does not
+/// measure). Shown by the frame HUD ([`crate::frame_stats`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RenderTimings {
+    /// Scene to display list and glyph atlas uploads (CPU).
+    pub paint: Duration,
+    /// Display list to GPU instance data (CPU).
+    pub encode: Duration,
+    /// Recording and submitting the GPU commands, including the instance
+    /// upload (CPU time; the GPU runs asynchronously).
+    pub submit: Duration,
+    /// Display list items.
+    pub items: usize,
+    /// GPU instances.
+    pub instances: usize,
+    /// Draw calls (backdrop composites included).
+    pub draw_calls: usize,
+    /// Bytes of instance data uploaded.
+    pub upload_bytes: usize,
+}
+
 /// Draws a [`Scene`] into a surface texture.
 ///
 /// The host never inspects the scene: it decides *when* to draw and hands
@@ -46,6 +69,12 @@ pub trait SceneRenderer {
         target: &RenderTarget<'_>,
         scene: &Scene,
     ) -> Result<(), HostError>;
+
+    /// The timings of the last [`SceneRenderer::render`], if the renderer
+    /// measures them (the default reports zeros).
+    fn take_timings(&mut self) -> RenderTimings {
+        RenderTimings::default()
+    }
 }
 
 impl<R: SceneRenderer + ?Sized> SceneRenderer for Box<R> {
@@ -56,5 +85,9 @@ impl<R: SceneRenderer + ?Sized> SceneRenderer for Box<R> {
         scene: &Scene,
     ) -> Result<(), HostError> {
         (**self).render(gpu, target, scene)
+    }
+
+    fn take_timings(&mut self) -> RenderTimings {
+        (**self).take_timings()
     }
 }
