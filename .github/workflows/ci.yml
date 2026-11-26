@@ -31,13 +31,23 @@ jobs:
       # Linux system packages: lavapipe (software Vulkan) for the UI
       # renderer's GPU tests (macOS uses Metal; without any adapter the GPU
       # tests skip), and fontconfig for system-font discovery in the text
-      # stack.
+      # stack. The Floor (Linux only, `livspeil-floor`) needs xkbcommon at
+      # build time; the `tty` feature also needs seat, input, udev, GBM and
+      # DRM development files.
       - name: Install Linux system packages
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libfontconfig1-dev pkg-config
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers libfontconfig1-dev pkg-config \
+            libxkbcommon-dev xkb-data libudev-dev libinput-dev libseat-dev libgbm-dev libdrm-dev libegl-dev
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      # The bare-metal Floor skeleton is behind a feature; it is only
+      # compiled here, never run (it needs a TTY and a GPU).
+      - name: Floor with the tty feature (Linux)
+        if: runner.os == 'Linux'
+        run: cargo clippy -p livspeil-floor --features tty --all-targets -- -D warnings
       - name: UI screenshots (CPU reference and GPU)
         run: cargo xtask shot --gpu
       - name: Upload UI screenshots and golden diffs
@@ -58,5 +68,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.95
       - uses: Swatinem/rust-cache@v2
       - name: Install Linux system packages
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev pkg-config
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev pkg-config \
+            libxkbcommon-dev xkb-data libudev-dev libinput-dev libseat-dev libgbm-dev libdrm-dev libegl-dev
       - run: cargo check --workspace --all-targets
+      - run: cargo check -p livspeil-floor --features tty --all-targets

@@ -28,7 +28,7 @@ The repository already carries the setup:
 
 ```sh
 sudo pacman -S --needed base-devel git github-cli rustup python \
-    fontconfig vulkan-icd-loader vulkan-tools reuse
+    fontconfig vulkan-icd-loader vulkan-tools reuse libxkbcommon
 # plus the Vulkan driver for your GPU: vulkan-radeon, vulkan-intel or nvidia-utils
 rustup default stable            # rust-toolchain.toml pins the channel
 cargo install cargo-deny --locked
