@@ -62,12 +62,11 @@ impl StyleKey {
     }
 }
 
-/// Where prepared glyphs were placed: scale, the fractional part of the
-/// physical origin (1/64 px), and the atlas generation they live in.
+/// What prepared glyphs depend on: the scale and the atlas generation they
+/// live in (runs snap to whole pixels, so the origin does not matter).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct PlaceKey {
     scale: u32,
-    frac: (u8, u8),
     generation: u64,
 }
 
@@ -341,14 +340,12 @@ impl TextContext {
         let key = shaper.lookup(text, style, at.max_width);
         let scale = at.scale;
         let (px, py) = (at.origin.0 * scale, at.origin.1 * scale);
-        let (ix, iy) = (px.floor(), py.floor());
-        let frac = (
-            ((px - ix) * 64.0).round().min(63.0) as u8,
-            ((py - iy) * 64.0).round().min(63.0) as u8,
-        );
+        // The whole run snaps to the pixel grid once. Snapping glyph by
+        // glyph from a fractional origin would change letter spacing and
+        // line positions while the text moves (zoomed or dragged cards).
+        let (ix, iy) = ((px + 0.5).floor(), (py + 0.5).floor());
         let place = PlaceKey {
             scale: scale.to_bits(),
-            frac,
             generation: self.atlas.generation(),
         };
         let mode = SubpixelMode::for_scale(scale);
@@ -368,13 +365,9 @@ impl TextContext {
                     q.clone()
                 }
                 _ => {
-                    let origin = (
-                        f32::from(frac.0) / 64.0 / scale,
-                        f32::from(frac.1) / 64.0 / scale,
-                    );
                     let q = entry
                         .layout
-                        .prepare_glyphs(origin, scale, rasterizer, atlas)?;
+                        .prepare_glyphs((0.0, 0.0), scale, rasterizer, atlas)?;
                     entry.prepared = Some((place, q.clone()));
                     q
                 }

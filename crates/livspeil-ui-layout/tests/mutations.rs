@@ -443,3 +443,29 @@ fn random_mutations_match_fresh_layout() {
         }
     }
 }
+
+/// Moving an out-of-flow box by fractions of a pixel keeps its size and its
+/// contents' offsets, so a dragged card and its labels move as one.
+#[test]
+fn contents_of_a_moving_absolute_box_do_not_shift() {
+    let mut t = LayoutTree::new();
+    let root = t.create(Style::default(), Measure::None).unwrap();
+    let card = t
+        .create(absolute(0.0, 0.0, 100.0, 50.5), Measure::None)
+        .unwrap();
+    let label = t
+        .create(absolute(10.0, 6.5, 40.0, 15.0), Measure::None)
+        .unwrap();
+    t.set_children(root, &[card]).unwrap();
+    t.set_children(card, &[label]).unwrap();
+
+    let mut seen = None;
+    for step in 0..40 {
+        let at = 20.0 + step as f32 * 0.1;
+        t.set_style(card, &absolute(at, at, 100.0, 50.5)).unwrap();
+        t.compute(root, VIEWPORT).unwrap();
+        let card_rect = t.rect(card).unwrap();
+        let now = (t.rect(label).unwrap(), card_rect.width, card_rect.height);
+        assert_eq!(*seen.get_or_insert(now), now, "card at {at}");
+    }
+}

@@ -376,3 +376,51 @@ fn wires_become_rotated_round_quads() {
     };
     assert_eq!(first.transform.apply(0.0, 0.0), (10.0, 10.0));
 }
+
+/// A text run moved by fractions of a pixel keeps the same glyph positions
+/// relative to each other: it only ever shifts as a whole, by whole pixels.
+#[test]
+fn moving_text_keeps_its_glyph_spacing() {
+    for scale in [1.0, 1.25, 2.0] {
+        let mut bridge = PaintBridge::new(FontSystem::test());
+        let (_host, scene) = demo_scene(&bridge);
+        let run = scene
+            .commands
+            .iter()
+            .find_map(|c| match c {
+                PaintCmd::Text(t) => Some(t.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let mut first: Option<Vec<(f32, f32)>> = None;
+        for step in 0..20 {
+            let mut moved = run.clone();
+            moved.rect.x += step as f32 * 0.15;
+            moved.rect.y += step as f32 * 0.15;
+            let one = Scene {
+                commands: vec![PaintCmd::Text(moved)],
+            };
+            let mut list = DisplayList::new();
+            bridge.paint_scene(&one, scale, &mut list).unwrap();
+            let glyphs = list
+                .items
+                .iter()
+                .find_map(|i| match &i.primitive {
+                    Primitive::Glyphs(g) => Some(g.glyphs.clone()),
+                    _ => None,
+                })
+                .unwrap();
+            let origin = (glyphs[0].rect.x, glyphs[0].rect.y);
+            let relative: Vec<(f32, f32)> = glyphs
+                .iter()
+                .map(|g| {
+                    (
+                        ((g.rect.x - origin.0) * scale).round(),
+                        ((g.rect.y - origin.1) * scale).round(),
+                    )
+                })
+                .collect();
+            assert_eq!(*first.get_or_insert_with(|| relative.clone()), relative);
+        }
+    }
+}
