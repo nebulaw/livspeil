@@ -163,24 +163,24 @@ fn icon_buttons(scheme: Scheme, scale: f32) -> Result<Shot, ShotError> {
                         })),
                         row()
                             .child(label("Styles"))
-                            .child(IconButton::new("bx-plus", "Add").render(&theme))
+                            .child(IconButton::new("bx-grid-plus", "Add").render(&theme))
                             .child(
-                                IconButton::new("bx-plus", "Add (filled)")
+                                IconButton::new("bx-grid-plus", "Add (filled)")
                                     .filled()
                                     .render(&theme),
                             )
                             .child(
-                                IconButton::new("bx-pin", "Pinned")
+                                IconButton::new("bx-bookmark-alt", "Pinned")
                                     .toggle(true)
                                     .render(&theme),
                             )
                             .child(
-                                IconButton::new("bx-pin", "Not pinned")
+                                IconButton::new("bx-bookmark-alt", "Not pinned")
                                     .toggle(false)
                                     .render(&theme),
                             )
                             .child(
-                                IconButton::new("bx-lock", "Locked")
+                                IconButton::new("bx-unlink", "Unlink")
                                     .disabled(true)
                                     .render(&theme),
                             ),
@@ -282,7 +282,7 @@ fn popover(scheme: Scheme, scale: f32) -> Result<Shot, ShotError> {
                         .child(Button::new("Grid settings").render(&theme))
                 })
                 .trigger(|theme| {
-                    IconButton::new("bx-cog", "Settings")
+                    IconButton::new("bx-gear", "Settings")
                         .toggle(true)
                         .size(IconSize::S20)
                         .render(theme)

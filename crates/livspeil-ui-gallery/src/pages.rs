@@ -359,11 +359,11 @@ fn buttons(theme: &Theme, state: &State, env: &Env, cx: &App) -> Element {
             columns(
                 card(theme, "Icon buttons").child(
                     row()
-                        .child(icon("bx-trash", "Move to trash"))
+                        .child(icon("bx-bookmarks", "Bookmarks"))
                         .child(icon("bx-copy", "Duplicate"))
-                        .child(icon("bx-share", "Share"))
+                        .child(icon("bx-folder", "Open folder"))
                         .child(
-                            IconButton::new("bx-lock", "Locked")
+                            IconButton::new("bx-unlink", "Unlink")
                                 .disabled(true)
                                 .render(theme),
                         ),
@@ -621,7 +621,7 @@ fn selects(theme: &Theme, state: &State, env: &Env) -> Element {
             .child(row().child(
                 Tooltip::new("Icon buttons are named by their tooltip").attach(
                     env,
-                    IconButton::new("bx-info-circle", "Information").render(theme),
+                    IconButton::new("bx-message-circle-notification", "Information").render(theme),
                 ),
             ))
             .child(caption(theme, "Rest the pointer on a control.")),

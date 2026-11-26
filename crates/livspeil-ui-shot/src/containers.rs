@@ -175,7 +175,7 @@ fn edit_menu() -> Menu {
         )
         .separator()
         .item(MenuItem::new("Cut").shortcut("Ctrl+X"))
-        .item(MenuItem::new("Copy").shortcut("Ctrl+C"))
+        .item(MenuItem::new("Copy").icon("bx-copy").shortcut("Ctrl+C"))
         .item(MenuItem::new("Paste").shortcut("Ctrl+V"))
         .separator()
         .item(MenuItem::new("Snap to Grid").checked(true))
@@ -238,7 +238,11 @@ fn context_menu(scale: f32) -> Result<Shot, ShotError> {
                 );
                 ContextMenu::new(
                     Menu::new()
-                        .item(MenuItem::new("Add Node…").shortcut("Shift+A"))
+                        .item(
+                            MenuItem::new("Add Node…")
+                                .icon("bx-grid-plus")
+                                .shortcut("Shift+A"),
+                        )
                         .item(MenuItem::new("Paste").shortcut("Ctrl+V"))
                         .separator()
                         .item(MenuItem::new("Show Minimap").checked(true))

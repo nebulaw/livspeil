@@ -2313,6 +2313,7 @@ version = "0.0.0"
 dependencies = [
  "livspeil-ui-core",
  "livspeil-ui-gallery",
+ "livspeil-ui-icons",
  "livspeil-ui-layout",
  "livspeil-ui-paint",
  "livspeil-ui-render",
