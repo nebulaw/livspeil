@@ -61,6 +61,7 @@
 //! ```
 
 mod button;
+mod dialog;
 mod dock;
 mod env;
 mod icon_button;
@@ -84,6 +85,7 @@ mod toggle;
 mod tooltip;
 
 pub use button::{Button, ButtonVariant};
+pub use dialog::{DIALOG_WIDTH, Dialog, DialogButton, SHEET_WIDTH};
 pub use dock::{DockView, PANEL_SCOPE, Panel, PanelMaterial, SlotFn};
 pub use env::{Clipboard, Env, MemoryClipboard, WidgetRoot};
 pub use icon_button::{IconButton, IconButtonStyle, IconSize};

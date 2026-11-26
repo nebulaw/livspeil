@@ -126,6 +126,25 @@ pub(crate) fn measure_text(env: &crate::Env, s: &str, size: f32, weight: f32) ->
     (l.width().ceil(), l.height().ceil())
 }
 
+/// Height of `s` set in the UI font, wrapped at `width`.
+pub(crate) fn measure_wrapped(
+    env: &crate::Env,
+    s: &str,
+    size: f32,
+    weight: f32,
+    width: f32,
+) -> f32 {
+    use livspeil_ui_text::{LayoutOptions, TextLayout, TextStyle};
+    let mut fonts = env.fonts();
+    let l = TextLayout::new(
+        &mut fonts,
+        s,
+        &TextStyle::sized(size).with_weight(weight),
+        LayoutOptions::wrap(width),
+    );
+    l.height().ceil()
+}
+
 /// Fade a disabled widget.
 pub(crate) fn disabled(el: Element, disabled: bool) -> Element {
     if disabled {
