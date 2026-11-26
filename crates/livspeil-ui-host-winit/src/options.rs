@@ -8,6 +8,7 @@ use std::time::Duration;
 use livspeil_ui_theme::ConfigWatcher;
 
 use crate::HostError;
+use crate::hud::HudOptions;
 
 /// The titlebar on macOS. Elsewhere the window keeps the system's
 /// decorations (X11 window manager frames; on Wayland server-side
@@ -84,6 +85,59 @@ impl Default for SurfaceOptions {
     }
 }
 
+/// Environment variable that overrides the present mode:
+/// `fifo`, `mailbox`, `immediate` or `auto` (see [`parse_present_mode`]).
+pub const PRESENT_MODE_ENV: &str = "LIVSPEIL_PRESENT_MODE";
+/// Environment variable that overrides the desired maximum frame latency
+/// (1 to 3).
+pub const FRAME_LATENCY_ENV: &str = "LIVSPEIL_FRAME_LATENCY";
+
+/// Parse a present mode name, case-insensitive: `fifo` (vsync),
+/// `mailbox` (vsync, newest frame wins), `immediate` (no vsync, may
+/// tear), `auto` (wgpu's `AutoVsync`: relaxed FIFO where available,
+/// else FIFO), `autonovsync`.
+#[must_use]
+pub fn parse_present_mode(name: &str) -> Option<wgpu::PresentMode> {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "fifo" => Some(wgpu::PresentMode::Fifo),
+        "mailbox" => Some(wgpu::PresentMode::Mailbox),
+        "immediate" => Some(wgpu::PresentMode::Immediate),
+        "auto" | "autovsync" => Some(wgpu::PresentMode::AutoVsync),
+        "autonovsync" => Some(wgpu::PresentMode::AutoNoVsync),
+        _ => None,
+    }
+}
+
+impl SurfaceOptions {
+    /// These options with [`PRESENT_MODE_ENV`] and [`FRAME_LATENCY_ENV`]
+    /// applied; `env` looks a variable up. Values that do not parse are
+    /// ignored (and logged).
+    #[must_use]
+    pub fn with_env(mut self, env: impl Fn(&str) -> Option<String>) -> Self {
+        if let Some(v) = env(PRESENT_MODE_ENV).filter(|v| !v.trim().is_empty()) {
+            match parse_present_mode(&v) {
+                Some(m) => self.present_mode = m,
+                None => log::warn!(
+                    "{PRESENT_MODE_ENV}={v}: expected fifo, mailbox, immediate or auto; ignored"
+                ),
+            }
+        }
+        if let Some(v) = env(FRAME_LATENCY_ENV).filter(|v| !v.trim().is_empty()) {
+            match v.trim().parse::<u32>() {
+                Ok(n @ 1..=3) => self.max_frame_latency = n,
+                _ => log::warn!("{FRAME_LATENCY_ENV}={v}: expected 1 to 3; ignored"),
+            }
+        }
+        self
+    }
+
+    /// [`SurfaceOptions::with_env`] with the process environment.
+    #[must_use]
+    pub fn with_process_env(self) -> Self {
+        self.with_env(|k| std::env::var(k).ok())
+    }
+}
+
 /// Called with the app after an accessibility action was performed (for
 /// example to let `livspeil-ui-widgets`' `Env` see focus changes:
 /// `move |app| env.sync_focus(app)`).
@@ -116,6 +170,9 @@ pub struct HostOptions {
     pub caret_blink: bool,
     /// See [`ActionHook`].
     pub after_accessibility_action: Option<ActionHook>,
+    /// The frame HUD and frame log; `None` leaves them (and their F3 and
+    /// F4 hotkeys) off.
+    pub frame_hud: Option<HudOptions>,
 }
 
 impl Default for HostOptions {
@@ -128,6 +185,7 @@ impl Default for HostOptions {
             role_cursors: true,
             caret_blink: true,
             after_accessibility_action: None,
+            frame_hud: None,
         }
     }
 }
@@ -175,6 +233,13 @@ impl HostOptions {
         f: impl FnMut(&mut livspeil_ui_core::App) + 'static,
     ) -> Self {
         self.after_accessibility_action = Some(ActionHook(Box::new(f)));
+        self
+    }
+
+    /// Turn on the frame HUD (F3 shows or hides it, F4 dumps the frame log).
+    #[must_use]
+    pub fn frame_hud(mut self, hud: HudOptions) -> Self {
+        self.frame_hud = Some(hud);
         self
     }
 
@@ -285,6 +350,43 @@ mod tests {
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
         );
         assert!(pick_format(&[F::Bgra8UnormSrgb]).is_err());
+    }
+
+    #[test]
+    fn present_mode_names() {
+        assert_eq!(parse_present_mode("Fifo"), Some(P::Fifo));
+        assert_eq!(parse_present_mode(" MAILBOX "), Some(P::Mailbox));
+        assert_eq!(parse_present_mode("immediate"), Some(P::Immediate));
+        assert_eq!(parse_present_mode("auto"), Some(P::AutoVsync));
+        assert_eq!(parse_present_mode("autonovsync"), Some(P::AutoNoVsync));
+        assert_eq!(parse_present_mode("vsync"), None);
+    }
+
+    #[test]
+    fn environment_overrides_surface_options() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| (*v).to_owned())
+            }
+        };
+        let base = SurfaceOptions::default();
+        assert_eq!(base.with_env(env(&[])), base);
+        let o = base.with_env(env(&[
+            (PRESENT_MODE_ENV, "mailbox"),
+            (FRAME_LATENCY_ENV, "2"),
+        ]));
+        assert_eq!((o.present_mode, o.max_frame_latency), (P::Mailbox, 2));
+        // Garbage and out-of-range values are ignored.
+        let o = base.with_env(env(&[
+            (PRESENT_MODE_ENV, "bogus"),
+            (FRAME_LATENCY_ENV, "9"),
+        ]));
+        assert_eq!(o, base);
+        let o = base.with_env(env(&[(PRESENT_MODE_ENV, ""), (FRAME_LATENCY_ENV, "0")]));
+        assert_eq!(o, base);
     }
 
     #[test]
