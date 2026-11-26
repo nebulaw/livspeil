@@ -24,6 +24,7 @@ Naming: Rust crates `livspeil-ui-*`; npm scope `@livspeil/ui` reserved for the T
 | `livspeil-ui-core` | entities/models, view tree, diffing, focus, input routing, animation driver, frame loop |
 | `livspeil-ui-render` | wgpu renderer: display list, batching, effects (shadow, blur, grain); CPU reference renderer |
 | `livspeil-ui-text` | shaping, layout, glyph atlas, editing primitives (on Parley) |
+| `livspeil-ui-icons` | the embedded Boxicons set and its coverage rasterizer |
 | `livspeil-ui-layout` | Taffy integration plus custom layouts (dock, infinite canvas) |
 | `livspeil-ui-theme` | tokens, materials, motion profiles, config loading and hot reload |
 | `livspeil-ui-paint` | paint bridge: view scene to display list, cached shaping, atlas uploads |
@@ -46,7 +47,7 @@ License: **MPL-2.0** (D33, "choose the loose option, relicense later if needed")
   - `Surface`: an external texture (the 3D viewport, a world preview).
   - Wires (Bézier strokes for the node canvas) are flattened by the paint bridge into rotated pill quads; the renderer has no separate path primitive.
 - **Batching**: sort by layer, batch by pipeline and texture; instanced quads evaluated as SDFs in the fragment shader; one shadow pass and one blur pipeline shared by all.
-- **Icons are not drawn with Vello.** Boxicons are simple filled paths, so they are rasterized once per needed physical size into an alpha atlas (tiny-skia or lyon), cached, and tinted at draw time. Vello is reserved for the Design Studio canvas (vector content), not for UI chrome.
+- **Icons are not drawn with Vello.** Boxicons are simple filled paths, so they are rasterized once per needed physical size into an alpha atlas (zeno, the glyph rasterizer; the atlas is the glyph atlas), cached, and tinted at draw time. Vello is reserved for the Design Studio canvas (vector content), not for UI chrome.
 - **Blur**: dual-Kawase at half or quarter resolution, per-region, cached while the backdrop region and the content under it are unchanged (caching not built yet). Quality by tier: T2 radius ~24 px at half res; T1 ~12 px at quarter res; T0 none (opaque tint).
 - **Grain/dither**: tiled noise overlay on large gradients and blur surfaces to prevent banding.
 - **Color**: UI chrome composited in gamma-encoded sRGB; 3D scene in linear; conversion at the `Surface` boundary. HDR/wide gamut later.
@@ -150,7 +151,9 @@ The original M1.1–M1.6 plan was re-cut into smaller PRs:
 | M1.11 | #38 | gallery pages for containers and NodeCanvas; host applies window requests; Linux run docs |
 | Round 14 | #39–#43, #45 | optional Linux AT-SPI feature; neutral colours and softer shadows (D59, D60, D62); popups fade without scaling (D61); bounded trackpad overscroll; macOS blur path and fallback (D63); IconButton styles, Tabs, Popover, Dialog/Sheet, Toast |
 
-Not built yet: Tree, Table, ColorPicker, CurveEditor, Viewport, auto-generated inspector; the icon atlas (`IconButton` shows a placeholder box) and `Image` drawing; the `Surface` primitive; layout animations; adaptive accent from the scene (the accent is only contrast-clamped); drag and drop between elements; Bevy and layer-shell hosts; damage tracking and blur caching; high contrast and text scale; NodeCanvas node delete, unlink-by-drag and keyboard navigation.
+Not built yet: Tree, Table, ColorPicker, CurveEditor, Viewport, auto-generated inspector; `Image` drawing (icons do not use it); the `Surface` primitive; layout animations; adaptive accent from the scene (the accent is only contrast-clamped); drag and drop between elements; Bevy and layer-shell hosts; damage tracking and blur caching; high contrast and text scale; NodeCanvas node delete, unlink-by-drag and keyboard navigation.
+
+Icons (M1.12): the 49 Boxicons free icons of `assets/icons/boxicons/` are embedded in `livspeil-ui-icons`, parsed by a strict SVG-subset parser and rasterized with zeno. `PaintCmd::Icon` becomes one sprite in the glyph atlas, so the CPU and wgpu renderers draw it with the glyph pipeline (including its coverage gamma), snapped to physical pixels under translation and uniform scale (sizes in quarter-pixel steps). `IconButton` and `MenuItem` use them.
 
 Checked in a real window by the owner on 2026-11-26 (Hyprland, Wayland, NVIDIA RTX 5070 Ti): the gallery works. The visual design is not yet at the target; P1 polish continues.
 
