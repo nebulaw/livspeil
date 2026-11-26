@@ -2,12 +2,12 @@ quad toast 164,292 340x72 r=12 fill=oklch(0.19 0 0 / 0.5) border=1 oklch(1 0 0 /
 quad dot 176,324 8x8 r=4 fill=oklch(0.66 0.2 25 / 1)
 text title 192,294 272x17 "Save failed" size=13 weight=600 color=oklch(0.97 0 0 / 0.92)
 text message 192,311 272x51 "The scene could not be saved because the disk is full. Free some space and try again." size=13 color=oklch(0.97 0 0 / 0.62)
-quad icon:bx-x 480,321 14x14 r=4 border=1.5 oklch(0.97 0 0 / 0.74)
+icon icon:bx-x 480,321 14x14 bx-x color=oklch(0.97 0 0 / 0.92)
 transform [1 0 0 1 0 -80]
   quad toast 164,308 340x56 r=12 fill=oklch(0.19 0 0 / 0.5) border=1 oklch(1 0 0 / 0.06) shadow=E3 material=Glass blur=16
   quad dot 176,332 8x8 r=4 fill=oklch(0.72 0.15 150 / 1)
   text message 192,328 272x17 "Living room saved" size=13 color=oklch(0.97 0 0 / 0.92)
-  quad icon:bx-x 480,329 14x14 r=4 border=1.5 oklch(0.97 0 0 / 0.74)
+  icon icon:bx-x 480,329 14x14 bx-x color=oklch(0.97 0 0 / 0.92)
 pop
 transform [1 0 0 1 0 -144]
   quad toast 164,308 340x56 r=12 fill=oklch(0.19 0 0 / 0.5) border=1 oklch(1 0 0 / 0.06) shadow=E3 material=Glass blur=16
@@ -15,5 +15,5 @@ transform [1 0 0 1 0 -144]
   text title 192,319 206x17 "Moved" size=13 weight=600 color=oklch(0.97 0 0 / 0.92)
   text message 192,336 206x17 "Moved 3 Charms to Kitchen" size=13 color=oklch(0.97 0 0 / 0.62)
   text label 426,328 29x17 "Undo" size=13 color=oklch(0.97 0 0 / 0.92)
-  quad icon:bx-x 476,329 14x14 r=4 border=1.5 oklch(0.97 0 0 / 0.74)
+  icon icon:bx-x 476,329 14x14 bx-x color=oklch(0.97 0 0 / 0.92)
 pop

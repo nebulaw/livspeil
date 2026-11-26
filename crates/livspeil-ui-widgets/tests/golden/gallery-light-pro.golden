@@ -9,7 +9,7 @@ opacity 0.4
   quad button:Off 240,12 36x24 r=4 fill=oklch(0.92 0 0 / 1) border=1 oklch(0 0 0 / 0.1)
   text label 248,16 20x16 "Off" size=12 color=oklch(0.16 0 0 / 0.9)
 pop
-quad icon:bx-trash 289,17 14x14 r=4 border=1.5 oklch(0.16 0 0 / 0.72)
+icon icon:bx-copy 289,17 14x14 bx-copy color=oklch(0.16 0 0 / 0.9)
 quad track 12,44 28x16 r=8 fill=oklch(0.56 0.18 255 / 1)
 transform [1 0 0 1 12 0]
   quad thumb 14,46 12x12 r=6 fill=oklch(1 0 0 / 1)

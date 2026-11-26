@@ -68,7 +68,7 @@ fn gallery(scheme: Scheme, density: Density) -> Gallery {
                         .child(Button::new("Off").disabled(true).render(&theme))
                         .child(
                             Tooltip::new("Trash")
-                                .attach(&env, IconButton::new("bx-trash", "Trash").render(&theme)),
+                                .attach(&env, IconButton::new("bx-copy", "Trash").render(&theme)),
                         ),
                 )
                 .child(
@@ -180,7 +180,7 @@ fn semantics_descriptions() {
     let mut push = |s: livspeil_ui_widgets::Semantics| all.push(s);
     push(Button::new("Save").primary().semantics());
     push(Button::new("Off").disabled(true).semantics());
-    push(IconButton::new("bx-trash", "Trash").semantics());
+    push(IconButton::new("bx-copy", "Trash").semantics());
     push(Toggle::new(true).label("Wi-Fi").semantics());
     push(Checkbox::new(CheckState::Mixed).label("All").semantics());
     push(

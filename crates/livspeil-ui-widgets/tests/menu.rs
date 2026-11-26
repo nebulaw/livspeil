@@ -11,12 +11,13 @@ use std::rc::Rc;
 
 use common::{center, find, host_sized, pointer, wait};
 use livspeil_ui_core::{
-    Element, Keymap, Keystroke, Modifiers, MouseButton, PointerKind, TestHost, View, div,
+    Element, IconRun, Keymap, Keystroke, Modifiers, MouseButton, PaintCmd, PointerKind, TestHost,
+    View, div,
 };
 use livspeil_ui_layout::{Point, Rect, Size, Vec2};
 use livspeil_ui_widgets::{
-    ContextMenu, Env, Menu, MenuBar, MenuItem, MenuPopup, format_keystroke, place_menu,
-    place_submenu, shortcut_for,
+    ContextMenu, Env, Menu, MenuAnchor, MenuBar, MenuItem, MenuPopup, format_keystroke, open_menu,
+    place_menu, place_submenu, shortcut_for,
 };
 
 type Log = Rc<RefCell<Vec<String>>>;
@@ -417,4 +418,39 @@ fn popups_fade_in_without_scaling() {
         }
     }
     assert_eq!(f.depth(), 1);
+}
+
+#[test]
+fn items_show_their_icon_in_the_mark_column_unless_checkable() {
+    let (mut h, env) = host_sized(Size::new(400.0, 300.0), |_, _| {
+        Box::new(|_| div().size(100.0, 100.0))
+    });
+    let menu = Menu::new()
+        .item(MenuItem::new("Copy").icon("bx-copy"))
+        .item(MenuItem::new("Grid").icon("bx-gear").checked(true))
+        .item(MenuItem::new("Plain"));
+    open_menu(
+        &env,
+        &mut h.app,
+        menu,
+        MenuAnchor::Point(Point::new(20.0, 20.0)),
+    );
+    h.run_until_idle(200);
+    let icons: Vec<IconRun> = h
+        .scene()
+        .unwrap()
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            PaintCmd::Icon(i) => Some(i.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(icons.len(), 1, "{icons:?}");
+    assert_eq!(&*icons[0].name, "bx-copy");
+    assert_eq!((icons[0].rect.width, icons[0].rect.height), (14.0, 14.0));
+    // It sits in the row, left of where the label starts.
+    let row = h.app.bounds(find(&h, "menuitem:Copy")).unwrap();
+    assert!(icons[0].rect.x >= row.x && icons[0].rect.right() <= row.x + 40.0);
+    assert!((icons[0].rect.center().y - row.center().y).abs() <= 0.5);
 }

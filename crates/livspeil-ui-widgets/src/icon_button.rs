@@ -5,7 +5,7 @@
 
 use std::rc::Rc;
 
-use livspeil_ui_core::{ClickEvent, Element, EventCx, SharedString, div};
+use livspeil_ui_core::{ClickEvent, Element, EventCx, SharedString, icon};
 use livspeil_ui_theme::{MotionClass, Scheme, Theme};
 
 use crate::button::{ButtonVariant, chrome, palette};
@@ -65,11 +65,12 @@ pub enum IconButtonStyle {
 
 /// A square button showing an icon.
 ///
-/// The icon slot is a sized, outlined placeholder box named
-/// `icon:<name>` (Boxicons name, e.g. `bx-trash`) until the icon atlas
-/// lands in the renderer (UI spec §3); sizes are 14, 16, 20 and 24 px
-/// ([`IconSize`]). The label is required: it is the accessible name, and
-/// with [`IconButton::tooltip`] also the tooltip text.
+/// The icon is a Boxicons name from the embedded set (`bx-copy`; the list
+/// is `livspeil_ui_icons::IconId::all`), drawn in the button's foreground
+/// color. A name the set does not have draws an outlined box. Sizes are
+/// 14, 16, 20 and 24 px ([`IconSize`]). The label is required: it is the
+/// accessible name, and with [`IconButton::tooltip`] also the tooltip
+/// text.
 ///
 /// Styles ([`IconButtonStyle`]): plain (default), filled, and toggle
 /// (`toggled(bool)`; the caller owns the state and flips it in
@@ -100,12 +101,12 @@ impl std::fmt::Debug for IconButton {
 }
 
 impl IconButton {
-    /// A plain icon button with icon `icon` (Boxicons name) and accessible
+    /// A plain icon button with icon `name` (Boxicons name) and accessible
     /// `label`.
     #[must_use]
-    pub fn new(icon: impl Into<SharedString>, label: impl Into<SharedString>) -> Self {
+    pub fn new(name: impl Into<SharedString>, label: impl Into<SharedString>) -> Self {
         IconButton {
-            icon: icon.into(),
+            icon: name.into(),
             label: label.into(),
             variant: ButtonVariant::Ghost,
             style: IconButtonStyle::Plain,
@@ -210,7 +211,7 @@ impl IconButton {
             _ => self.variant,
         };
         let (.., mut fg) = palette(theme, variant);
-        let (side, icon) = match self.size {
+        let (side, glyph) = match self.size {
             Some(s) => (s.button(), s.px()),
             None => (m.height, m.icon),
         };
@@ -240,11 +241,10 @@ impl IconButton {
             })
             .transition(MotionClass::Micro)
             .child(
-                div()
+                icon(self.icon.clone())
                     .name(format!("icon:{}", self.icon))
-                    .size(icon, icon)
-                    .rounded(theme.tokens.radii.xs)
-                    .border(1.5, fg.with_alpha(fg.alpha * 0.8))
+                    .size(glyph, glyph)
+                    .text_color(fg)
                     .hit_test(false),
             );
         let el = sem.apply(el);
