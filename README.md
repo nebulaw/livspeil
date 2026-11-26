@@ -24,6 +24,7 @@ Status: **Phase 0 (kernel) and Phase 1 (UI toolkit)**. This repository holds the
 | `crates/livspeil-ui-theme` | Design tokens, materials, motion profiles, theme/motion config loading and hot reload |
 | `crates/livspeil-ui-render` | Display list, wgpu renderer (quads, materials with backdrop blur, glyphs) and CPU reference rasterizer |
 | `crates/livspeil-ui-text` | Text shaping, layout, editing model and glyph atlas (on Parley) |
+| `crates/livspeil-ui-icons` | The embedded Boxicons set and its coverage rasterizer (MPL-2.0 code; the icons are CC BY 4.0) |
 | `crates/livspeil-ui-paint` | Paint bridge: core scenes to display lists, cached text shaping and glyph atlas uploads |
 | `crates/livspeil-ui-widgets` | Widgets: buttons, toggles, check boxes, radios, segmented control, slider, number and text fields, select, tooltip |
 | `crates/livspeil-ui-a11y` | Accessibility: incremental AccessKit trees from the UI core and action routing |

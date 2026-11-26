@@ -2270,6 +2270,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "livspeil-ui-icons"
+version = "0.0.0"
+dependencies = [
+ "zeno",
+]
+
+[[package]]
 name = "livspeil-ui-layout"
 version = "0.0.0"
 dependencies = [

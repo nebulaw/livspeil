@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 Livspeil contributors
+# SPDX-License-Identifier: MPL-2.0
+
+[package]
+name = "livspeil-ui-icons"
+description = "Livspeil UI icons: the embedded Boxicons set and its coverage rasterizer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MPL-2.0"
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Coverage rasterizer (the one livspeil-ui-text uses for glyphs).
+zeno = "0.3"
+
+[lints]
+workspace = true
