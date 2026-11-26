@@ -733,6 +733,24 @@ impl App {
         self.tree.nodes.get(&id).map(|n| n.bounds)
     }
 
+    /// Where an element sits on screen: its layout bounds mapped through its
+    /// ancestors' transforms (scrolling, translation, canvas pan and zoom),
+    /// not its own (press feedback). Anchor popups with this.
+    #[must_use]
+    pub fn visual_bounds(&self, id: ElementId) -> Option<Rect> {
+        let node = self.tree.nodes.get(&id)?;
+        let mut rect = node.bounds;
+        let mut parent = node.parent;
+        while let Some(p) = parent.and_then(|p| self.tree.nodes.get(&p)) {
+            if let Some(t) = p.child_transform() {
+                rect = t.apply_rect(&rect);
+            }
+            rect = p.transform().apply_rect(&rect);
+            parent = p.parent;
+        }
+        Some(rect)
+    }
+
     /// The first element (depth-first) whose name or key is `name`.
     #[must_use]
     pub fn find(&self, name: &str) -> Option<ElementId> {

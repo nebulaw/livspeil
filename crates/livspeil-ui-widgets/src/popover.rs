@@ -350,8 +350,8 @@ fn toggle(view: View<Popover>, cx: &mut EventCx<'_>) {
     if view.read(cx).open {
         Popover::close(view, cx);
     } else {
-        let anchor = cx.bounds();
         let trigger = cx.element_id();
+        let anchor = cx.visual_bounds(trigger).unwrap_or_else(|| cx.bounds());
         Popover::open_at(view, cx, anchor, Some(trigger));
     }
 }
