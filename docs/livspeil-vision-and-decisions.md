@@ -129,6 +129,9 @@ All `crates/livspeil-ui-*` are MPL-2.0 and testable headlessly (CPU reference ra
 - M1.9 gallery and fully wired host (#35): `cargo run -p livspeil-ui-gallery`; PaintRenderer, AccessKit adapter, IME, cursors, clipboard, caret blink.
 - M1.10 containers (#36): ScrollView (momentum, rubber band), VirtualList (100k rows), Panel, DockView, Menu/MenuBar/ContextMenu, Titlebar with window requests, Bézier wire primitive, NodeCanvas over a `NodeGraphModel` trait with culling, LOD and minimap.
 - M1.11 (#38): gallery pages for containers and the node canvas, host applies window requests, Linux (Wayland/X11) run docs.
+- Round 14 (#39–#43, #45): optional Linux AT-SPI feature, neutral colours and softer shadows, popups without scaling, bounded trackpad overscroll, macOS blur path with fallback, IconButton styles, Tabs, Popover, Dialog/Sheet, Toast.
+- Round 14 (#47, merged locally): frame HUD (F3) and frame log (F4), present-mode overrides, NodeCanvas CPU trims. The stutter cause is not yet identified and the 1 ms target is not met.
+- Floor spike (#46, merged locally): `crates/livspeil-floor` (GPL, Linux only), nested compositor and untested TTY skeleton; renderer recommendation in `docs/decisions/floor-renderer.md`.
 - First real-window check by the owner (2026-11-26, Hyprland on Wayland, NVIDIA RTX 5070 Ti): everything works; the design needs more work.
 
 ## Roadmap
