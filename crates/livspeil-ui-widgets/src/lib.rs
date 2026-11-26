@@ -81,6 +81,7 @@ mod tabs;
 mod text_box;
 mod text_field;
 mod titlebar;
+mod toast;
 mod toggle;
 mod tooltip;
 
@@ -117,5 +118,9 @@ pub use style::{ClickFn, DISABLED_OPACITY};
 pub use tabs::{CLOSE_SIZE, TAB_INSET, TAB_MAX_WIDTH, TAB_MIN_WIDTH, TABS_SCOPE, TabItem, Tabs};
 pub use text_field::{TextField, TextFn};
 pub use titlebar::{TITLEBAR_HEIGHT, TOOLBAR_HEIGHT, TRAFFIC_LIGHT_INSET, Titlebar};
+pub use toast::{
+    MAX_TOASTS, TOAST_DURATION, TOAST_GAP, TOAST_MARGIN, TOAST_WIDTH, Toast, ToastId, ToastTone,
+    Toasts, toast_element,
+};
 pub use toggle::{CheckState, Checkbox, Radio, RadioGroup, Toggle};
 pub use tooltip::{TOOLTIP_DELAY, Tooltip, place as place_tooltip};

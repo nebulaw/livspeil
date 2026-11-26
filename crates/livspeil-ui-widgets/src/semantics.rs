@@ -348,8 +348,8 @@ impl Semantics {
             Role::Tab => R::Tab,
             Role::Dialog => R::Dialog,
             Role::Popover => R::Group,
-            Role::Status => R::Group,
-            Role::Alert => R::Group,
+            Role::Status => R::Status,
+            Role::Alert => R::Alert,
         }
     }
 

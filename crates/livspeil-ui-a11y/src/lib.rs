@@ -82,6 +82,8 @@ pub fn map_role(role: Role) -> accesskit::Role {
         Role::Toolbar => R::Toolbar,
         Role::MenuBar => R::MenuBar,
         Role::MenuItemCheckBox => R::MenuItemCheckBox,
+        Role::Status => R::Status,
+        Role::Alert => R::Alert,
         // AccessKit's splitter is ARIA `separator`.
         Role::Separator => R::Splitter,
         // `Role` is non-exhaustive; `Generic` and future roles.
@@ -113,6 +115,11 @@ fn map_toggled(t: Toggled) -> accesskit::Toggled {
 /// Build the AccessKit node for an exposed element (without children).
 fn build_node(n: &SemanticNode<'_>, role: Role, scale: f64) -> Node {
     let mut node = Node::new(map_role(role));
+    match role {
+        Role::Status => node.set_live(accesskit::Live::Polite),
+        Role::Alert => node.set_live(accesskit::Live::Assertive),
+        _ => {}
+    }
     if let Some(label) = n.label() {
         // AccessKit convention: a label's text is its value.
         if role == Role::Label {
