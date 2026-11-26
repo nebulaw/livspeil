@@ -64,6 +64,18 @@ pub enum Role {
     NodeCanvas,
     /// One node card on a node canvas.
     Node,
+    /// A tab strip ([`crate::Tabs`]).
+    TabList,
+    /// One tab of a tab strip (selected state).
+    Tab,
+    /// A modal dialog or sheet.
+    Dialog,
+    /// A popover (an anchored, non-modal group).
+    Popover,
+    /// A live region announcing status messages politely (toasts).
+    Status,
+    /// A live region announcing an important message at once.
+    Alert,
 }
 
 /// Toggle state of switches and check boxes.
@@ -332,6 +344,12 @@ impl Semantics {
             Role::MenuItem => R::MenuItem,
             Role::MenuItemCheckBox => R::MenuItemCheckBox,
             Role::Titlebar => R::Toolbar,
+            Role::TabList => R::TabList,
+            Role::Tab => R::Tab,
+            Role::Dialog => R::Dialog,
+            Role::Popover => R::Group,
+            Role::Status => R::Status,
+            Role::Alert => R::Alert,
         }
     }
 

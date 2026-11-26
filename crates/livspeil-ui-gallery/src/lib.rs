@@ -12,7 +12,8 @@
 //!
 //! - A Frost sidebar lists the [`Page`]s in [`Group`]s (Controls,
 //!   Containers, System) and scrolls when the window is short. Cmd/Ctrl+1..9
-//!   and Cmd/Ctrl+0 switch to the first ten pages (the bindings live in
+//!   and Cmd/Ctrl+0 switch to the first ten pages (later pages have no
+//!   shortcut) (the bindings live in
 //!   the keymap as `gallery.page-<n>`).
 //! - [`Chrome`]: system window decorations, or (macOS) the gallery's own
 //!   [`Titlebar`](livspeil_ui_widgets::Titlebar) under a transparent
@@ -23,6 +24,7 @@
 //!   reloaded `theme.toml` / `motion.toml` show up in it too.
 
 mod containers;
+mod overlays;
 mod pages;
 
 use std::sync::Mutex;
@@ -62,6 +64,7 @@ use livspeil_ui_widgets::{
 };
 
 pub use containers::{Containers, LAYERS, MenuChecks, STRESS_NODES, VIRTUAL_ROWS, row_title};
+pub use overlays::Overlays;
 pub use pages::State;
 
 /// The window's logical size (also the screenshot size).
@@ -120,6 +123,8 @@ pub enum Page {
     Menus,
     /// The node canvas over a sample graph or a 500-node stress graph.
     NodeCanvas,
+    /// Icon buttons, tabs, popovers, dialogs, sheets and toasts.
+    Overlays,
     /// Solid, Frost, Glass and Ink over a colorful background.
     Materials,
     /// Type scale, weights and tabular digits.
@@ -132,7 +137,7 @@ pub enum Page {
 
 impl Page {
     /// Every page in sidebar order.
-    pub const ALL: [Page; 14] = [
+    pub const ALL: [Page; 15] = [
         Page::Buttons,
         Page::Toggles,
         Page::Radios,
@@ -143,6 +148,7 @@ impl Page {
         Page::Dock,
         Page::Menus,
         Page::NodeCanvas,
+        Page::Overlays,
         Page::Materials,
         Page::Typography,
         Page::Motion,
@@ -167,6 +173,7 @@ impl Page {
             Page::Typography => "Typography",
             Page::Motion => "Motion",
             Page::Theme => "Theme",
+            Page::Overlays => "Overlays & tabs",
         }
     }
 
@@ -188,6 +195,7 @@ impl Page {
             Page::Typography => "typography",
             Page::Motion => "motion",
             Page::Theme => "theme",
+            Page::Overlays => "overlays",
         }
     }
 
@@ -201,7 +209,9 @@ impl Page {
             | Page::Sliders
             | Page::TextFields
             | Page::Select => Group::Controls,
-            Page::Scroll | Page::Dock | Page::Menus | Page::NodeCanvas => Group::Containers,
+            Page::Scroll | Page::Dock | Page::Menus | Page::NodeCanvas | Page::Overlays => {
+                Group::Containers
+            }
             Page::Materials | Page::Typography | Page::Motion | Page::Theme => Group::System,
         }
     }

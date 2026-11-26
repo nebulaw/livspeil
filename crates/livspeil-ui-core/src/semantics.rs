@@ -105,6 +105,12 @@ pub enum Role {
     /// A separator between groups (menu separators; focusable separators
     /// are splitters).
     Separator,
+    /// A live region whose changes are announced politely (toasts; ARIA
+    /// `status`).
+    Status,
+    /// A live region whose changes are announced at once (urgent toasts;
+    /// ARIA `alert`).
+    Alert,
 }
 
 impl Role {

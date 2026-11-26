@@ -61,28 +61,35 @@
 //! ```
 
 mod button;
+mod dialog;
 mod dock;
 mod env;
+mod icon_button;
 pub mod keymap;
 mod label;
 mod menu;
 mod node_canvas;
 mod number_field;
+mod popover;
 mod scroll;
 mod segmented;
 mod select;
 pub mod semantics;
 mod slider;
 mod style;
+mod tabs;
 mod text_box;
 mod text_field;
 mod titlebar;
+mod toast;
 mod toggle;
 mod tooltip;
 
-pub use button::{Button, ButtonVariant, IconButton};
+pub use button::{Button, ButtonVariant};
+pub use dialog::{DIALOG_WIDTH, Dialog, DialogButton, SHEET_WIDTH};
 pub use dock::{DockView, PANEL_SCOPE, Panel, PanelMaterial, SlotFn};
 pub use env::{Clipboard, Env, MemoryClipboard, WidgetRoot};
+pub use icon_button::{IconButton, IconButtonStyle, IconSize};
 pub use keymap::{WIDGET_KEYMAP, keymap};
 pub use label::{Label, Tone};
 pub use menu::{
@@ -97,6 +104,7 @@ pub use node_canvas::{
     graph_bounds, minimap_mapping, oriented, palette_color, rect_from, rubber_select,
 };
 pub use number_field::{NumberField, Scrub, scrub_precision};
+pub use popover::{POPOVER_GAP, POPOVER_MARGIN, Placement, Popover, place_popover};
 pub use scroll::{
     OVERSCAN, SCROLL_SCOPE, ScrollAxis, ScrollContent, ScrollInfo, ScrollPhysics, ScrollView,
     Scroller, VirtualList, rubber_band, scroll_actions, visible_range,
@@ -107,7 +115,12 @@ pub use semantics::{NumericValue, Role, SemanticAction, Semantics, Toggled};
 pub use slider::{SLIDER_THUMB, Slider};
 pub use style::step_decimals;
 pub use style::{ClickFn, DISABLED_OPACITY};
+pub use tabs::{CLOSE_SIZE, TAB_INSET, TAB_MAX_WIDTH, TAB_MIN_WIDTH, TABS_SCOPE, TabItem, Tabs};
 pub use text_field::{TextField, TextFn};
 pub use titlebar::{TITLEBAR_HEIGHT, TOOLBAR_HEIGHT, TRAFFIC_LIGHT_INSET, Titlebar};
+pub use toast::{
+    MAX_TOASTS, TOAST_DURATION, TOAST_GAP, TOAST_MARGIN, TOAST_WIDTH, Toast, ToastId, ToastTone,
+    Toasts, toast_element,
+};
 pub use toggle::{CheckState, Checkbox, Radio, RadioGroup, Toggle};
 pub use tooltip::{TOOLTIP_DELAY, Tooltip, place as place_tooltip};

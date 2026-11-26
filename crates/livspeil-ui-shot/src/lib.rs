@@ -21,6 +21,7 @@
 
 pub mod containers;
 pub mod gallery;
+pub mod overlays;
 pub mod scenes;
 pub mod ui;
 

@@ -27,6 +27,8 @@ pub mod actions {
     pub const FOCUS_MENUBAR: &str = "menu.focus_bar";
     /// Open the focused element's context menu (Shift+F10).
     pub const CONTEXT_MENU: &str = "menu.context";
+    /// Close the selected tab (Delete, Backspace in a closable tab bar).
+    pub const CLOSE_TAB: &str = "tabs.close";
     /// Fine step up (number field, ×0.1).
     pub const INCREMENT_SMALL: &str = "ui.increment_small";
     /// Fine step down (number field, ×0.1).
@@ -185,6 +187,14 @@ pub const WIDGET_KEYMAP: &str = r#"
 "up" = "ui.prev"
 "home" = "ui.first"
 "end" = "ui.last"
+
+[contexts.Tabs]
+"right" = "ui.next"
+"left" = "ui.prev"
+"home" = "ui.first"
+"end" = "ui.last"
+"delete" = "tabs.close"
+"backspace" = "tabs.close"
 
 [contexts.Select]
 "down" = "ui.next"

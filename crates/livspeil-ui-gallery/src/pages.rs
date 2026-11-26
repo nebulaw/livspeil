@@ -77,6 +77,8 @@ pub struct State {
     pub blend: Model<usize>,
     /// The container pages (scroll, dock, menus, node canvas).
     pub containers: Containers,
+    /// The Overlays & tabs page.
+    pub overlays: crate::overlays::Overlays,
 }
 
 impl std::fmt::Debug for State {
@@ -221,6 +223,7 @@ impl State {
             locked_layer: app.new_model(false),
             blend: app.new_model(0),
             containers: Containers::new(app, env),
+            overlays: crate::overlays::Overlays::new(app, env),
         }
     }
 }
@@ -315,6 +318,7 @@ pub(crate) fn render(
         Page::Typography => typography(&theme),
         Page::Motion => motion(&theme, state, view, cx),
         Page::Theme => theme_page(&theme, state, cx),
+        Page::Overlays => crate::overlays::page(&theme, &state.overlays, cx),
     }
 }
 

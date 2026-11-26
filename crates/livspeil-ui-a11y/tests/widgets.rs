@@ -124,7 +124,59 @@ fn new_roles_map_to_accesskit() {
         (Role::MenuItem, R::MenuItem),
         (Role::MenuItemCheckBox, R::MenuItemCheckBox),
         (Role::Separator, R::Splitter),
+        (Role::Status, R::Status),
+        (Role::Alert, R::Alert),
     ] {
         assert_eq!(map_role(core), ak, "{core:?}");
+    }
+}
+
+/// Toasts are live regions: polite `Status`, assertive `Alert`.
+#[test]
+fn toasts_are_live_regions_in_the_accesskit_tree() {
+    use livspeil_ui_a11y::accesskit::{Live, Role as AkRole};
+    use livspeil_ui_widgets::{Toast, ToastTone, Toasts};
+    let mut app = App::new();
+    let env = Env::headless(&mut app);
+    let content = app.new_view(Plain);
+    let root = env.root(&mut app, content);
+    app.set_root(root);
+    let toasts = Toasts::new(&env, &mut app);
+    let mut h = TestHost::new(app, Size::new(420.0, 300.0));
+    h.run_until_idle(50);
+    Toasts::show(toasts, &mut h.app, Toast::new("Saved").title("Project"));
+    Toasts::show(
+        toasts,
+        &mut h.app,
+        Toast::new("Could not save")
+            .tone(ToastTone::Danger)
+            .sticky(),
+    );
+    for _ in 0..40 {
+        h.step();
+    }
+    let mut tree = A11yTree::new();
+    let update = tree.full_update(&h.app, 1.0).expect("tree");
+    let nodes: Vec<_> = update.nodes.iter().map(|(_, n)| n).collect();
+    let status = nodes
+        .iter()
+        .find(|n| n.role() == AkRole::Status)
+        .expect("status");
+    assert_eq!(status.live(), Some(Live::Polite));
+    assert_eq!(status.label(), Some("Project"));
+    assert_eq!(status.description(), Some("Saved"));
+    let alert = nodes
+        .iter()
+        .find(|n| n.role() == AkRole::Alert)
+        .expect("alert");
+    assert_eq!(alert.live(), Some(Live::Assertive));
+    assert_eq!(alert.label(), Some("Could not save"));
+}
+
+struct Plain;
+
+impl Render for Plain {
+    fn render(&mut self, _cx: &mut ViewContext<'_, Self>) -> Element {
+        div().w_full().h_full()
     }
 }
