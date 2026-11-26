@@ -2290,6 +2290,7 @@ version = "0.0.0"
 dependencies = [
  "criterion",
  "livspeil-ui-core",
+ "livspeil-ui-icons",
  "livspeil-ui-layout",
  "livspeil-ui-render",
  "livspeil-ui-text",

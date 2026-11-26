@@ -239,10 +239,19 @@ impl TextSpec {
     }
 }
 
+/// The content of an icon element; an unset color is the theme's primary
+/// text color.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IconSpec {
+    pub(crate) name: SharedString,
+    pub(crate) color: Option<Color>,
+}
+
 #[derive(Debug)]
 pub(crate) enum ElementKind {
     Div,
     Text(TextSpec),
+    Icon(IconSpec),
     View(AnyView),
 }
 
@@ -282,6 +291,24 @@ pub fn text(text: impl Into<SharedString>) -> Element {
         features: Vec::new(),
         color: None,
     }))
+}
+
+/// Edge length of an icon element that is not given a size.
+const ICON_SIZE: f32 = 16.0;
+
+/// An icon element: the renderer's icon `name` (a Boxicons name such as
+/// `bx-copy`), tinted with [`Element::text_color`]. It is 16x16 and does
+/// not shrink; set another size with [`Element::size`]. The icon is drawn
+/// square and centered in the element. The core does not know which names
+/// exist; the renderer draws a placeholder for unknown ones.
+#[must_use]
+pub fn icon(name: impl Into<SharedString>) -> Element {
+    let mut el = Element::new(ElementKind::Icon(IconSpec {
+        name: name.into(),
+        color: None,
+    }));
+    el.style.flex_shrink = 0.0;
+    el.size(ICON_SIZE, ICON_SIZE)
 }
 
 impl<V: Render> From<View<V>> for Element {
@@ -633,11 +660,13 @@ impl Element {
         self
     }
 
-    /// Text color (text elements).
+    /// Text color (text and icon elements).
     #[must_use]
     pub fn text_color(mut self, c: Color) -> Self {
-        if let ElementKind::Text(t) = &mut self.kind {
-            t.color = Some(c);
+        match &mut self.kind {
+            ElementKind::Text(t) => t.color = Some(c),
+            ElementKind::Icon(i) => i.color = Some(c),
+            ElementKind::Div | ElementKind::View(_) => {}
         }
         self
     }
