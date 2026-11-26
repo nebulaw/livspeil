@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use livspeil_ui_core::{App, Element, Render, View, ViewContext, div};
 use livspeil_ui_layout::{Canvas, Size, Vec2};
 use livspeil_ui_paint::{FontSystem, PaintBridge};
-use livspeil_ui_render::{Color, DisplayList, FrameOptions, encode};
+use livspeil_ui_render::{Color, DisplayList, Frame, FrameOptions, encode_into};
 use livspeil_ui_widgets::{DemoGraph, Env, NodeCanvas};
 
 /// Frames measured per configuration (override with `LIVSPEIL_BENCH_ITERS`).
@@ -77,7 +77,23 @@ fn us(d: Duration) -> f64 {
 
 fn main() {
     let mut bridge = PaintBridge::new(FontSystem::test());
+    bridge.text.width_slack = 1.0;
     let iters = iterations();
+    // The display list and the encoded frame are reused, as the host's
+    // PaintRenderer does.
+    let options = FrameOptions {
+        width: 1600,
+        height: 1000,
+        scale: 1.0,
+        clear: Color::BLACK,
+    };
+    let mut list = DisplayList::new();
+    let mut gpu_frame = Frame {
+        options,
+        clear: [0.0; 4],
+        instances: Vec::new(),
+        ops: Vec::new(),
+    };
     for (name, zoom) in [
         ("zoom 1 (Full)", Some(1.0)),
         ("zoom 0.4 (Compact)", Some(0.4)),
@@ -94,18 +110,10 @@ fn main() {
             NodeCanvas::pan_by(canvas, &mut app, Vec2::new(sign * 3.0, 0.0));
             let frame = app.draw_frame(1.0 / 60.0);
             let t1 = Instant::now();
-            let mut list = DisplayList::new();
+            list.items.clear();
             let _updates = bridge.paint_scene(&frame.scene, 1.0, &mut list);
             let t2 = Instant::now();
-            let _ = encode(
-                &list,
-                FrameOptions {
-                    width: 1600,
-                    height: 1000,
-                    scale: 1.0,
-                    clear: Color::BLACK,
-                },
-            );
+            let _ = encode_into(&list, options, &mut gpu_frame);
             let t3 = Instant::now();
             cmds = frame.scene.commands.len();
             items = list.items.len();
