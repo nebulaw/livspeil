@@ -55,8 +55,8 @@ in half; delete a worktree's `target/` as soon as its PR is open.
 ## 2. The roles
 
 **You** decide: product direction, open questions, licences, and merging.
-Decisions are numbered (D1…D50 so far) and recorded in the project hub
-doc. A session never merges to `main`, never pushes to `main`, and never
+Decisions are numbered (D1…D64 so far) and recorded in the hub doc
+(`docs/livspeil-vision-and-decisions.md`). A session never merges to `main`, never pushes to `main`, and never
 merges from the GitHub web editor (that corrupted `Cargo.lock` once; ask
 the lead session to resolve conflicts instead).
 
@@ -199,15 +199,15 @@ Put these in `~/.claude/settings.json` (yours, not the repo's):
   `spec-first-task`) are available in Claude Code too when skill sync is
   on; they cover closing a round, running a decision round and a single
   spec-first task.
-- Attach the claude.ai project "Livspeil" when you work from claude.ai,
-  so the hub doc and specs are in reach; in the terminal, the same specs
-  are in `specs/`.
+- The hub doc and specs are in the repository (`docs/`, `specs/`). If you
+  also work from the claude.ai project "Livspeil", refresh its copies from
+  here.
 
 ## 9. Where things are written down
 
 | Where | What |
 |---|---|
-| Project hub doc (claude.ai project "Livspeil") | Vision, numbered decisions, roadmap, risks |
+| `docs/livspeil-vision-and-decisions.md` | Vision, numbered decisions, roadmap, risks, open questions |
 | `specs/` | Kernel and UI specs, kept as-built |
 | `docs/` | Component docs, known upstream issues, benchmarks |
 | PR bodies | What changed, what was verified, known gaps |

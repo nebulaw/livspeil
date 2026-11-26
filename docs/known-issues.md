@@ -178,5 +178,9 @@ into `zbus` 6.0. They are not vulnerability reports. No `cargo update` can
 remove them, and dropping them would mean dropping screen-reader support on
 Linux.
 
+AccessKit ignores the same three ids upstream
+(<https://github.com/AccessKit/accesskit/pull/834>): zbus 6 needs Rust 1.89,
+above their minimum.
+
 Remove the ignores when an `accesskit_unix` release builds on zbus 6.
 

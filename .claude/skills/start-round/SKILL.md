@@ -8,8 +8,8 @@ disable-model-invocation: true
 Start a work round for: $ARGUMENTS
 
 1. **Ground it.** `git fetch origin`. Read the spec sections for these
-   milestones (`specs/`), the hub doc's open decisions if the project is
-   attached, and what recently landed (`git log --oneline -15 origin/main`).
+   milestones (`specs/`), the hub doc's decisions and open questions
+   (`docs/livspeil-vision-and-decisions.md`), and what recently landed (`git log --oneline -15 origin/main`).
    If a decision the work depends on is open, ask the user first (one
    short question with options and your recommendation) and stop.
 2. **Split into tracks.** Two or three tracks, each one PR, touching

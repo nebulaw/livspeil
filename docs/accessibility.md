@@ -206,9 +206,11 @@ The platform side lives in the host, not in these crates:
 
 ## Linux AT-SPI dependency stack
 On Linux the AccessKit adapter (`accesskit_unix`) talks AT-SPI over D-Bus through
-`zbus`, `atspi` and an async runtime (`async-io`). As of 2026-11-26 all of these
-are on their current releases (`accesskit` 0.25, `accesskit_winit` 0.34,
-`accesskit_unix` 0.24, `zbus` 5.19) and `cargo deny check` reports no advisories.
+`zbus`, `atspi` and an async runtime (`async-io`). As of 2026-11-26 the
+AccessKit crates are on their current releases (`accesskit` 0.25,
+`accesskit_winit` 0.34, `accesskit_unix` 0.24), which use `zbus` 5.19.
+`cargo deny check` passes with three "unmaintained" advisories for `zbus`'s
+old helper crates ignored (see `known-issues.md`).
 `livspeil-ui-host-winit` exposes the stack as the default-on feature `atspi`.
 Build with `default-features = false, features = ["widgets"]` to leave out zbus,
 atspi and async-io entirely (the Linux window then has no screen-reader support).
