@@ -5,7 +5,7 @@
 
 use std::rc::Rc;
 
-use livspeil_ui_core::{ClickEvent, Element, EventCx, SharedString, icon};
+use livspeil_ui_core::{ClickEvent, Element, EventCx, SharedString, icon, text};
 use livspeil_ui_theme::{MotionClass, Scheme, Theme};
 
 use crate::button::{ButtonVariant, chrome, palette};
@@ -78,6 +78,8 @@ pub enum IconButtonStyle {
 #[derive(Clone)]
 pub struct IconButton {
     icon: SharedString,
+    /// Drawn as text in place of the icon.
+    character: Option<&'static str>,
     label: SharedString,
     variant: ButtonVariant,
     style: IconButtonStyle,
@@ -107,6 +109,7 @@ impl IconButton {
     pub fn new(name: impl Into<SharedString>, label: impl Into<SharedString>) -> Self {
         IconButton {
             icon: name.into(),
+            character: None,
             label: label.into(),
             variant: ButtonVariant::Ghost,
             style: IconButtonStyle::Plain,
@@ -115,6 +118,16 @@ impl IconButton {
             disabled: false,
             tooltip: None,
             on_click: None,
+        }
+    }
+
+    /// A close button. The icon set has no cross, so it is the "×"
+    /// character, as on tabs.
+    #[must_use]
+    pub(crate) fn close(label: impl Into<SharedString>) -> Self {
+        IconButton {
+            character: Some("\u{d7}"),
+            ..IconButton::new("close", label)
         }
     }
 
@@ -231,6 +244,10 @@ impl IconButton {
                 fg = theme.accent();
             }
         }
+        let content = match self.character {
+            Some(c) => text(c).font_size(glyph + 2.0),
+            None => icon(self.icon.clone()).size(glyph, glyph),
+        };
         el = el
             .name(format!("icon-button:{}", self.label))
             .size(side, side)
@@ -241,9 +258,8 @@ impl IconButton {
             })
             .transition(MotionClass::Micro)
             .child(
-                icon(self.icon.clone())
+                content
                     .name(format!("icon:{}", self.icon))
-                    .size(glyph, glyph)
                     .text_color(fg)
                     .hit_test(false),
             );
