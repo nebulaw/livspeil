@@ -203,3 +203,15 @@ The platform side lives in the host, not in these crates:
    content. Reduce motion, reduce transparency, high contrast and text
    scale are already in the theme and motion configuration
    ([ui-config.md](ui-config.md)).
+
+## Linux AT-SPI dependency stack
+On Linux the AccessKit adapter (`accesskit_unix`) talks AT-SPI over D-Bus through
+`zbus`, `atspi` and an async runtime (`async-io`). As of 2026-11-26 all of these
+are on their current releases (`accesskit` 0.25, `accesskit_winit` 0.34,
+`accesskit_unix` 0.24, `zbus` 5.19) and `cargo deny check` reports no advisories.
+`livspeil-ui-host-winit` exposes the stack as the default-on feature `atspi`.
+Build with `default-features = false, features = ["widgets"]` to leave out zbus,
+atspi and async-io entirely (the Linux window then has no screen-reader support).
+There is no alternative to AccessKit that covers AT-SPI, UI Automation and
+NSAccessibility for a custom toolkit, so the approach is to keep it updated and
+optional. Re-run `cargo tree -i zbus` and `cargo deny check` on each AccessKit bump.
