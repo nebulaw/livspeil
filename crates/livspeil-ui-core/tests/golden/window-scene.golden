@@ -1,8 +1,8 @@
-quad root 0,0 640x400 fill=oklch(0.14 0.01 265 / 1)
-quad sidebar 0,0 180x400 fill=oklch(0.17 0.01 265 / 0.72) border=1 oklch(1 0 0 / 0.06) shadow=E2 material=Frost blur=24
+quad root 0,0 640x400 fill=oklch(0.1 0 0 / 1)
+quad sidebar 0,0 180x400 fill=oklch(0.15 0 0 / 0.72) border=1 oklch(1 0 0 / 0.06) shadow=E2 material=Frost blur=24
 text item0 16,16 43x17 "Item 0" size=13 color=oklch(0.97 0 0 / 0.92)
 text item1 16,52 43x17 "Item 1" size=13 color=oklch(0.97 0 0 / 0.92)
 text item2 16,88 43x17 "Item 2" size=13 color=oklch(0.97 0 0 / 0.92)
-quad card0 196,16 208x80 r=10 fill=oklch(0.2 0.01 265 / 1) border=1 oklch(1 0 0 / 0.06) shadow=E2
-quad card1 416,16 208x80 r=10 fill=oklch(0.2 0.01 265 / 1) border=1 oklch(1 0 0 / 0.06) shadow=E2
-quad card2 196,206 208x80 r=10 fill=oklch(0.2 0.01 265 / 1) border=1 oklch(1 0 0 / 0.06) shadow=E2
+quad card0 196,16 208x80 r=10 fill=oklch(0.19 0 0 / 1) border=1 oklch(1 0 0 / 0.06) shadow=E2
+quad card1 416,16 208x80 r=10 fill=oklch(0.19 0 0 / 1) border=1 oklch(1 0 0 / 0.06) shadow=E2
+quad card2 196,206 208x80 r=10 fill=oklch(0.19 0 0 / 1) border=1 oklch(1 0 0 / 0.06) shadow=E2
