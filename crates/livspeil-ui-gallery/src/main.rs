@@ -6,18 +6,23 @@
 //! `--gpu-info` prints the GPU stack and the chosen blur path instead (see
 //! `docs/ui-host.md`).
 //!
+//! `--scenario=pan-sample|pan-stress|pan-stress-fit [--seconds=N]` pans the
+//! node canvas by itself, writes the frame log and exits (measurements).
+//!
 //! The frame HUD (F3 shows or hides it, F4 dumps the frame log) is always
 //! available; `--hud` or `LIVSPEIL_HUD=1` starts with it visible.
 
 use livspeil_ui_core::{App, KEYMAP_FILE};
-use livspeil_ui_gallery::{Chrome, Page, WINDOW_SIZE, mount_with};
+use livspeil_ui_gallery::{Chrome, Mounted, Page, WINDOW_SIZE, mount_with};
 use livspeil_ui_host_winit::frame_stats::default_log_path;
 use livspeil_ui_host_winit::{
-    HostOptions, HudOptions, PRESENT_MODE_ENV, PaintRenderer, SurfaceOptions, Titlebar,
-    WidgetClipboard, parse_present_mode, run,
+    FrameDriver, HostOptions, HudOptions, PRESENT_MODE_ENV, PaintRenderer, SurfaceOptions,
+    Titlebar, WidgetClipboard, parse_present_mode, run,
 };
+use livspeil_ui_layout::Vec2;
 use livspeil_ui_paint::{FontSystem, PaintBridge};
 use livspeil_ui_theme::{ConfigKind, ConfigWatcher, config_dir};
+use livspeil_ui_widgets::NodeCanvas;
 
 fn main() {
     if std::env::args().any(|a| a == "--gpu-info") {
@@ -96,6 +101,20 @@ fn main() {
         // Accessibility actions can move focus: let text fields know.
         .after_accessibility_action(move |app| env.sync_focus(app));
     options.surface = surface;
+    if let Some(name) = args.iter().find_map(|a| a.strip_prefix("--scenario=")) {
+        let seconds = args
+            .iter()
+            .find_map(|a| a.strip_prefix("--seconds="))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(6.0);
+        match scenario(name, &mounted, seconds) {
+            Some(driver) => options.driver = Some(driver),
+            None => {
+                eprintln!("livspeil-ui-gallery: unknown scenario {name}");
+                std::process::exit(2);
+            }
+        }
+    }
     // Hot reload `~/.config/livspeil/ui/{theme,motion,keymap}.toml` when the
     // directory exists; otherwise no timer runs.
     if let Some(dir) = config_dir().filter(|d| d.is_dir()) {
@@ -108,4 +127,37 @@ fn main() {
         eprintln!("livspeil-ui-gallery: {e}");
         std::process::exit(1);
     }
+}
+
+/// A driver that pans a node canvas back and forth for `seconds`.
+fn scenario(name: &str, mounted: &Mounted, seconds: f64) -> Option<FrameDriver> {
+    let (which, fit) = match name {
+        "pan-sample" => (0, false),
+        "pan-stress" => (1, false),
+        "pan-stress-fit" => (1, true),
+        _ => return None,
+    };
+    let canvas = mounted.canvases[which];
+    let choice = mounted.canvas_choice;
+    let mut frame = 0_u32;
+    Some(FrameDriver::new(move |app, elapsed| {
+        match frame {
+            0 => choice.update(app, |c, cx| {
+                *c = which;
+                cx.notify();
+            }),
+            // The canvas knows its size after a layout.
+            5 if fit => NodeCanvas::fit(canvas, app),
+            _ => {
+                let step = if (frame / 60).is_multiple_of(2) {
+                    3.0
+                } else {
+                    -3.0
+                };
+                NodeCanvas::pan_by(canvas, app, Vec2::new(step, 0.0));
+            }
+        }
+        frame += 1;
+        elapsed.as_secs_f64() < seconds
+    }))
 }

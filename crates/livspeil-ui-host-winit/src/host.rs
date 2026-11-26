@@ -24,6 +24,7 @@ use crate::accessibility::Accessibility;
 use crate::frame_stats::{FrameLog, FrameSample, FrameStats, GpuReport, HUD_WINDOW, dump_text};
 use crate::hud::{HudOptions, hud_commands};
 use crate::input::{InputTranslator, KeyInput};
+use crate::options::FrameDriver;
 use crate::options::{
     ActionHook, HostOptions, SurfaceOptions, Titlebar, WindowOptions, surface_config,
 };
@@ -148,6 +149,9 @@ pub struct Host<R> {
     role_cursors: bool,
     base_keymap: Keymap,
     hud: Option<Hud>,
+    driver: Option<FrameDriver>,
+    /// The driver finished: exit at the end of the event batch.
+    quit: bool,
     /// Length of the scene before the HUD overlay was appended to it.
     overlay_from: Option<usize>,
 }
@@ -259,6 +263,8 @@ impl<R: SceneRenderer> Host<R> {
             role_cursors: options.role_cursors,
             base_keymap,
             hud: options.frame_hud.map(Hud::new),
+            driver: options.driver,
+            quit: false,
             overlay_from: None,
         }
     }
@@ -508,6 +514,12 @@ impl<R: SceneRenderer> Host<R> {
         if !self.pacer.redraw_started() || self.gfx.is_none() {
             self.skip_frame();
             return;
+        }
+        if let Some(driver) = &mut self.driver
+            && !driver.step(&mut self.app, self.start.elapsed())
+        {
+            self.driver = None;
+            self.quit = true;
         }
         let mut needs_next = false;
         let mut build = Duration::ZERO;
@@ -943,6 +955,13 @@ impl<R: SceneRenderer> ApplicationHandler<HostEvent> for Host<R> {
             self.app.dispatch(InputEvent::Text(text));
         }
         self.sync_ime();
+        if self.quit {
+            event_loop.exit();
+            return;
+        }
+        if self.driver.is_some() {
+            self.app.request_frame();
+        }
         if self
             .pacer
             .want_redraw(self.scheduler.should_draw(&self.app))

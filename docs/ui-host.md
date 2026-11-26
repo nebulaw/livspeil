@@ -380,6 +380,21 @@ interval.
   `--hud` (or `LIVSPEIL_HUD=1`) starts with the overlay on,
   `--present-mode=MODE` beats the environment variable.
 
+## Scripted scenarios
+
+`HostOptions::driver` takes a `FrameDriver`: a closure called before each
+frame with the time since the host started. While one is installed the host
+draws continuously; returning `false` closes the app. The gallery uses it for
+measurements that need a real window but no hands:
+
+```sh
+cargo run --release -p livspeil-ui-gallery -- node-canvas \
+    --scenario=pan-stress --seconds=6    # pan-sample | pan-stress | pan-stress-fit
+```
+
+The frame log (above) is written on exit. Measure release builds only, and
+check the adapter line of the log.
+
 ## Surface details
 
 - Scale factor changes: positions are tracked in logical pixels. The
