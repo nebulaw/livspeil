@@ -118,10 +118,20 @@ pub enum Transition {
     Tween(Duration, Easing),
 }
 
+/// See [`Element::gradient_x`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct HorizontalGradient {
+    pub(crate) from: Color,
+    pub(crate) to: Color,
+    pub(crate) start: f32,
+    pub(crate) end: f32,
+}
+
 /// Base visual style.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Visual {
     pub(crate) background: Option<Color>,
+    pub(crate) gradient: Option<HorizontalGradient>,
     pub(crate) border: Option<(f32, Color)>,
     pub(crate) radii: Corners,
     pub(crate) elevation: Option<Elevation>,
@@ -142,6 +152,7 @@ impl Default for Visual {
     fn default() -> Self {
         Visual {
             background: None,
+            gradient: None,
             border: None,
             radii: Corners::default(),
             elevation: None,
@@ -516,6 +527,20 @@ impl Element {
     #[must_use]
     pub fn bg(mut self, c: Color) -> Self {
         self.visual.background = Some(c);
+        self
+    }
+
+    /// A left-to-right gradient fill (it replaces the background): `from`
+    /// up to the fraction `start` of the width, then to `to` at the
+    /// fraction `end`, which holds to the right edge. Not animated.
+    #[must_use]
+    pub fn gradient_x(mut self, from: Color, to: Color, start: f32, end: f32) -> Self {
+        self.visual.gradient = Some(HorizontalGradient {
+            from,
+            to,
+            start,
+            end,
+        });
         self
     }
 

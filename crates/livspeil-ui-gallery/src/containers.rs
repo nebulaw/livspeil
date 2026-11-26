@@ -7,7 +7,7 @@
 
 use livspeil_ui_core::{App, Element, FontFeature, Model, Role, View, div, text};
 use livspeil_ui_layout::style::length;
-use livspeil_ui_layout::{Canvas, DockEdge, Rect, Vec2};
+use livspeil_ui_layout::{Canvas, DockEdge, Rect, Style, Vec2};
 use livspeil_ui_theme::{Color, Theme};
 use livspeil_ui_widgets::{
     Button, ContextMenu, DemoGraph, DockView, Env, Menu, MenuBar, MenuItem, NodeCanvas,
@@ -25,6 +25,8 @@ pub const VIRTUAL_ROW_HEIGHT: f32 = 28.0;
 pub const STRESS_NODES: usize = 500;
 /// Links of the stress graph.
 pub const STRESS_LINKS: usize = 750;
+/// Narrowest card that shows every menu bar title.
+const MENUBAR_CARD: f32 = 248.0;
 /// Index of the View menu in the menu bar.
 const VIEW_MENU: usize = 3;
 
@@ -183,7 +185,18 @@ fn virtual_row(app: &App, i: usize) -> Element {
                 .rounded(4.0)
                 .bg(Color::oklch(0.72, 0.13, hue(i), 1.0)),
         )
-        .child(text(row_title(i)).grow())
+        // A narrow list cuts the title off rather than push the time out.
+        .child(
+            div()
+                .grow()
+                .flex_row()
+                .style(|s| {
+                    s.flex_basis = length(0.0);
+                    s.min_size.width = length(0.0);
+                })
+                .clip()
+                .child(text(row_title(i))),
+        )
         .child(
             text(format!("{}.{:02} s", i % 60, (i * 7) % 100))
                 .font_size(12.0)
@@ -734,6 +747,23 @@ pub(crate) fn dock(theme: &Theme, s: &Containers, view: View<Gallery>, cx: &App)
         .child(frame(theme, "dock-frame", Element::view(&dock)))
 }
 
+/// The demo boxes of the Menus page: 280 px tall, less if the window is
+/// short.
+fn menu_box(s: &mut Style) {
+    s.flex_basis = length(280.0);
+    s.flex_grow = 0.0;
+    s.flex_shrink = 1.0;
+    s.min_size.height = length(0.0);
+}
+
+/// A centred line of text that wraps, rather than overflow, when narrow.
+fn centered(label: Element) -> Element {
+    div()
+        .flex_row()
+        .justify_center()
+        .child(label.style(|s| s.min_size.width = length(0.0)))
+}
+
 /// Menus.
 pub(crate) fn menus(theme: &Theme, s: &Containers, env: &Env, cx: &App) -> Element {
     let c = theme.colors();
@@ -742,7 +772,7 @@ pub(crate) fn menus(theme: &Theme, s: &Containers, env: &Env, cx: &App) -> Eleme
     let on = |m: Model<bool>| if *m.read(cx) { "on" } else { "off" };
     let window = div()
         .key("window")
-        .h(280.0)
+        .style(menu_box)
         .flex_col()
         .rounded(theme.tokens.radii.md)
         .clip()
@@ -772,24 +802,41 @@ pub(crate) fn menus(theme: &Theme, s: &Containers, env: &Env, cx: &App) -> Eleme
     let area = div()
         .key("area")
         .name("context-area")
-        .h(280.0)
+        .style(menu_box)
         .rounded(theme.tokens.radii.md)
         .bg(c.surface[0])
         .border(1.0, c.text_primary.with_alpha(0.1))
         .flex_col()
-        .items_center()
         .justify_center()
         .gap(6.0)
+        .px(8.0)
         .focusable()
         .semantics(|s| s.role(Role::Group).label("Canvas"))
-        .child(text("Right-click here").text_color(c.text_secondary))
-        .child(caption(theme, "or focus it and press Shift+F10"));
-    let area = ContextMenu::new(context_menu(cx, s.last_command, checks)).attach(env, area);
-    column()
-        .child(crate::pages::columns(
-            card(theme, "Menu bar").child(window),
-            card(theme, "Context menu").child(area),
+        .child(centered(
+            text("Right-click here").text_color(c.text_secondary),
         ))
+        .child(centered(caption(theme, "or focus it and press Shift+F10")));
+    let area = ContextMenu::new(context_menu(cx, s.last_command, checks)).attach(env, area);
+    // Never stacked: the page does not scroll, and the menu bar anchors its
+    // menus at its laid-out position. The menu bar's card keeps the width
+    // its titles need; the other takes the rest. In a short window the
+    // boxes get shorter.
+    let half = |card: Element, min: f32| {
+        card.grow().style(move |s| {
+            s.flex_basis = length(0.0);
+            s.min_size.width = length(min);
+            s.min_size.height = length(0.0);
+        })
+    };
+    fill_column()
+        .child(
+            div()
+                .flex_row()
+                .gap(16.0)
+                .style(|s| s.min_size.height = length(0.0))
+                .child(half(card(theme, "Menu bar").child(window), MENUBAR_CARD))
+                .child(half(card(theme, "Context menu").child(area), 0.0)),
+        )
         .child(caption(
             theme,
             "F10 focuses the menu bar, Alt+F/E/V open a menu; arrows move, Enter chooses, Escape closes.",

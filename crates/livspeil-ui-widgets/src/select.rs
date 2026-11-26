@@ -205,8 +205,8 @@ impl Select {
 }
 
 fn open(view: View<Select>, cx: &mut EventCx<'_>) {
-    let anchor = cx.bounds();
     let trigger = cx.element_id();
+    let anchor = cx.visual_bounds(trigger).unwrap_or_else(|| cx.bounds());
     let env = view.update(cx, |s, vcx| {
         let sel = *s.selected.read(vcx);
         s.open = true;

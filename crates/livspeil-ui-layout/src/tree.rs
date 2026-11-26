@@ -21,6 +21,7 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::fmt;
+use std::rc::Rc;
 
 use taffy::{AvailableSpace, NodeId, TaffyTree, compute_leaf_layout};
 
@@ -33,6 +34,49 @@ pub type Style = taffy::Style;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LayoutNode(NodeId);
 
+/// Shaped text: one box of its natural size until it is given less width,
+/// then as tall as it is when wrapped to that width.
+#[derive(Clone)]
+pub struct TextBlock {
+    natural: Size,
+    key: u64,
+    height_at: Rc<dyn Fn(f32) -> f32>,
+}
+
+impl TextBlock {
+    /// `natural` is the unwrapped size; `height_at` gives the height wrapped
+    /// to a narrower width. `key` identifies the content and font: blocks
+    /// with equal keys and natural sizes are taken to wrap alike.
+    #[must_use]
+    pub fn new(natural: Size, key: u64, height_at: impl Fn(f32) -> f32 + 'static) -> Self {
+        TextBlock {
+            natural,
+            key,
+            height_at: Rc::new(height_at),
+        }
+    }
+
+    /// The unwrapped size.
+    #[must_use]
+    pub fn natural(&self) -> Size {
+        self.natural
+    }
+}
+
+impl PartialEq for TextBlock {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key && self.natural == other.natural
+    }
+}
+
+impl fmt::Debug for TextBlock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TextBlock")
+            .field("natural", &self.natural)
+            .finish_non_exhaustive()
+    }
+}
+
 /// How a leaf measures its content.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub enum Measure {
@@ -41,6 +85,10 @@ pub enum Measure {
     None,
     /// A fixed intrinsic size.
     Fixed(Size),
+    /// Shaped text. Its intrinsic width is always the natural one (it never
+    /// makes a flex item shrinkable); when the layout settles on a narrower
+    /// width, the height is that of the wrapped text.
+    Text(TextBlock),
     /// A text size estimate for when no shaper is available (the UI core
     /// uses it for text without an installed text measurer, e.g. headless
     /// tests): `chars` glyphs of average advance `0.55 × font_size`, lines
@@ -66,6 +114,14 @@ impl Measure {
         let (w, h) = match self {
             Measure::None => (0.0, 0.0),
             Measure::Fixed(s) => (s.width, s.height),
+            Measure::Text(t) => {
+                // Half a pixel of rounding slack, as the painter allows.
+                let height = match known.width {
+                    Some(w) if w > 0.0 && w + 0.5 < t.natural.width => (t.height_at)(w),
+                    _ => t.natural.height,
+                };
+                (t.natural.width, height)
+            }
             Measure::TextPlaceholder {
                 chars,
                 font_size,

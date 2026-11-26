@@ -20,4 +20,6 @@ pub use canvas::{Canvas, CanvasIndex};
 pub use dock::{Dock, DockEdge, DockLayout, DockSide, Splitter, SplitterDrag};
 pub use geometry::{Corners, Point, Rect, Size, Transform2D, Vec2};
 pub use taffy;
-pub use tree::{LayoutError, LayoutNode, LayoutStats, LayoutTree, Measure, Style, style};
+pub use tree::{
+    LayoutError, LayoutNode, LayoutStats, LayoutTree, Measure, Style, TextBlock, style,
+};

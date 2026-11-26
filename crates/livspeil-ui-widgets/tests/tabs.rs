@@ -13,8 +13,8 @@ use common::{center, find, golden_dir, host, host_sized, scene, wait};
 use livspeil_testkit::assert_golden;
 use livspeil_ui_core::{Element, Model, Role, TestHost, Toggled, View, div};
 use livspeil_ui_layout::{Size, Vec2};
-use livspeil_ui_theme::{MotionConfig, Scheme, Theme};
-use livspeil_ui_widgets::{TabItem, Tabs};
+use livspeil_ui_theme::{Material, MotionConfig, Scheme, Theme};
+use livspeil_ui_widgets::{FADE_WIDTH, TabItem, Tabs};
 
 struct Fx {
     h: TestHost,
@@ -229,7 +229,7 @@ fn overflow_scrolls_to_the_selection_and_with_the_wheel() {
     // Wheel back to the start.
     let p = center(&f.h, "tabs");
     for _ in 0..20 {
-        f.h.scroll(p.x, p.y, Vec2::new(-20.0, 0.0));
+        f.h.scroll(p.x, p.y, Vec2::new(20.0, 0.0));
         wait(&mut f.h, 16);
     }
     f.h.run_until_idle(200);
@@ -237,12 +237,158 @@ fn overflow_scrolls_to_the_selection_and_with_the_wheel() {
     assert!(first.x >= bar.x - 0.6, "scrolled back: {first:?}");
     // Vertical wheels scroll the bar as well.
     for _ in 0..10 {
-        f.h.scroll(p.x, p.y, Vec2::new(0.0, 20.0));
+        f.h.scroll(p.x, p.y, Vec2::new(0.0, -20.0));
         wait(&mut f.h, 16);
     }
     f.h.run_until_idle(200);
     let first = on_screen(&f.h, "tab:Scene");
     assert!(first.x < bar.x, "vertical wheel moves the strip: {first:?}");
+}
+
+const MANY: [&str; 6] = [
+    "Scene", "Charms", "Timeline", "Assets", "Settings", "History",
+];
+
+/// Which ends of the bar show a fade: (left, right).
+fn fades(h: &TestHost) -> (bool, bool) {
+    (
+        h.app.find("tabs-fade-left").is_some(),
+        h.app.find("tabs-fade-right").is_some(),
+    )
+}
+
+/// Whether the tab is wholly inside the bar and clear of any fade.
+fn fully_visible(h: &TestHost, tab: &str) -> bool {
+    let bar = h.app.bounds(find(h, "tabs")).unwrap();
+    let (left, right) = fades(h);
+    let lo = bar.x + if left { FADE_WIDTH } else { 0.0 };
+    let hi = bar.right() - if right { FADE_WIDTH } else { 0.0 };
+    let t = on_screen(h, tab);
+    t.x >= lo - 0.6 && t.right() <= hi + 0.6
+}
+
+#[test]
+fn only_ends_with_hidden_tabs_fade() {
+    let f = fixture(400.0, &FOUR, false);
+    assert_eq!(fades(&f.h), (false, false), "everything fits");
+
+    let mut f = fixture(220.0, &MANY, false);
+    assert_eq!(fades(&f.h), (false, true), "at the start");
+    f.h.key("tab");
+    f.key("right");
+    f.key("right");
+    assert_eq!(fades(&f.h), (true, true), "in the middle");
+    f.key("end");
+    assert_eq!(fades(&f.h), (true, false), "at the end");
+    // The fade covers its end of the bar and is drawn in the track color.
+    let bar = f.h.app.bounds(find(&f.h, "tabs")).unwrap();
+    let fade = f.h.app.bounds(find(&f.h, "tabs-fade-left")).unwrap();
+    assert!((fade.x - bar.x - 1.0).abs() < 0.6 && (fade.width - FADE_WIDTH).abs() < 0.6);
+    let gradients = scene(&f.h).matches("gradient=").count();
+    assert_eq!(gradients, 1);
+}
+
+#[test]
+fn keys_and_clicks_bring_the_tab_fully_into_view() {
+    let mut f = fixture(220.0, &MANY, false);
+    f.h.key("tab");
+    for title in &MANY[1..] {
+        f.key("right");
+        let name = format!("tab:{title}");
+        assert!(fully_visible(&f.h, &name), "{name} with the keyboard");
+    }
+    for title in MANY[..MANY.len() - 1].iter().rev() {
+        f.key("left");
+        let name = format!("tab:{title}");
+        assert!(fully_visible(&f.h, &name), "{name} going back");
+    }
+    // Click the part of a cut-off tab that shows beside the fade.
+    let bar = f.h.app.bounds(find(&f.h, "tabs")).unwrap();
+    let cut = MANY
+        .iter()
+        .map(|t| format!("tab:{t}"))
+        .find(|n| {
+            let t = on_screen(&f.h, n);
+            t.x < bar.right() - FADE_WIDTH && t.right() > bar.right() - FADE_WIDTH
+        })
+        .expect("a tab crosses the right edge");
+    let t = on_screen(&f.h, &cut);
+    f.h.click(t.x + 2.0, t.y + t.height / 2.0);
+    f.h.run_until_idle(200);
+    assert!(fully_visible(&f.h, &cut), "{cut} after a click");
+
+    // Choosing the selected tab again after scrolling away reveals it.
+    f.key("end");
+    let p = center(&f.h, "tabs");
+    for _ in 0..20 {
+        f.h.scroll(p.x, p.y, Vec2::new(20.0, 0.0));
+        wait(&mut f.h, 16);
+    }
+    f.h.run_until_idle(200);
+    assert!(!fully_visible(&f.h, "tab:History"));
+    f.key("end");
+    assert!(fully_visible(&f.h, "tab:History"), "End on the last tab");
+}
+
+#[test]
+fn chevrons_scroll_without_selecting() {
+    let mut f = fixture(220.0, &MANY, false);
+    let before = on_screen(&f.h, "tab:Scene").x;
+    let p = center(&f.h, "tabs-more-right");
+    f.h.click(p.x, p.y);
+    f.h.run_until_idle(200);
+    assert!(on_screen(&f.h, "tab:Scene").x < before - 40.0, "scrolled");
+    assert_eq!(f.sel(), 0, "selection unchanged");
+    let p = center(&f.h, "tabs-more-left");
+    f.h.click(p.x, p.y);
+    f.h.run_until_idle(200);
+    assert!((on_screen(&f.h, "tab:Scene").x - before).abs() < 0.6);
+    assert_eq!(fades(&f.h), (false, true));
+}
+
+#[test]
+fn fades_are_the_track_color_in_both_themes_and_on_frost() {
+    for scheme in [Scheme::Dark, Scheme::Light] {
+        let (mut h, _) = host(|app, env| {
+            app.set_theme(Theme {
+                scheme,
+                ..Theme::default()
+            });
+            let sel = app.new_model(2usize);
+            let tabs = app.new_view(Tabs::new(env, sel, MANY).name("tabs").label("Views"));
+            Box::new(move |_| {
+                div()
+                    .p(16.0)
+                    .material(Material::Frost)
+                    .child(div().w(220.0).child(Element::view(&tabs)))
+            })
+        });
+        h.run_until_idle(200);
+        let dump = scene(&h);
+        let line = |start: &str| {
+            dump.lines()
+                .map(str::trim_start)
+                .find(|l| l.starts_with(start))
+                .unwrap_or_else(|| panic!("no {start}\n{dump}"))
+                .to_owned()
+        };
+        let track = line("quad tabs ");
+        let color = track
+            .split("fill=")
+            .nth(1)
+            .and_then(|c| c.split(" / ").next())
+            .expect("the track is filled");
+        let clear = format!("{color} / 0)");
+        let solid = format!("{color} / 1)");
+        assert!(
+            line("quad tabs-fade-left").contains(&format!("gradient={solid}..{clear}")),
+            "{dump}"
+        );
+        assert!(
+            line("quad tabs-fade-right").contains(&format!("gradient={clear}..{solid}")),
+            "{dump}"
+        );
+    }
 }
 
 #[test]

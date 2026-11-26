@@ -115,7 +115,9 @@ pub use semantics::{NumericValue, Role, SemanticAction, Semantics, Toggled};
 pub use slider::{SLIDER_THUMB, Slider};
 pub use style::step_decimals;
 pub use style::{ClickFn, DISABLED_OPACITY};
-pub use tabs::{CLOSE_SIZE, TAB_INSET, TAB_MAX_WIDTH, TAB_MIN_WIDTH, TABS_SCOPE, TabItem, Tabs};
+pub use tabs::{
+    CLOSE_SIZE, FADE_WIDTH, TAB_INSET, TAB_MAX_WIDTH, TAB_MIN_WIDTH, TABS_SCOPE, TabItem, Tabs,
+};
 pub use text_field::{TextField, TextFn};
 pub use titlebar::{TITLEBAR_HEIGHT, TOOLBAR_HEIGHT, TRAFFIC_LIGHT_INSET, Titlebar};
 pub use toast::{

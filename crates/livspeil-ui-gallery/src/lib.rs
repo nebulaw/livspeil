@@ -15,6 +15,9 @@
 //!   and Cmd/Ctrl+0 switch to the first ten pages (later pages have no
 //!   shortcut) (the bindings live in
 //!   the keymap as `gallery.page-<n>`).
+//! - Pages taller than the window scroll under their title
+//!   ([`Page::scrolls`]); the others fit themselves to the window. Columns
+//!   stack, and the toolbar and control rows wrap, when the window is narrow.
 //! - [`Chrome`]: system window decorations, or (macOS) the gallery's own
 //!   [`Titlebar`](livspeil_ui_widgets::Titlebar) under a transparent
 //!   native one ([`mount_with`]).
@@ -48,14 +51,15 @@ pub fn blur_note() -> Option<String> {
     BLUR_NOTE.lock().ok().and_then(|n| n.clone())
 }
 
+use std::cell::OnceCell;
 use std::rc::Rc;
 
 use livspeil_ui_core::{
     App, Element, ElementId, Key, Keymap, Keystroke, Model, Phase, Render, Role, View, ViewContext,
     actions, div, text,
 };
-use livspeil_ui_layout::Rect;
-use livspeil_ui_layout::style::length;
+use livspeil_ui_layout::style::{FlexWrap, JustifyContent, length};
+use livspeil_ui_layout::{Rect, Vec2};
 use livspeil_ui_text::FontSystem;
 use livspeil_ui_theme::{Color, Density, Material, Scheme, Theme, Tier};
 use livspeil_ui_widgets::keymap::actions as widget_actions;
@@ -69,6 +73,10 @@ pub use pages::State;
 
 /// The window's logical size (also the screenshot size).
 pub const WINDOW_SIZE: (f32, f32) = (1000.0, 640.0);
+/// Space left and right of a page.
+const PAGE_PADDING: f32 = 24.0;
+/// Space under a page.
+const PAGE_BOTTOM: f32 = 20.0;
 /// Sidebar width including its margin.
 pub const SIDEBAR_WIDTH: f32 = 220.0;
 /// Action prefix of the page shortcuts: `gallery.page-1` … `gallery.page-10`.
@@ -199,6 +207,17 @@ impl Page {
         }
     }
 
+    /// Whether the page scrolls when it is taller than the window. The
+    /// others size themselves to the window (their content scrolls or pans
+    /// by itself).
+    #[must_use]
+    pub fn scrolls(self) -> bool {
+        !matches!(
+            self,
+            Page::Scroll | Page::Dock | Page::Menus | Page::NodeCanvas
+        )
+    }
+
     /// The sidebar group.
     #[must_use]
     pub fn group(self) -> Group {
@@ -324,13 +343,48 @@ pub fn mount_with(app: &mut App, fonts: FontSystem, page: Page, chrome: Chrome) 
         .label("Pages")
         .focusable(false),
     );
+    let state = Rc::new(state);
+    // The page's content needs the gallery's handle, which does not exist
+    // yet.
+    let handle: Rc<OnceCell<View<Gallery>>> = Rc::default();
+    let (content_env, content_state, content_view) = (env.clone(), state.clone(), handle.clone());
+    let scroll = app.new_view(
+        ScrollView::new(&env, move |app, _| {
+            let current = *page.read(app);
+            let content = content_view.get().map(|view| {
+                pages::render(current, &content_state, &content_env, *view, app)
+                    // As tall as its content: the scroll view does the rest.
+                    .style(|s| s.flex_shrink = 0.0)
+            });
+            div().flex_col().child(
+                div()
+                    .key(current.slug())
+                    .flex_col()
+                    .px(PAGE_PADDING)
+                    .style(|s| s.padding.bottom = length(PAGE_BOTTOM))
+                    .children(content),
+            )
+        })
+        .name("page-scroll")
+        .label("Page")
+        .focusable(false),
+    );
+    // A new page starts at its top.
+    let _ = app.observe(page.id(), move |app| {
+        scroll.update(app, |s, cx| {
+            s.scroller_mut().jump_to(Vec2::ZERO);
+            cx.notify();
+        });
+    });
     let gallery = app.new_view(Gallery {
         env: env.clone(),
         page,
         chrome,
         sidebar,
-        state: Rc::new(state),
+        scroll,
+        state,
     });
+    let _ = handle.set(gallery);
     let root = env.root(app, gallery);
     let shell = app.new_view(Shell {
         env: env.clone(),
@@ -410,6 +464,7 @@ pub struct Gallery {
     page: Model<Page>,
     chrome: Chrome,
     sidebar: View<ScrollView>,
+    scroll: View<ScrollView>,
     state: Rc<State>,
 }
 
@@ -447,6 +502,13 @@ impl Gallery {
     #[must_use]
     pub fn sidebar(&self) -> View<ScrollView> {
         self.sidebar
+    }
+
+    /// The scroll view of pages that can be taller than the window
+    /// ([`Page::scrolls`]).
+    #[must_use]
+    pub fn page_scroll(&self) -> View<ScrollView> {
+        self.scroll
     }
 }
 
@@ -590,13 +652,20 @@ fn toolbar(theme: &Theme, motion_reduce: bool, view: View<Gallery>) -> Element {
     div()
         .key("toolbar")
         .name("toolbar")
-        .h(52.0)
+        // Right-aligned; wraps onto more lines in a narrow window.
+        .style(|s| {
+            s.min_size.height = length(52.0);
+            s.flex_shrink = 0.0;
+            s.flex_wrap = FlexWrap::Wrap;
+            s.justify_content = JustifyContent::FLEX_END;
+            s.padding.top = length(10.0);
+            s.padding.bottom = length(10.0);
+        })
         .flex_row()
         .items_center()
         .gap(12.0)
         .px(20.0)
         .semantics(|s| s.role(Role::Toolbar).label("Appearance"))
-        .child(div().grow())
         .child(
             SegmentedControl::new(["Dark", "Light"], scheme)
                 .label("Theme")
@@ -702,7 +771,35 @@ impl Render for Gallery {
         let page = *self.page.read(cx);
         let view = cx.view();
         let reduce_motion = cx.motion().reduce_motion;
-        let content = pages::render(page, &self.state, &self.env, view, cx);
+        if page == Page::Motion {
+            pages::step_motion(&self.state, cx);
+        }
+        let content = if page.scrolls() {
+            // Whatever re-renders the gallery also changes the page.
+            self.scroll.update(cx, |_, cx| cx.notify());
+            div()
+                .key("scroll-area")
+                .grow()
+                .style(|s| s.min_size.height = length(0.0))
+                .child(Element::view(&self.scroll))
+        } else {
+            div()
+                .key(page.slug())
+                .grow()
+                .flex_col()
+                .px(PAGE_PADDING)
+                .style(|s| {
+                    s.padding.bottom = length(PAGE_BOTTOM);
+                    s.min_size.height = length(0.0);
+                })
+                .child(pages::render(page, &self.state, &self.env, view, cx))
+        };
+        let title = Label::new(page.title())
+            .tone(Tone::Primary)
+            .render(&theme)
+            .font_size(theme.tokens.type_scale.sizes[5])
+            .font_weight(600.0)
+            .semantics(|s| s.role(Role::Heading));
         let main = div()
             .key("main")
             .grow()
@@ -712,24 +809,17 @@ impl Render for Gallery {
             .child(toolbar(&theme, reduce_motion, view))
             .child(
                 div()
-                    .key(page.slug())
                     .name("page")
                     .grow()
                     .flex_col()
-                    .px(24.0)
-                    .style(|s| {
-                        s.padding.bottom = length(20.0);
-                        s.min_size.height = length(0.0);
-                    })
+                    .style(|s| s.min_size.height = length(0.0))
                     .gap(16.0)
                     .clip()
                     .child(
-                        Label::new(page.title())
-                            .tone(Tone::Primary)
-                            .render(&theme)
-                            .font_size(theme.tokens.type_scale.sizes[5])
-                            .font_weight(600.0)
-                            .semantics(|s| s.role(Role::Heading)),
+                        div()
+                            .px(PAGE_PADDING)
+                            .style(|s| s.flex_shrink = 0.0)
+                            .child(title),
                     )
                     .child(content),
             );

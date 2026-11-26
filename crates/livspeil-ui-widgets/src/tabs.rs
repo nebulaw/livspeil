@@ -10,8 +10,8 @@ use livspeil_ui_core::{
     ViewContext, div, text,
 };
 use livspeil_ui_layout::style::{Dimension, LengthPercentageAuto};
-use livspeil_ui_layout::{Rect, Vec2};
-use livspeil_ui_theme::{Elevation, MotionClass, PropertyKind};
+use livspeil_ui_layout::{Corners, Rect, Vec2};
+use livspeil_ui_theme::{Color, Elevation, MotionClass, PropertyKind, Theme};
 
 use crate::env::Env;
 use crate::keymap::actions;
@@ -28,8 +28,15 @@ pub const TAB_MIN_WIDTH: f32 = 56.0;
 pub const TAB_MAX_WIDTH: f32 = 220.0;
 /// Edge length of a close button.
 pub const CLOSE_SIZE: f32 = 16.0;
-/// Margin kept around the selected tab when it is scrolled into view.
-const REVEAL_MARGIN: f32 = 8.0;
+/// Width of the fade over an end of the bar that hides tabs. The selected
+/// tab is scrolled clear of it.
+pub const FADE_WIDTH: f32 = 32.0;
+/// Width of the scroll button (a chevron) at the outer end of a fade.
+const CHEVRON_WIDTH: f32 = 16.0;
+/// The part of a fade that is solid track color, behind the chevron.
+const FADE_SOLID: f32 = 0.5;
+/// How much of the bar a chevron click scrolls.
+const CHEVRON_PAGE: f32 = 0.6;
 /// Pixels per wheel line.
 const WHEEL_LINE: f32 = 40.0;
 
@@ -90,7 +97,11 @@ impl<S: Into<SharedString>> From<S> for TabItem {
 ///   [`Tabs::closable`], Delete/Backspace close the selected tab.
 /// - Tabs are as wide as their title (at least 56, at most 220 px). When
 ///   they do not fit, the bar scrolls horizontally (wheel, trackpad), and
-///   choosing a tab scrolls it into view with the same spring.
+///   choosing a tab (click or keys) scrolls it into view with the same
+///   spring.
+/// - An end of the bar that hides tabs fades into the track and shows a
+///   chevron (`tabs-more-left`, `tabs-more-right`) that scrolls that way;
+///   nothing is drawn when every tab fits.
 /// - Close buttons (`close:<title>`) belong to a tab; clicking one removes
 ///   the tab from the bar, moves the selection to the tab that took its
 ///   place and calls [`Tabs::on_close`] with the removed index.
@@ -115,6 +126,10 @@ pub struct Tabs {
     offset: Animated<f32>,
     /// What the offset last revealed: (selected, viewport width, total).
     revealed: Option<(usize, f32, f32)>,
+    /// A tab was chosen: reveal it even if the selection did not change.
+    reveal_again: bool,
+    /// (viewport width, total width) of the last render.
+    extent: (f32, f32),
 }
 
 impl std::fmt::Debug for Tabs {
@@ -147,6 +162,8 @@ impl Tabs {
             pill_placed: false,
             offset: Animated::new(0.0),
             revealed: None,
+            reveal_again: false,
+            extent: (0.0, 0.0),
         }
     }
 
@@ -271,7 +288,14 @@ fn set_selected(view: View<Tabs>, cx: &mut App, i: usize) {
             t.items.get(i).is_some_and(|x| !x.disabled) && !t.disabled,
         )
     };
-    if ok && *model.read(cx) != i {
+    if !ok {
+        return;
+    }
+    view.update(cx, |t, vcx| {
+        t.reveal_again = true;
+        vcx.notify();
+    });
+    if *model.read(cx) != i {
         model.update(cx, |s, mcx| {
             *s = i;
             mcx.notify();
@@ -319,10 +343,9 @@ impl Render for Tabs {
             .map_or_else(|| style::entity_name("tabs", view.id()), str::to_owned);
         let widths = self.widths(&theme);
         let total: f32 = widths.iter().sum::<f32>() + 2.0 * TAB_INSET;
-        let avail = cx
-            .layout_bounds()
-            .map_or(total, |b| b.width)
-            .clamp(0.0, total.max(1.0));
+        let bounds = cx.layout_bounds();
+        let avail = bounds.map_or(total, |b| b.width).clamp(0.0, total.max(1.0));
+        self.extent = (avail, total);
         let max_off = (total - avail).max(0.0);
         let h = m.height;
         let inner_h = h - 2.0 * TAB_INSET;
@@ -349,17 +372,22 @@ impl Render for Tabs {
         } else if self.pill.is_animating() {
             self.pill.step(dt);
         }
-        if n > 0 && self.revealed != Some((sel, avail, total)) {
+        // Before the first layout the width is unknown: nothing to reveal.
+        let stale = self.reveal_again || self.revealed != Some((sel, avail, total));
+        if n > 0 && bounds.is_some() && stale {
             let (x, w) = (x_of(sel), widths[sel]);
+            // Clear of the fades, or centred in a bar too narrow for that.
+            let margin = ((avail - w) / 2.0).clamp(0.0, FADE_WIDTH);
             let cur = self.offset.target();
             let mut want = cur;
-            if x - REVEAL_MARGIN < want {
-                want = x - REVEAL_MARGIN;
+            if x + w + margin > want + avail {
+                want = x + w + margin - avail;
             }
-            if x + w + REVEAL_MARGIN > want + avail {
-                want = x + w + REVEAL_MARGIN - avail;
+            if x - margin < want {
+                want = x - margin;
             }
             want = want.clamp(0.0, max_off);
+            self.reveal_again = false;
             if self.revealed.is_none() {
                 self.offset.set(want);
             } else if (want - cur).abs() > f32::EPSILON {
@@ -394,7 +422,7 @@ impl Render for Tabs {
             .style(|s| s.flex_shrink = 0.0)
             .flex_row()
             .p(TAB_INSET)
-            .translate(Vec2::new(-off, 0.0))
+            .translate(Vec2::new(-off - 1.0, 0.0))
             .child(
                 div()
                     .key("pill")
@@ -494,7 +522,23 @@ impl Render for Tabs {
             .bg(track)
             .border(1.0, style::hairline(&theme))
             .clip()
-            .child(strip);
+            // The tabs are clipped inside the side borders, so that no
+            // sliver of a hidden one shows under them.
+            .child(
+                div()
+                    .key("viewport")
+                    .absolute(Rect::new(1.0, 0.0, (avail - 2.0).max(0.0), h))
+                    .flex_row()
+                    .clip()
+                    .child(strip),
+            );
+        // Fades over the ends that hide tabs.
+        let hidden = [off > 0.5, off < max_off - 0.5];
+        for (right, hidden) in [false, true].into_iter().zip(hidden) {
+            if hidden {
+                el = el.child(fade(view, &theme, track, right, avail, self.disabled));
+            }
+        }
         el = sem.apply(el);
         if self.disabled {
             return style::disabled(el, true);
@@ -510,10 +554,14 @@ impl Render for Tabs {
                     return;
                 }
                 let d = delta.pixels(WHEEL_LINE);
-                // A horizontal bar follows either axis of the wheel.
+                // A horizontal bar follows either axis of the wheel; the
+                // content moves with the delta, as in a `ScrollView`.
                 let dx = if d.x.abs() >= d.y.abs() { d.x } else { d.y };
-                scroll_by(view, cx, dx, matches!(delta, ScrollDelta::Lines(_)));
-                cx.stop_propagation();
+                let (avail, total) = view.read(cx).extent;
+                if total > avail {
+                    scroll_by(view, cx, -dx, matches!(delta, ScrollDelta::Lines(_)));
+                    cx.stop_propagation();
+                }
             });
         let nav = |dir: isize, edge: bool| {
             move |cx: &mut EventCx<'_>| {
@@ -529,7 +577,8 @@ impl Render for Tabs {
                 } else {
                     style::step_enabled(&enabled, Some(cur), dir, false)
                 };
-                if let Some(i) = next.filter(|i| *i != cur) {
+                // Choosing the current tab again scrolls it back into view.
+                if let Some(i) = next.or(edge.then_some(cur)) {
                     set_selected(view, cx, i);
                 }
             }
@@ -555,6 +604,82 @@ impl Render for Tabs {
     }
 }
 
+/// The fade over one end of the bar, with its chevron button.
+fn fade(
+    view: View<Tabs>,
+    theme: &Theme,
+    track: Color,
+    right: bool,
+    avail: f32,
+    disabled: bool,
+) -> Element {
+    let m = metrics(theme);
+    // Inside the bar's border, over the same area as the tabs.
+    let width = FADE_WIDTH.min(avail / 2.0 - 1.0).max(0.0);
+    let height = m.height - 2.0;
+    let x = if right { avail - 1.0 - width } else { 1.0 };
+    let r = (m.radius - 1.0).max(0.0);
+    let clear = track.with_alpha(0.0);
+    let (from, to, start, end, radii) = if right {
+        let radii = Corners {
+            top_right: r,
+            bottom_right: r,
+            ..Corners::default()
+        };
+        (clear, track, 0.0, 1.0 - FADE_SOLID, radii)
+    } else {
+        let radii = Corners {
+            top_left: r,
+            bottom_left: r,
+            ..Corners::default()
+        };
+        (track, clear, FADE_SOLID, 1.0, radii)
+    };
+    let chevron_width = CHEVRON_WIDTH.min(width);
+    let mut chevron = div()
+        .key("chevron")
+        .name(if right {
+            "tabs-more-right"
+        } else {
+            "tabs-more-left"
+        })
+        .absolute(Rect::new(
+            if right { width - chevron_width } else { 0.0 },
+            0.0,
+            chevron_width,
+            height,
+        ))
+        .flex_row()
+        .items_center()
+        .justify_center()
+        .child(
+            text(if right { "\u{203a}" } else { "\u{2039}" })
+                .key("glyph")
+                .font_size(m.font + 3.0)
+                .text_color(theme.colors().text_secondary)
+                .hit_test(false),
+        );
+    if !disabled {
+        let dx = if right { 1.0 } else { -1.0 } * avail * CHEVRON_PAGE;
+        chevron = chevron.on_click(move |_, cx| {
+            scroll_by(view, cx, dx, true);
+            cx.stop_propagation();
+        });
+    }
+    div()
+        .key(if right { "fade-right" } else { "fade-left" })
+        .name(if right {
+            "tabs-fade-right"
+        } else {
+            "tabs-fade-left"
+        })
+        .absolute(Rect::new(x, 1.0, width, height))
+        .radii(radii)
+        .gradient_x(from, to, start, end)
+        .hit_test(false)
+        .child(chevron)
+}
+
 /// Scroll the strip by `dx` px (wheel and trackpad): trackpad deltas move
 /// at once, wheel steps spring.
 fn scroll_by(view: View<Tabs>, cx: &mut EventCx<'_>, dx: f32, springy: bool) {
@@ -564,10 +689,7 @@ fn scroll_by(view: View<Tabs>, cx: &mut EventCx<'_>, dx: f32, springy: bool) {
         PropertyKind::Movement,
     );
     view.update(cx, |t, vcx| {
-        let (total, avail) = match t.revealed {
-            Some((_, avail, total)) => (total, avail),
-            None => return,
-        };
+        let (avail, total) = t.extent;
         let max = (total - avail).max(0.0);
         let want = (t.offset.target() + dx).clamp(0.0, max);
         if springy {

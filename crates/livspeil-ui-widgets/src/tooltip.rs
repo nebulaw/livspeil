@@ -155,7 +155,7 @@ impl Tooltip {
             let key = OverlayKey::Tooltip(id);
             if cx.is_hovered(id) && !env.has_overlay(cx, key) {
                 let mut e = entry.clone();
-                e.anchor = cx.bounds();
+                e.anchor = cx.visual_bounds(id).unwrap_or_else(|| cx.bounds());
                 env.show_overlay(cx, key, OverlayKind::Tooltip(e));
             }
         })

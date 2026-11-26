@@ -8,10 +8,10 @@
 use livspeil_ui_core::{
     App, Element, Render, Scene as CoreScene, TestHost, ViewContext, div, text,
 };
-use livspeil_ui_layout::Size;
+use livspeil_ui_layout::{Rect, Size};
 use livspeil_ui_paint::{FontSystem, PaintBridge};
 use livspeil_ui_render::Color;
-use livspeil_ui_theme::{Scheme, Theme};
+use livspeil_ui_theme::{Color as ThemeColor, Material, Scheme, Theme};
 use livspeil_ui_widgets::{
     Button, Dialog, DialogButton, Env, IconButton, IconSize, Placement, Popover, TabItem, Tabs,
     Toast, ToastTone, Toasts,
@@ -253,6 +253,58 @@ fn tabs(scheme: Scheme, scale: f32) -> Result<Shot, ShotError> {
     finish_scene(bridge, &scene, scale)
 }
 
+// ---- tabs on frost ----
+
+/// An overflowing bar scrolled to its middle, so both ends fade, on a Frost
+/// panel over colour.
+fn tabs_frost(scheme: Scheme, scale: f32) -> Result<Shot, ShotError> {
+    let bridge = PaintBridge::new(FontSystem::test());
+    let scene = settle(
+        &bridge,
+        scheme,
+        |app, env| {
+            let selected = app.new_model(3usize);
+            let bar = app.new_view(
+                Tabs::new(
+                    env,
+                    selected,
+                    [
+                        "Scene", "Charms", "Timeline", "Assets", "History", "Settings",
+                    ],
+                )
+                .label("Panels"),
+            );
+            Box::new(move |cx| {
+                let theme = cx.theme().clone();
+                let stripe = |x: f32, hue: f32| {
+                    div()
+                        .absolute(Rect::new(x, 0.0, 70.0, SIZE.height))
+                        .bg(ThemeColor::oklch(0.65, 0.17, hue, 1.0))
+                };
+                div()
+                    .w_full()
+                    .h_full()
+                    .bg(theme.colors().surface[0])
+                    .child(stripe(60.0, 285.0))
+                    .child(stripe(200.0, 200.0))
+                    .child(stripe(340.0, 40.0))
+                    .child(
+                        div()
+                            .absolute(Rect::new(100.0, 120.0, 360.0, 100.0))
+                            .flex_col()
+                            .justify_center()
+                            .px(40.0)
+                            .rounded(theme.tokens.radii.lg)
+                            .material(Material::Frost)
+                            .child(div().w(280.0).child(Element::view(&bar))),
+                    )
+            })
+        },
+        |_| {},
+    )?;
+    finish_scene(bridge, &scene, scale)
+}
+
 // ---- popover ----
 
 fn popover(scheme: Scheme, scale: f32) -> Result<Shot, ShotError> {
@@ -414,6 +466,7 @@ macro_rules! themed {
 
 themed!(icon_buttons_for, icon_buttons);
 themed!(tabs_for, tabs);
+themed!(tabs_frost_for, tabs_frost);
 themed!(popover_for, popover);
 themed!(toasts_for, toasts);
 
@@ -443,7 +496,7 @@ pub fn scenes() -> Vec<Scene> {
     let (width, height) = (SIZE.width as u32, SIZE.height as u32);
     let mut v = Vec::new();
     for scheme in [Scheme::Dark, Scheme::Light] {
-        let names: [Named; 6] = match scheme {
+        let names: [Named; 7] = match scheme {
             Scheme::Dark => [
                 (
                     "icon-buttons-dark",
@@ -454,6 +507,11 @@ pub fn scenes() -> Vec<Scene> {
                     "tabs-dark",
                     "Tabs: plain, closable and overflowing bars, dark",
                     tabs_for(scheme),
+                ),
+                (
+                    "tabs-frost-dark",
+                    "Tabs overflowing at both ends on a Frost panel, dark",
+                    tabs_frost_for(scheme),
                 ),
                 (
                     "popover-dark",
@@ -486,6 +544,11 @@ pub fn scenes() -> Vec<Scene> {
                     "tabs-light",
                     "Tabs: plain, closable and overflowing bars, light",
                     tabs_for(scheme),
+                ),
+                (
+                    "tabs-frost-light",
+                    "Tabs overflowing at both ends on a Frost panel, light",
+                    tabs_frost_for(scheme),
                 ),
                 (
                     "popover-light",

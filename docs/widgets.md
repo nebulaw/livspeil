@@ -55,6 +55,22 @@ content first and the overlay layer, an absolutely positioned box the size
 of the viewport, after it, so popups and tooltips paint and hit-test above
 everything.
 
+## Text layout
+
+A text element is one box of its natural (unwrapped) width. When layout gives
+it less width than that (a stretched child of a narrow column, a flex item
+with `min_size.width = 0`), it is as tall as its wrapped lines. Text never
+makes a flex item shrink by itself. The height comes from
+`TextMeasurer::wrapped_height`, whose default breaks greedily after spaces
+and hyphens.
+
+`Element::gradient_x(from, to, start, end)` fills an element with a
+left-to-right gradient (used by the tab fades).
+
+Popups (`Popover`, `Select`, `Tooltip`) anchor at `App::visual_bounds`, the
+element's position after its ancestors' transforms, so they open in the right
+place inside a scrolled view.
+
 ## Widgets
 
 | Widget | Kind | Semantics (core role) | Keyboard |
@@ -141,8 +157,14 @@ width spring with the Standard class of the `tabs` motion scope (velocity
 kept when retargeted; instant under Reduce Motion). Tabs are as wide as
 their title (56 to 220 px) and the bar is never wider than its container;
 when tabs do not fit it scrolls horizontally (wheel, trackpad; a vertical
-wheel also works) and choosing a tab scrolls it into view. Scrolling is a
-simple spring, without the momentum of `ScrollView`. Close buttons
+wheel also works; the content moves with the delta, as in `ScrollView`) and
+choosing a tab by click or keys, the selected one included, scrolls it fully
+into view. An end that hides tabs fades into the track color (also on Frost,
+as the track is opaque) and shows a chevron (`tabs-more-left`,
+`tabs-more-right`) that scrolls 60% of the width without changing the
+selection; with no hidden tabs there is neither, and a bar that fits leaves
+wheel events to its ancestors. Scrolling is a simple spring, without the
+momentum of `ScrollView`. Close buttons
 (`close:<title>`) remove the tab, choose the tab that took its place and
 call `on_close(index)`; `Tabs::push` and `Tabs::close` do the same from
 code. Keys (context `Tabs`): Left/Right, Home/End, Delete/Backspace
@@ -403,6 +425,14 @@ pixel fade instead of disappearing.
 
 ## Known gaps
 
+- `Menu`, `MenuBar` and `ContextMenu` still anchor at layout bounds, so a
+  menu bar inside a scrolled view opens its menus at the unscrolled position;
+  text field IME placement has the same limit.
+- Clips are rectangular: square children paint over rounded corners.
+- `ScrollView` clamps its offset again only at the next scroll after the
+  window grows.
+- `DockView` does not shrink panels below their minimums in a narrow
+  container.
 - Builders capture state when rendered; several key presses between two
   frames act on the same state (hosts draw a frame between events).
 - Focus changes made directly with `App::focus` are noticed by text and
