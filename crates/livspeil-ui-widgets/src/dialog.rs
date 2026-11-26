@@ -466,6 +466,7 @@ fn layer(view: View<Dialog>, app: &App, look: Look) -> Vec<Element> {
             let mut el = btn
                 .on_click(move |_, cx| Dialog::press(view, cx, i))
                 .render(theme)
+                .style(|s| s.flex_shrink = 0.0)
                 .key(button_key(i));
             if !b.disabled && !leaving {
                 // Enter on a focused button presses that button, not the

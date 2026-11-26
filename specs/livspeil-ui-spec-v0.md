@@ -123,5 +123,5 @@ The original milestone plan above was re-cut into smaller PRs. Built and merged:
 | M1.9 | #35 | gallery app; host fully wired (PaintRenderer, AccessKit adapter) |
 | M1.10 | #36 | ScrollView, VirtualList, Panel, DockView, Menu/MenuBar/ContextMenu, Titlebar, Bézier wires, NodeCanvas |
 
-Not built yet (from section 9 and 11): IconButton, Tabs, Tree, Table, Popover, Dialog/Sheet, Toast, ColorPicker, CurveEditor, Viewport, auto-generated inspector; Bevy and Wayland layer-shell hosts; damage tracking and blur caching (principle 6); high contrast and text scale. NodeCanvas misses the section 12 CPU target (4.7–9.5 ms per frame at 2000 nodes on a shared VM). Component details: `docs/widgets.md`, `docs/ui-host.md`, `docs/accessibility.md`, `docs/ui-config.md`.
+Not built yet (from section 9 and 11): Tree, Table, ColorPicker, CurveEditor, Viewport, auto-generated inspector; Bevy and Wayland layer-shell hosts; damage tracking and blur caching (principle 6); high contrast and text scale. NodeCanvas misses the section 12 CPU target (4.7–9.5 ms per frame at 2000 nodes on a shared VM). Component details: `docs/widgets.md`, `docs/ui-host.md`, `docs/accessibility.md`, `docs/ui-config.md`.
 

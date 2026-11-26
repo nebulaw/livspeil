@@ -43,7 +43,7 @@ pub fn settle_page_with(
 /// What `livspeil-ui-host-winit`'s `PaintRenderer` does to every scene
 /// (`widen_text_runs`): one more pixel of width per text run, so labels
 /// whose layout box was rounded below their measured width do not wrap.
-fn widen_text_runs(scene: &mut CoreScene) {
+pub(crate) fn widen_text_runs(scene: &mut CoreScene) {
     for c in &mut scene.commands {
         if let PaintCmd::Text(t) = c
             && t.rect.width > 0.0
@@ -88,7 +88,7 @@ fn dark() -> Color {
 }
 
 /// Scene names `gallery-<slug>-1x` / `-2x`, in page order.
-const NAMES: [[&str; 2]; 14] = [
+const NAMES: [[&str; 2]; 15] = [
     ["gallery-buttons-1x", "gallery-buttons-2x"],
     ["gallery-toggles-1x", "gallery-toggles-2x"],
     ["gallery-radios-1x", "gallery-radios-2x"],
@@ -99,13 +99,14 @@ const NAMES: [[&str; 2]; 14] = [
     ["gallery-dock-1x", "gallery-dock-2x"],
     ["gallery-menus-1x", "gallery-menus-2x"],
     ["gallery-node-canvas-1x", "gallery-node-canvas-2x"],
+    ["gallery-overlays-1x", "gallery-overlays-2x"],
     ["gallery-materials-1x", "gallery-materials-2x"],
     ["gallery-typography-1x", "gallery-typography-2x"],
     ["gallery-motion-1x", "gallery-motion-2x"],
     ["gallery-theme-1x", "gallery-theme-2x"],
 ];
 
-const BUILDS: [fn(f32) -> Result<Shot, ShotError>; 14] = [
+const BUILDS: [fn(f32) -> Result<Shot, ShotError>; 15] = [
     page_shot::<0>,
     page_shot::<1>,
     page_shot::<2>,
@@ -120,6 +121,7 @@ const BUILDS: [fn(f32) -> Result<Shot, ShotError>; 14] = [
     page_shot::<11>,
     page_shot::<12>,
     page_shot::<13>,
+    page_shot::<14>,
 ];
 
 /// The gallery scenes.

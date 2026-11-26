@@ -418,7 +418,11 @@ impl Render for Toasts {
             let id = item.id;
             let t = &item.toast;
             let sem = t.semantics();
-            let mut col = div().key("text").flex_col().w(text_w);
+            let mut col = div()
+                .key("text")
+                .flex_col()
+                .w(text_w)
+                .style(|s| s.flex_shrink = 0.0);
             if let Some(title) = &t.title {
                 col = col.child(
                     text(title.clone())
@@ -457,6 +461,7 @@ impl Render for Toasts {
                     div()
                         .key("dot")
                         .size(8.0, 8.0)
+                        .style(|s| s.flex_shrink = 0.0)
                         .rounded(4.0)
                         .bg(t.tone.color(&theme))
                         .hit_test(false),

@@ -60,7 +60,11 @@ everything.
 | Widget | Kind | Semantics (core role) | Keyboard |
 |---|---|---|---|
 | `Button` (primary, secondary, ghost, destructive) | builder | Button (Button) | Space/Enter activate |
-| `IconButton` | builder | Button, named by its label | Space/Enter activate |
+| `IconButton` | builder | Button, named by its label; toggle style reports toggled | Space/Enter activate |
+| `Tabs` | view, `Model<usize>` | TabList with Tab parts (TabList / Tab) | one tab stop; Left/Right (no wrap), Home/End; Delete/Backspace close |
+| `Popover` | view | Popover group named by its label (Group); trigger reports expanded | Escape closes; Tab stays inside |
+| `Dialog` (also sheet) | view | Dialog named by the title, described by the message (Dialog) | Tab trapped; Enter default, Escape cancel |
+| `Toasts` | view, `Toast` values | each toast a live region: Status (polite) or Alert (danger) (Status / Alert) | Escape in a toast dismisses |
 | `Toggle` | builder | Switch, toggled (Switch) | Space/Enter flip |
 | `Checkbox` | builder | CheckBox, toggled incl. mixed (CheckBox) | Space/Enter: mixed/unchecked → checked → unchecked |
 | `Radio` | builder | RadioButton, selected (RadioButton, checked = selected) | Space/Enter select |
@@ -92,6 +96,14 @@ the danger color, secondary a raised surface with a hairline, ghost has no
 surface until hovered. The icon slot of `IconButton` is a sized placeholder
 box named `icon:<name>` until the icon atlas exists.
 
+`IconButton` icons are Boxicons names (`bx-trash`); until the icon atlas
+exists the slot is the placeholder box `icon:<name>`. Sizes are `IconSize`
+14/16/20/24 (the button is the icon plus 5 px each side; without `size` the
+icon and button follow the density). Styles (`IconButtonStyle`): plain,
+`filled()` (accent, or the `ButtonVariant` color) and `toggle(on)`, which
+sits on the same raised pill as the selected segment while on and is
+exposed as a toggle button. `tooltip(&env)` shows the label as a tooltip.
+
 ### Toggle, Checkbox, Radio, RadioGroup
 
 The switch thumb and the check mark / radio dot spring between states and
@@ -103,6 +115,65 @@ label) is the click and focus target.
 Equal-width segments on a track; the selected segment sits on a pill that
 slides with the standard spring (no visible overshoot in the snappy profile,
 settles in well under a second, keeps velocity when retargeted).
+
+### Tabs
+
+`Tabs::new(&env, selected, ["Scene", ...])` (`TabItem` for per-tab
+`closable`/`disabled`). The selected tab sits on a raised pill (D60): dark,
+a lighter pill on a darker track; light, a bright pill on a slightly darker
+track, with only the faint `e1` contact shadow. The pill's position and
+width spring with the Standard class of the `tabs` motion scope (velocity
+kept when retargeted; instant under Reduce Motion). Tabs are as wide as
+their title (56 to 220 px) and the bar is never wider than its container;
+when tabs do not fit it scrolls horizontally (wheel, trackpad; a vertical
+wheel also works) and choosing a tab scrolls it into view. Scrolling is a
+simple spring, without the momentum of `ScrollView`. Close buttons
+(`close:<title>`) remove the tab, choose the tab that took its place and
+call `on_close(index)`; `Tabs::push` and `Tabs::close` do the same from
+code. Keys (context `Tabs`): Left/Right, Home/End, Delete/Backspace
+(`tabs.close`).
+
+### Popover
+
+`Popover::new(&env, |app| content).trigger(|theme| element).placement(..)
+.size(w, h)`; or `Popover::open_at(view, app, anchor, restore)`. An
+arrow-less Glass panel placed top, bottom, left or right of the anchor by
+`place_popover`: the preferred side if it fits, else the opposite side if
+that fits, else the roomier one, always clamped to an 8 px margin. It fades
+in and slides 4 px away from the anchor (no scale, D61) and fades out when
+closed; under Reduce Motion the slide is instant. Escape and a click
+outside (consumed by a scrim) close it; focus moves into the panel (Tab
+stays in it) and returns to the trigger. Overlay layers (`OverlayKind::Layer`)
+know when they are leaving, so closing animates and removal happens after
+0.2 s (at once when motion is instant).
+
+### Dialog and sheet
+
+`Dialog::new(&env, title).message(..).button(DialogButton::new("Delete")
+.destructive().default_button().on_press(..))`, `.sheet()` for a sheet
+attached to the window's top edge. A scrim (black at 45% dark, 25% light)
+takes every press (`dismiss_on_scrim` makes it cancel). Focus goes to the
+default button and Tab cycles inside the scrim and panel (a focus scope);
+Enter presses the default button unless a button has focus (then that
+one), Escape presses the cancel button (or just closes). Any button closes
+and then runs its callback; focus returns to the opener. Dialogs fade in and
+slide 8 px; sheets slide down from above the window with the Large class;
+neither scales; both fade out. Height is measured from the wrapped title and
+message plus `content(height, ..)`.
+
+### Toasts
+
+`Toasts::new(&env, app)` once per app, then `Toasts::show(view, app,
+Toast::new("Saved").title(..).tone(..).action("Undo", f).duration(..)
+.sticky())`. Toasts stack at the bottom right (newest lowest, at most
+four); older ones move up with the Standard spring. They slide in from the
+right while fading (the slide is instant under Reduce Motion) and fade out
+after `TOAST_DURATION` (4 s) counted with the frame clock; the countdown
+pauses while the pointer is over a toast or focus is on its buttons. The
+action button runs and dismisses; the close button and Escape dismiss.
+Each toast is a live region: `Status` (AccessKit Status, polite) or `Alert`
+(assertive) for the danger tone. A stack with a timed toast renders every
+frame; with none it is idle.
 
 ### Slider
 
@@ -323,7 +394,9 @@ pixel fade instead of disappearing.
 - Caret blink, cursor shapes, IME placement, the system clipboard and
   window requests come from `livspeil-ui-host-winit` (`docs/ui-host.md`);
   headless hosts have none of them.
-- Popups and tooltips are removed without an exit animation.
+- Select popups, menus and tooltips are removed without an exit animation (popovers, dialogs and toasts fade out).
+- Dialogs do not yet mark the content behind them inert for assistive technology (the scrim only blocks pointer input and Tab), and AccessKit's modal flag is not set.
+- Scrim colors are black with an alpha, not a theme token.
 - Scroll release is inferred from a 60 ms pause in pixel deltas (no touch
   phases from hosts yet); Alt alone does not focus the menu bar (no
   modifier-only key events), use F10.
