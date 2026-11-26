@@ -63,6 +63,7 @@
 mod button;
 mod dock;
 mod env;
+mod icon_button;
 pub mod keymap;
 mod label;
 mod menu;
@@ -80,9 +81,10 @@ mod titlebar;
 mod toggle;
 mod tooltip;
 
-pub use button::{Button, ButtonVariant, IconButton};
+pub use button::{Button, ButtonVariant};
 pub use dock::{DockView, PANEL_SCOPE, Panel, PanelMaterial, SlotFn};
 pub use env::{Clipboard, Env, MemoryClipboard, WidgetRoot};
+pub use icon_button::{IconButton, IconButtonStyle, IconSize};
 pub use keymap::{WIDGET_KEYMAP, keymap};
 pub use label::{Label, Tone};
 pub use menu::{

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Livspeil contributors
 // SPDX-License-Identifier: MPL-2.0
 
-//! [`Button`] and [`IconButton`].
+//! [`Button`] (see `icon_button.rs` for the icon button).
 
 use std::rc::Rc;
 
@@ -26,7 +26,7 @@ pub enum ButtonVariant {
 }
 
 /// Fill colors of a variant: (rest, hover, pressed, text).
-fn palette(theme: &Theme, variant: ButtonVariant) -> (Color, Color, Color, Color) {
+pub(crate) fn palette(theme: &Theme, variant: ButtonVariant) -> (Color, Color, Color, Color) {
     let c = theme.colors();
     match variant {
         ButtonVariant::Primary => {
@@ -59,7 +59,7 @@ fn palette(theme: &Theme, variant: ButtonVariant) -> (Color, Color, Color, Color
 
 /// Shared chrome of buttons: fill, hover/press/focus refinements animated
 /// with the micro spring, focusability and the click handler.
-fn chrome(
+pub(crate) fn chrome(
     theme: &Theme,
     variant: ButtonVariant,
     disabled: bool,
@@ -192,95 +192,6 @@ impl Button {
                     .name("label")
                     .font_size(m.font)
                     .text_color(fg)
-                    .hit_test(false),
-            );
-        sem.apply(el)
-    }
-}
-
-/// A square button showing an icon. The icon is a placeholder slot (a
-/// sized, outlined box named `icon:<name>`) until the icon atlas lands.
-/// The label is required: it is the accessible name (and the tooltip text
-/// callers usually attach).
-#[derive(Clone)]
-pub struct IconButton {
-    icon: SharedString,
-    label: SharedString,
-    variant: ButtonVariant,
-    disabled: bool,
-    on_click: Option<ClickFn>,
-}
-
-impl std::fmt::Debug for IconButton {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("IconButton")
-            .field("icon", &self.icon)
-            .field("label", &self.label)
-            .finish_non_exhaustive()
-    }
-}
-
-impl IconButton {
-    /// A ghost icon button with icon `icon` (Boxicons name) and accessible
-    /// `label`.
-    #[must_use]
-    pub fn new(icon: impl Into<SharedString>, label: impl Into<SharedString>) -> Self {
-        IconButton {
-            icon: icon.into(),
-            label: label.into(),
-            variant: ButtonVariant::Ghost,
-            disabled: false,
-            on_click: None,
-        }
-    }
-
-    /// Set the variant.
-    #[must_use]
-    pub fn variant(mut self, v: ButtonVariant) -> Self {
-        self.variant = v;
-        self
-    }
-
-    /// Disable.
-    #[must_use]
-    pub fn disabled(mut self, disabled: bool) -> Self {
-        self.disabled = disabled;
-        self
-    }
-
-    /// Click handler.
-    #[must_use]
-    pub fn on_click(mut self, f: impl Fn(&ClickEvent, &mut EventCx<'_>) + 'static) -> Self {
-        self.on_click = Some(Rc::new(f));
-        self
-    }
-
-    /// Semantics: `Button` named by the label.
-    #[must_use]
-    pub fn semantics(&self) -> Semantics {
-        Semantics::new(Role::Button)
-            .label(&*self.label)
-            .interactive(
-                self.disabled,
-                &[SemanticAction::Click, SemanticAction::Focus],
-            )
-    }
-
-    /// Build the element (name `icon-button:<label>`).
-    #[must_use]
-    pub fn render(self, theme: &Theme) -> Element {
-        let m = metrics(theme);
-        let (.., fg) = palette(theme, self.variant);
-        let sem = self.semantics();
-        let el = chrome(theme, self.variant, self.disabled, self.on_click)
-            .name(format!("icon-button:{}", self.label))
-            .w(m.height)
-            .child(
-                div()
-                    .name(format!("icon:{}", self.icon))
-                    .size(m.icon, m.icon)
-                    .rounded(theme.tokens.radii.xs)
-                    .border(1.5, fg.with_alpha(fg.alpha * 0.8))
                     .hit_test(false),
             );
         sem.apply(el)
