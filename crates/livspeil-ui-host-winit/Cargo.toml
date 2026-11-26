@@ -31,10 +31,14 @@ winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "
 arboard = { version = "3.7", default-features = false }
 log = "0.4"
 # Platform accessibility (VoiceOver, AT-SPI, UIA) for the winit window.
-accesskit_winit = { version = "0.34.2", default-features = false, features = ["accesskit_unix", "async-io", "rwh_06"] }
+accesskit_winit = { version = "0.34.2", default-features = false, features = ["rwh_06"] }
 
 [features]
-default = ["widgets"]
+default = ["widgets", "atspi"]
+# Linux AT-SPI (Orca) through AccessKit: pulls in zbus and an async runtime
+# (async-io). Turn off with `default-features = false` to drop that stack;
+# macOS and Windows accessibility are unaffected.
+atspi = ["accesskit_winit/accesskit_unix", "accesskit_winit/async-io"]
 # `PaintRenderer` (livspeil-ui-paint) and the clipboard bridge for
 # livspeil-ui-widgets' `Env`.
 widgets = ["dep:livspeil-ui-paint", "dep:livspeil-ui-widgets"]
