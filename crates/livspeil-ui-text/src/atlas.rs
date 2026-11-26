@@ -34,6 +34,23 @@ impl AtlasRect {
     }
 }
 
+/// What an atlas entry is a picture of. Glyphs and other coverage masks
+/// (icons) share one atlas, so they upload and batch together.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AtlasKey {
+    /// A font glyph.
+    Glyph(GlyphKey),
+    /// An icon: the caller's icon number and its physical pixel size
+    /// (`f32::to_bits`).
+    Icon { icon: u32, size_bits: u32 },
+}
+
+impl From<GlyphKey> for AtlasKey {
+    fn from(key: GlyphKey) -> Self {
+        AtlasKey::Glyph(key)
+    }
+}
+
 /// Where a glyph lives in the atlas and how to place it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AtlasEntry {
@@ -68,7 +85,7 @@ pub struct GlyphAtlas {
     height: u32,
     pixels: Vec<u8>,
     allocator: AtlasAllocator,
-    entries: HashMap<GlyphKey, AtlasEntry>,
+    entries: HashMap<AtlasKey, AtlasEntry>,
     dirty: Vec<AtlasRect>,
     generation: u64,
 }
@@ -78,7 +95,7 @@ impl fmt::Debug for GlyphAtlas {
         f.debug_struct("GlyphAtlas")
             .field("width", &self.width)
             .field("height", &self.height)
-            .field("glyphs", &self.entries.len())
+            .field("entries", &self.entries.len())
             .field("dirty", &self.dirty.len())
             .field("generation", &self.generation)
             .finish_non_exhaustive()
@@ -120,7 +137,7 @@ impl GlyphAtlas {
         self.generation
     }
 
-    /// Number of cached glyphs (including blank ones).
+    /// Number of cached glyphs and icons (including blank ones).
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -132,8 +149,8 @@ impl GlyphAtlas {
     }
 
     #[must_use]
-    pub fn get(&self, key: &GlyphKey) -> Option<AtlasEntry> {
-        self.entries.get(key).copied()
+    pub fn get(&self, key: impl Into<AtlasKey>) -> Option<AtlasEntry> {
+        self.entries.get(&key.into()).copied()
     }
 
     /// Look up `key`, rasterizing with `rasterize` on a miss. A `None`
@@ -144,9 +161,10 @@ impl GlyphAtlas {
     /// [`TextError::GlyphTooLarge`] when the glyph can never fit.
     pub fn get_or_insert_with(
         &mut self,
-        key: GlyphKey,
+        key: impl Into<AtlasKey>,
         rasterize: impl FnOnce() -> Option<GlyphMask>,
     ) -> Result<AtlasEntry, TextError> {
+        let key = key.into();
         if let Some(entry) = self.entries.get(&key) {
             return Ok(*entry);
         }
@@ -162,9 +180,13 @@ impl GlyphAtlas {
     ///
     /// # Errors
     /// As for [`GlyphAtlas::get_or_insert_with`].
-    pub fn insert(&mut self, key: GlyphKey, mask: &GlyphMask) -> Result<AtlasEntry, TextError> {
+    pub fn insert(
+        &mut self,
+        key: impl Into<AtlasKey>,
+        mask: &GlyphMask,
+    ) -> Result<AtlasEntry, TextError> {
         let entry = self.place(mask)?;
-        self.entries.insert(key, entry);
+        self.entries.insert(key.into(), entry);
         Ok(entry)
     }
 

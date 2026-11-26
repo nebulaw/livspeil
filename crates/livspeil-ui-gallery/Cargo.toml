@@ -26,6 +26,7 @@ log = "0.4"
 [dev-dependencies]
 livspeil-ui-a11y = { path = "../livspeil-ui-a11y" }
 livspeil-ui-paint = { path = "../livspeil-ui-paint" }
+livspeil-ui-render = { path = "../livspeil-ui-render" }
 
 [features]
 default = ["app"]
@@ -35,6 +36,10 @@ app = ["dep:livspeil-ui-host-winit", "dep:livspeil-ui-paint"]
 name = "livspeil-ui-gallery"
 path = "src/main.rs"
 required-features = ["app"]
+
+[[bench]]
+name = "frame_phases"
+harness = false
 
 [lints]
 workspace = true

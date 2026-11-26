@@ -79,6 +79,20 @@ pub struct TextRun {
     pub color: Color,
 }
 
+/// An icon: the renderer rasterizes the named shape for its size on screen
+/// (`livspeil-ui-paint` with `livspeil-ui-icons`) and tints it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IconRun {
+    /// The element that painted it.
+    pub element: ElementId,
+    /// Layout box; the icon is the largest square centered in it.
+    pub rect: Rect,
+    /// Icon name.
+    pub name: SharedString,
+    /// Color.
+    pub color: Color,
+}
+
 /// One paint command. Push/Pop pairs nest.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PaintCmd {
@@ -103,6 +117,8 @@ pub enum PaintCmd {
     Quad(Quad),
     /// Draw text.
     Text(TextRun),
+    /// Draw an icon.
+    Icon(IconRun),
     /// Stroke a wire (cubic Bézier).
     Wire(crate::wire::Wire),
 }
@@ -216,6 +232,16 @@ impl Scene {
                     }
                     let _ = write!(out, " color={}", color(t.color));
                 }
+                PaintCmd::Icon(i) => {
+                    let _ = write!(
+                        out,
+                        "icon {} {} {} color={}",
+                        name(i.element),
+                        i.rect,
+                        i.name,
+                        color(i.color)
+                    );
+                }
                 PaintCmd::Wire(w) => {
                     let p = |p: livspeil_ui_layout::Point| format!("{},{}", num(p.x), num(p.y));
                     let _ = write!(
@@ -293,6 +319,16 @@ fn paint_node(input: &PaintInput<'_>, id: ElementId, scene: &mut Scene, stats: &
         .map(|e| (e, input.theme.shadow(e)));
     let fill = match material {
         Some((_, r)) if r.tint.alpha > 0.0 => Some(Fill::Solid(r.tint)),
+        _ if v.gradient.is_some() => v.gradient.map(|g| {
+            let r = node.bounds;
+            let at = |f: f32| Vec2::new(r.x + r.width * f, r.y);
+            Fill::LinearGradient {
+                start: at(g.start),
+                end: at(g.end),
+                from: g.from,
+                to: g.to,
+            }
+        }),
         _ if bg.alpha > 0.0 => Some(Fill::Solid(bg)),
         _ => None,
     };
@@ -329,6 +365,14 @@ fn paint_node(input: &PaintInput<'_>, id: ElementId, scene: &mut Scene, stats: &
             text: t.text.clone(),
             font: t.font(input.theme),
             color: t.color.unwrap_or(input.theme.colors().text_primary),
+        }));
+    }
+    if let Some(i) = &node.icon {
+        cmds.push(PaintCmd::Icon(IconRun {
+            element: id,
+            rect: node.bounds,
+            name: i.name.clone(),
+            color: i.color.unwrap_or(input.theme.colors().text_primary),
         }));
     }
     let o = node.bounds.origin();

@@ -18,11 +18,13 @@ Status: **Phase 0 (kernel) and Phase 1 (UI toolkit)**. This repository holds the
 | `crates/livspeil-script` | Script worker host: out-of-process scripts, capabilities, limits (M0.14) |
 | `crates/livspeil-wasm-host` | Sandboxed WebAssembly node packages (third-party Charms in process) |
 | `crates/livspeil-cli` | `livspeil` headless command line (`validate`, `fmt`, `cook`, `diff`, `assets`, `run`) |
+| `crates/livspeil-floor` | The Floor, Livspeil's Wayland compositor (Smithay), Linux only: spike with a nested build and a bare-metal skeleton; see `docs/decisions/floor-renderer.md` (GPL-3.0-or-later) |
 | `crates/livspeil-ui-core` | UI core: models, views, element diffing, input and focus, animation driver, frame loop, paint list (MPL-2.0, like every UI crate) |
 | `crates/livspeil-ui-layout` | Geometry, Taffy flex/grid/block layout over a retained tree, dock and infinite-canvas layouts |
 | `crates/livspeil-ui-theme` | Design tokens, materials, motion profiles, theme/motion config loading and hot reload |
 | `crates/livspeil-ui-render` | Display list, wgpu renderer (quads, materials with backdrop blur, glyphs) and CPU reference rasterizer |
 | `crates/livspeil-ui-text` | Text shaping, layout, editing model and glyph atlas (on Parley) |
+| `crates/livspeil-ui-icons` | The embedded Boxicons set and its coverage rasterizer (MPL-2.0 code; the icons are CC BY 4.0) |
 | `crates/livspeil-ui-paint` | Paint bridge: core scenes to display lists, cached text shaping and glyph atlas uploads |
 | `crates/livspeil-ui-widgets` | Widgets: buttons, toggles, check boxes, radios, segmented control, slider, number and text fields, select, tooltip |
 | `crates/livspeil-ui-a11y` | Accessibility: incremental AccessKit trees from the UI core and action routing |
@@ -341,6 +343,20 @@ Things to look at:
 - **Hot reload**: edit `~/.config/livspeil/ui/{theme,motion,keymap}.toml`
   (see `docs/ui-config.md`) while it runs; the toolbar follows.
 - **Idle**: when nothing moves the process draws no frames.
+- **Frame HUD**: F3 shows or hides a frame-time overlay (bottom right),
+  F4 writes a summary and the per-frame CSV of the last 10 s to the frame
+  log (on macOS hold fn for F3 and F4). Start with it visible using
+  `--hud` or `LIVSPEIL_HUD=1`. It shows FPS, interval avg/p95/max, late
+  frames (interval over 1.5x the median), the CPU phases (build, paint,
+  encode, submit, acquire, present), wgpu backend, adapter, driver,
+  present mode, surface format, frame latency, scale factor and monitor
+  refresh rate. The log is `$XDG_STATE_HOME/livspeil/gallery-frames.log`
+  (`~/.local/state/livspeil/` by default; `~/Library/Logs/livspeil/` on
+  macOS); the path is printed at startup. Send that file when reporting
+  stutter. `LIVSPEIL_PRESENT_MODE=fifo|mailbox|immediate|auto` (or
+  `--present-mode=`) and `LIVSPEIL_FRAME_LATENCY=1..3` change how frames
+  are presented; the HUD shows what the surface actually uses. Details:
+  `docs/ui-host.md`, "Frame HUD and frame log".
 - **Window**: on macOS the gallery draws its own titlebar under the
   transparent native one (drag it to move the window, double-click to
   zoom). On Linux the window keeps the system's decorations.
@@ -355,6 +371,14 @@ C toolchain with `pkg-config` for the build):
   NVIDIA), and `fontconfig`. `mesa` provides the OpenGL ES fallback.
 - **Debian/Ubuntu**: `mesa-vulkan-drivers libfontconfig1-dev` (plus your
   vendor's driver on NVIDIA).
+
+Building the whole workspace on Linux also compiles the Floor
+(`livspeil-floor`), which needs the xkbcommon development files
+(`libxkbcommon` on Arch, `libxkbcommon-dev` on Debian/Ubuntu). Its `tty`
+feature additionally needs libseat, libinput, udev, GBM and DRM
+(`seatd libinput systemd-libs libdrm mesa` on Arch;
+`libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev` on Debian).
+macOS never builds the Floor.
 
 winit 0.30 picks the backend itself: Wayland when `WAYLAND_DISPLAY` (or
 `WAYLAND_SOCKET`) is set and not empty, otherwise X11 through `DISPLAY`.

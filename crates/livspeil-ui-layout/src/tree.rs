@@ -21,6 +21,7 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::fmt;
+use std::rc::Rc;
 
 use taffy::{AvailableSpace, NodeId, TaffyTree, compute_leaf_layout};
 
@@ -33,6 +34,49 @@ pub type Style = taffy::Style;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LayoutNode(NodeId);
 
+/// Shaped text: one box of its natural size until it is given less width,
+/// then as tall as it is when wrapped to that width.
+#[derive(Clone)]
+pub struct TextBlock {
+    natural: Size,
+    key: u64,
+    height_at: Rc<dyn Fn(f32) -> f32>,
+}
+
+impl TextBlock {
+    /// `natural` is the unwrapped size; `height_at` gives the height wrapped
+    /// to a narrower width. `key` identifies the content and font: blocks
+    /// with equal keys and natural sizes are taken to wrap alike.
+    #[must_use]
+    pub fn new(natural: Size, key: u64, height_at: impl Fn(f32) -> f32 + 'static) -> Self {
+        TextBlock {
+            natural,
+            key,
+            height_at: Rc::new(height_at),
+        }
+    }
+
+    /// The unwrapped size.
+    #[must_use]
+    pub fn natural(&self) -> Size {
+        self.natural
+    }
+}
+
+impl PartialEq for TextBlock {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key && self.natural == other.natural
+    }
+}
+
+impl fmt::Debug for TextBlock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TextBlock")
+            .field("natural", &self.natural)
+            .finish_non_exhaustive()
+    }
+}
+
 /// How a leaf measures its content.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub enum Measure {
@@ -41,6 +85,10 @@ pub enum Measure {
     None,
     /// A fixed intrinsic size.
     Fixed(Size),
+    /// Shaped text. Its intrinsic width is always the natural one (it never
+    /// makes a flex item shrinkable); when the layout settles on a narrower
+    /// width, the height is that of the wrapped text.
+    Text(TextBlock),
     /// A text size estimate for when no shaper is available (the UI core
     /// uses it for text without an installed text measurer, e.g. headless
     /// tests): `chars` glyphs of average advance `0.55 × font_size`, lines
@@ -66,6 +114,14 @@ impl Measure {
         let (w, h) = match self {
             Measure::None => (0.0, 0.0),
             Measure::Fixed(s) => (s.width, s.height),
+            Measure::Text(t) => {
+                // Half a pixel of rounding slack, as the painter allows.
+                let height = match known.width {
+                    Some(w) if w > 0.0 && w + 0.5 < t.natural.width => (t.height_at)(w),
+                    _ => t.natural.height,
+                };
+                (t.natural.width, height)
+            }
             Measure::TextPlaceholder {
                 chars,
                 font_size,
@@ -384,8 +440,14 @@ impl LayoutTree {
     }
 
     /// Pixel-snap the subtree under `root`, like Taffy's own rounding (edges
-    /// are rounded in absolute coordinates, so adjacent boxes stay flush),
-    /// but walking real children instead of hoisted lists.
+    /// are rounded in a shared frame, so adjacent boxes stay flush), but
+    /// walking real children instead of hoisted lists.
+    ///
+    /// Unlike Taffy, every out-of-flow box starts a new frame: its size is
+    /// rounded on its own and its subtree is rounded relative to its origin.
+    /// Moving such a box by a fraction of a pixel therefore never shifts or
+    /// resizes its contents relative to it (a dragged node card and its
+    /// labels move as one).
     fn round(&mut self, root: NodeId) {
         // (node, unrounded absolute origin) for the ancestor chain.
         let mut chain: Vec<(NodeId, f32, f32)> = Vec::new();
@@ -416,15 +478,20 @@ impl LayoutTree {
             let l = self.taffy.unrounded_layout(node);
             let x = bx + l.location.x;
             let y = by + l.location.y;
-            let rect = Rect::new(
-                round(x) - round(px),
-                round(y) - round(py),
-                round(x + l.size.width) - round(x),
-                round(y + l.size.height) - round(y),
-            );
+            let new_frame = out_of_flow && !chain.is_empty();
+            let (width, height) = if new_frame {
+                (round(l.size.width), round(l.size.height))
+            } else {
+                (
+                    round(x + l.size.width) - round(x),
+                    round(y + l.size.height) - round(y),
+                )
+            };
+            let rect = Rect::new(round(x) - round(px), round(y) - round(py), width, height);
             self.rects.insert(node, rect);
             let depth = chain.len();
-            chain.push((node, x, y));
+            let (fx, fy) = if new_frame { (0.0, 0.0) } else { (x, y) };
+            chain.push((node, fx, fy));
             if let Ok(children) = self.taffy.children(node) {
                 stack.extend(children.into_iter().rev().map(|c| (c, Some(depth))));
             }

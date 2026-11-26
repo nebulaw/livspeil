@@ -8,7 +8,7 @@ mod common;
 
 use common::{center, find, golden_dir, host, scene, wait};
 use livspeil_testkit::assert_golden;
-use livspeil_ui_core::{Model, Role, TestHost, Toggled, div};
+use livspeil_ui_core::{IconRun, Model, PaintCmd, Role, TestHost, Toggled, div};
 use livspeil_ui_theme::{Scheme, Theme};
 use livspeil_ui_widgets::{
     ButtonVariant, IconButton, IconButtonStyle, IconSize, Semantics, TOOLTIP_DELAY,
@@ -168,24 +168,32 @@ fn styles_render_distinct_fills_in_both_themes() {
                                 .render(&theme),
                         )
                     })
-                    .child(IconButton::new("bx-plus", "Add").filled().render(&theme))
                     .child(
-                        IconButton::new("bx-trash", "Remove")
+                        IconButton::new("bx-grid-plus", "Add")
+                            .filled()
+                            .render(&theme),
+                    )
+                    .child(
+                        IconButton::new("bx-copy", "Remove")
                             .style(IconButtonStyle::Filled)
                             .variant(ButtonVariant::Destructive)
                             .render(&theme),
                     )
                     .child(
-                        IconButton::new("bx-pin", "Pinned")
+                        IconButton::new("bx-bookmark-alt", "Pinned")
                             .toggle(true)
                             .render(&theme),
                     )
                     .child(
-                        IconButton::new("bx-pin", "Unpinned")
+                        IconButton::new("bx-bookmark-alt", "Unpinned")
                             .toggle(false)
                             .render(&theme),
                     )
-                    .child(IconButton::new("bx-x", "Off").disabled(true).render(&theme))
+                    .child(
+                        IconButton::new("bx-unlink", "Off")
+                            .disabled(true)
+                            .render(&theme),
+                    )
             })
         });
         h.run_until_idle(100);
@@ -195,4 +203,42 @@ fn styles_render_distinct_fills_in_both_themes() {
         };
         assert_golden(&golden_dir(), name, &scene(&h));
     }
+}
+
+fn icons_drawn(h: &TestHost) -> Vec<IconRun> {
+    h.scene()
+        .expect("a frame")
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            PaintCmd::Icon(i) => Some(i.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_icon_is_painted_in_the_foreground_color() {
+    let (h, _) = host(|_, _| {
+        Box::new(|cx| {
+            let theme = cx.theme().clone();
+            div()
+                .flex_row()
+                .p(8.0)
+                .gap(8.0)
+                .child(IconButton::new("bx-copy", "Plain").render(&theme))
+                .child(IconButton::new("bx-gear", "On").toggle(true).render(&theme))
+                .child(IconButton::new("bx-star", "Filled").filled().render(&theme))
+        })
+    });
+    let drawn = icons_drawn(&h);
+    let names: Vec<&str> = drawn.iter().map(|i| &*i.name).collect();
+    assert_eq!(names, ["bx-copy", "bx-gear", "bx-star"]);
+    let theme = Theme::default();
+    assert_eq!(drawn[0].color, theme.colors().text_primary);
+    assert_eq!(drawn[1].color, theme.accent(), "an on toggle is accented");
+    assert_ne!(drawn[2].color, drawn[0].color, "on_accent, not plain text");
+    // Centered in the button.
+    let button = h.app.bounds(find(&h, "icon-button:Plain")).unwrap();
+    assert_eq!(drawn[0].rect.center(), button.center());
 }

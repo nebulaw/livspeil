@@ -8,9 +8,10 @@
 //! sized by a character-count estimate.
 
 use std::fmt;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::rc::Rc;
 
-use livspeil_ui_layout::{Measure, Size};
+use livspeil_ui_layout::{Measure, Size, TextBlock};
 
 use crate::app::App;
 use crate::element::TextSpec;
@@ -83,6 +84,34 @@ pub trait TextMeasurer {
     /// The natural (unwrapped) size of `text` in `font`: the advance of its
     /// longest line and the height of all its lines.
     fn measure(&self, text: &str, font: &FontSpec) -> Size;
+
+    /// The height of `text` wrapped to `width`.
+    ///
+    /// The default breaks greedily after spaces and hyphens, measuring each
+    /// candidate line with [`TextMeasurer::measure`]; words wider than
+    /// `width` keep a line to themselves, as the renderer lets them
+    /// overflow. A measurer with a real line breaker should override it.
+    fn wrapped_height(&self, text: &str, font: &FontSpec, width: f32) -> f32 {
+        let height = |line: &str| {
+            let line = line.trim_end();
+            self.measure(if line.is_empty() { "x" } else { line }, font)
+                .height
+        };
+        let mut total = 0.0;
+        for paragraph in text.split('\n') {
+            let mut line = String::new();
+            for word in paragraph.split_inclusive([' ', '-']) {
+                let before = line.len();
+                line.push_str(word);
+                if before > 0 && self.measure(line.trim_end(), font).width > width + 0.5 {
+                    total += height(&line[..before]);
+                    line.drain(..before);
+                }
+            }
+            total += height(&line);
+        }
+        total
+    }
 }
 
 /// The installed measurer.
@@ -113,15 +142,26 @@ impl App {
     }
 }
 
-/// The layout measure of a text element. Measured text is one fixed box
-/// (wrapping by the available width needs a measure callback in
-/// `livspeil-ui-layout`; until then wrapped paragraphs get an explicit
-/// size from their view).
+/// The layout measure of a text element: its natural size, and the wrapped
+/// height when layout gives it less width than that.
 pub(crate) fn text_measure(app: &App, t: &TextSpec) -> Measure {
     let font = t.font(app.theme());
     let size = font.size;
     match &app.text_measurer.0 {
-        Some(m) => Measure::Fixed(m.measure(&t.text, &font)),
+        Some(m) => {
+            let natural = m.measure(&t.text, &font);
+            let mut key = DefaultHasher::new();
+            t.text.hash(&mut key);
+            font.size.to_bits().hash(&mut key);
+            font.weight.to_bits().hash(&mut key);
+            for f in &font.features {
+                (f.tag, f.value).hash(&mut key);
+            }
+            let (m, text) = (m.clone(), t.text.clone());
+            Measure::Text(TextBlock::new(natural, key.finish(), move |width| {
+                m.wrapped_height(&text, &font, width)
+            }))
+        }
         None => Measure::TextPlaceholder {
             chars: u32::try_from(t.text.chars().count()).unwrap_or(u32::MAX),
             font_size: size,
@@ -166,6 +206,52 @@ mod tests {
                         .font_feature(FontFeature::TNUM),
                 )
         }
+    }
+
+    struct Paragraphs;
+
+    impl Render for Paragraphs {
+        fn render(&mut self, _cx: &mut ViewContext<'_, Self>) -> Element {
+            // Columns stretch their children to 100 px; the card's height
+            // follows the wrapped paragraph.
+            div().flex_col().w(100.0).child(
+                div()
+                    .name("card")
+                    .flex_col()
+                    .p(5.0)
+                    .child(text("aaaa bbbb cccc dddd").name("long").font_size(10.0))
+                    .child(text("ab").name("short").font_size(10.0)),
+            )
+        }
+    }
+
+    #[test]
+    fn text_narrower_than_its_natural_width_is_as_tall_as_its_lines() {
+        let mut app = App::new();
+        app.set_text_measurer(Rc::new(Fixed));
+        let view = app.new_view(Paragraphs);
+        app.set_root(view);
+        let mut host = TestHost::new(app, Size::new(200.0, 200.0));
+        host.run_until_idle(10);
+        let b = |n: &str| host.app.bounds(host.app.find(n).unwrap()).unwrap();
+        // 90 px hold nine 10 px glyphs: "aaaa bbbb" / "cccc dddd", 20 px
+        // lines.
+        assert_eq!((b("long").width, b("long").height), (90.0, 40.0));
+        assert_eq!(b("short").height, 20.0);
+        assert_eq!(b("card").height, 70.0);
+        assert_eq!(b("short").y, b("long").bottom());
+    }
+
+    #[test]
+    fn the_default_wrap_breaks_after_spaces_and_hyphens() {
+        let font = FontSpec::sized(10.0);
+        let h = |s: &str, w: f32| Fixed.wrapped_height(s, &font, w);
+        assert_eq!(h("aaaa bbbb", 200.0), 20.0);
+        assert_eq!(h("aaaa bbbb", 40.0), 40.0);
+        assert_eq!(h("aaaa-bbbb", 50.0), 40.0);
+        // A word wider than the line overflows on a line of its own.
+        assert_eq!(h("aaaaaaaaaa b", 40.0), 40.0);
+        assert_eq!(h("a\n\nb", 40.0), 60.0);
     }
 
     #[test]

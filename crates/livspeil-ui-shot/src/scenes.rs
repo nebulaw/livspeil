@@ -393,6 +393,7 @@ pub fn scenes() -> Vec<Scene> {
     v.extend(crate::containers::scenes());
     v.extend(crate::gallery::scenes());
     v.extend(crate::overlays::scenes());
+    v.extend(crate::icons::scenes());
     v
 }
 

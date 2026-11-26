@@ -8,7 +8,7 @@
 use livspeil_ui_core::{
     Animated, App, Element, FontFeature, Model, Role, View, ViewContext, div, text,
 };
-use livspeil_ui_layout::style::length;
+use livspeil_ui_layout::style::{AlignItems, FlexWrap, length};
 use livspeil_ui_layout::{Rect, Vec2};
 use livspeil_ui_theme::{Color, Density, Material, MotionClass, Scheme, SpringSpec, Theme, Tier};
 use livspeil_ui_widgets::{
@@ -253,6 +253,7 @@ pub(crate) fn card(theme: &Theme, title: &'static str) -> Element {
         .p(16.0)
         .rounded(theme.tokens.radii.md)
         .material(Material::Solid)
+        .name(format!("card:{title}"))
         .semantics(|s| s.role(Role::Group).label(title))
         .child(
             text(title.to_uppercase())
@@ -262,21 +263,30 @@ pub(crate) fn card(theme: &Theme, title: &'static str) -> Element {
         )
 }
 
+/// A row of controls that wraps onto more lines when the window is narrow.
 pub(crate) fn row() -> Element {
-    div().flex_row().items_center().gap(12.0)
+    div()
+        .flex_row()
+        .items_center()
+        .gap(12.0)
+        .style(|s| s.flex_wrap = FlexWrap::Wrap)
 }
 
-/// Two equal columns.
+/// Narrowest column of [`columns`] before the two stack.
+const COLUMN_WIDTH: f32 = 300.0;
+
+/// Two equal columns, stacked when both do not fit.
 pub(crate) fn columns(left: Element, right: Element) -> Element {
     let col = |e: Element| {
         e.grow().style(|s| {
-            s.flex_basis = length(0.0);
+            s.flex_basis = length(COLUMN_WIDTH);
             s.min_size.width = length(0.0);
         })
     };
     div()
         .flex_row()
         .gap(16.0)
+        .style(|s| s.flex_wrap = FlexWrap::Wrap)
         .child(col(left))
         .child(col(right))
 }
@@ -300,7 +310,7 @@ pub(crate) fn render(
     state: &State,
     env: &Env,
     view: View<Gallery>,
-    cx: &mut ViewContext<'_, Gallery>,
+    cx: &App,
 ) -> Element {
     let theme = cx.theme().clone();
     match page {
@@ -359,11 +369,11 @@ fn buttons(theme: &Theme, state: &State, env: &Env, cx: &App) -> Element {
             columns(
                 card(theme, "Icon buttons").child(
                     row()
-                        .child(icon("bx-trash", "Move to trash"))
+                        .child(icon("bx-bookmarks", "Bookmarks"))
                         .child(icon("bx-copy", "Duplicate"))
-                        .child(icon("bx-share", "Share"))
+                        .child(icon("bx-folder", "Open folder"))
                         .child(
-                            IconButton::new("bx-lock", "Locked")
+                            IconButton::new("bx-unlink", "Unlink")
                                 .disabled(true)
                                 .render(theme),
                         ),
@@ -621,7 +631,7 @@ fn selects(theme: &Theme, state: &State, env: &Env) -> Element {
             .child(row().child(
                 Tooltip::new("Icon buttons are named by their tooltip").attach(
                     env,
-                    IconButton::new("bx-info-circle", "Information").render(theme),
+                    IconButton::new("bx-message-circle-notification", "Information").render(theme),
                 ),
             ))
             .child(caption(theme, "Rest the pointer on a control.")),
@@ -647,10 +657,15 @@ fn materials(theme: &Theme) -> Element {
             .bg(color)
             .hit_test(false)
     };
-    let sample = |m: Material, name: &'static str, note: &'static str, x: f32, y: f32| {
+    // Staggered by `drop`; they wrap when the window is narrow.
+    let sample = |m: Material, name: &'static str, note: &'static str, drop: f32| {
         div()
             .key(name)
-            .absolute(Rect::new(x, y, 144.0, 104.0))
+            .size(144.0, 104.0)
+            .style(move |s| {
+                s.flex_shrink = 0.0;
+                s.margin.top = length(drop);
+            })
             .material(m)
             .rounded(theme.tokens.radii.lg)
             .flex_col()
@@ -677,7 +692,17 @@ fn materials(theme: &Theme) -> Element {
                 .key("stage")
                 .name("material-stage")
                 .w_full()
-                .h(area_h)
+                .style(move |s| {
+                    s.min_size.height = length(area_h);
+                    s.align_items = AlignItems::START;
+                    s.flex_wrap = FlexWrap::Wrap;
+                    s.flex_shrink = 0.0;
+                    s.padding.left = length(20.0);
+                    s.padding.top = length(40.0);
+                    s.padding.bottom = length(20.0);
+                })
+                .flex_row()
+                .gap(26.0)
                 .rounded(theme.tokens.radii.lg)
                 .clip()
                 .bg(Color::oklch(0.32, 0.08, 270.0, 1.0))
@@ -696,29 +721,25 @@ fn materials(theme: &Theme) -> Element {
                     Material::Solid,
                     "Solid",
                     "Dense tools and inspectors",
-                    20.0,
-                    40.0,
+                    0.0,
                 ))
                 .child(sample(
                     Material::Frost,
                     "Frost",
                     "Sidebars, docks, the menubar",
-                    190.0,
-                    110.0,
+                    70.0,
                 ))
                 .child(sample(
                     Material::Glass,
                     "Glass",
                     "Tooltips and menus",
-                    360.0,
-                    40.0,
+                    0.0,
                 ))
                 .child(sample(
                     Material::Ink,
                     "Ink",
                     "Text over the scene",
-                    530.0,
-                    110.0,
+                    70.0,
                 )),
         )
         .child(
@@ -809,13 +830,9 @@ fn typography(theme: &Theme) -> Element {
     )
 }
 
-fn motion(
-    theme: &Theme,
-    state: &State,
-    view: View<Gallery>,
-    cx: &mut ViewContext<'_, Gallery>,
-) -> Element {
-    let c = theme.colors();
+/// The Motion page's per-frame work, run while the gallery renders: follow
+/// the configured speed and step the playground spring.
+pub(crate) fn step_motion(state: &State, cx: &mut ViewContext<'_, Gallery>) {
     // Follow hot-reloaded speed changes.
     let speed_now = cx.motion().speed;
     if (*state.speed.read(cx) - speed_now).abs() > f32::EPSILON {
@@ -825,9 +842,15 @@ fn motion(
     let dt = cx.frame_delta();
     let ball = state.ball;
     let moving = ball.update(cx, |a, _| a.is_animating() && a.step(dt));
-    if moving {
+    // Reading the ball makes the gallery follow later animations of it.
+    if moving || ball.read(cx).is_animating() {
         cx.notify();
     }
+}
+
+fn motion(theme: &Theme, state: &State, view: View<Gallery>, cx: &App) -> Element {
+    let c = theme.colors();
+    let ball = state.ball;
     let pos = ball.read(cx).value();
     let flipped = *state.flipped.read(cx);
     let (response, damping) = (state.response, state.damping);

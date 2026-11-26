@@ -70,7 +70,7 @@ pub use app::{
     pointer,
 };
 pub use element::{
-    Element, ElementId, Phase, PointerFilter, Refinement, SharedString, Transition, div, text,
+    Element, ElementId, Phase, PointerFilter, Refinement, SharedString, Transition, div, icon, text,
 };
 pub use entity::{AnyView, EntityId, Model, ModelContext, Render, View, ViewContext};
 pub use host::{FrameScheduler, TestHost};
@@ -80,7 +80,7 @@ pub use input::{
 };
 pub use keymap::{Binding, KEYMAP_FILE, Keymap, actions};
 pub use paint::{
-    Border, Fill, PaintCmd, PaintStats, Painter, Quad, RecordingPainter, Scene, TextRun,
+    Border, Fill, IconRun, PaintCmd, PaintStats, Painter, Quad, RecordingPainter, Scene, TextRun,
 };
 pub use platform::{CursorShape, TextInputState};
 pub use semantics::{

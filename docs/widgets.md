@@ -55,6 +55,22 @@ content first and the overlay layer, an absolutely positioned box the size
 of the viewport, after it, so popups and tooltips paint and hit-test above
 everything.
 
+## Text layout
+
+A text element is one box of its natural (unwrapped) width. When layout gives
+it less width than that (a stretched child of a narrow column, a flex item
+with `min_size.width = 0`), it is as tall as its wrapped lines. Text never
+makes a flex item shrink by itself. The height comes from
+`TextMeasurer::wrapped_height`, whose default breaks greedily after spaces
+and hyphens.
+
+`Element::gradient_x(from, to, start, end)` fills an element with a
+left-to-right gradient (used by the tab fades).
+
+Popups (`Popover`, `Select`, `Tooltip`) anchor at `App::visual_bounds`, the
+element's position after its ancestors' transforms, so they open in the right
+place inside a scrolled view.
+
 ## Widgets
 
 | Widget | Kind | Semantics (core role) | Keyboard |
@@ -93,16 +109,31 @@ editing or popup state and write to their model.
 Rest, hover (+lightness), pressed (scale 0.97) and keyboard focus (focus-ring
 border) animate with the micro spring. Primary uses the accent, destructive
 the danger color, secondary a raised surface with a hairline, ghost has no
-surface until hovered. The icon slot of `IconButton` is a sized placeholder
-box named `icon:<name>` until the icon atlas exists.
+surface until hovered.
 
-`IconButton` icons are Boxicons names (`bx-trash`); until the icon atlas
-exists the slot is the placeholder box `icon:<name>`. Sizes are `IconSize`
+`IconButton` icons are Boxicons names (`bx-copy`) from the embedded set (see
+[Icons](#icons)), drawn in the button's foreground color; the icon element is
+named `icon:<name>`. Sizes are `IconSize`
 14/16/20/24 (the button is the icon plus 5 px each side; without `size` the
 icon and button follow the density). Styles (`IconButtonStyle`): plain,
 `filled()` (accent, or the `ButtonVariant` color) and `toggle(on)`, which
 sits on the same raised pill as the selected segment while on and is
 exposed as a toggle button. `tooltip(&env)` shows the label as a tooltip.
+
+### Icons
+
+`livspeil_ui_core::icon(name)` is a 16x16 element (set another size with
+`size`, a color with `text_color`; default: primary text color). The set is
+the 49 [Boxicons](../assets/icons/boxicons/README.md) files in
+`assets/icons/boxicons/` (CC BY 4.0); `livspeil_ui_icons::IconId::all` lists
+the names, and the `icons-*` screenshot scenes show them. It is a small set:
+there is no trash, plus, lock, pin or cross icon, for example.
+
+A name outside the set is not an error: it draws an outlined, rounded box of
+the icon's size in the icon's color, so the mistake is visible. Icons are
+decorative and absent from the accessibility tree; whatever shows one needs
+its own label (`IconButton` requires one). Toast close buttons use the "×"
+character, as tab close buttons do, because the set has no cross.
 
 ### Toggle, Checkbox, Radio, RadioGroup
 
@@ -126,8 +157,14 @@ width spring with the Standard class of the `tabs` motion scope (velocity
 kept when retargeted; instant under Reduce Motion). Tabs are as wide as
 their title (56 to 220 px) and the bar is never wider than its container;
 when tabs do not fit it scrolls horizontally (wheel, trackpad; a vertical
-wheel also works) and choosing a tab scrolls it into view. Scrolling is a
-simple spring, without the momentum of `ScrollView`. Close buttons
+wheel also works; the content moves with the delta, as in `ScrollView`) and
+choosing a tab by click or keys, the selected one included, scrolls it fully
+into view. An end that hides tabs fades into the track color (also on Frost,
+as the track is opaque) and shows a chevron (`tabs-more-left`,
+`tabs-more-right`) that scrolls 60% of the width without changing the
+selection; with no hidden tabs there is neither, and a bar that fits leaves
+wheel events to its ancestors. Scrolling is a simple spring, without the
+momentum of `ScrollView`. Close buttons
 (`close:<title>`) remove the tab, choose the tab that took its place and
 call `on_close(index)`; `Tabs::push` and `Tabs::close` do the same from
 code. Keys (context `Tabs`): Left/Right, Home/End, Delete/Backspace
@@ -296,7 +333,9 @@ content keeps its size and slides out.
 ### Menus
 
 `Menu::new().item(MenuItem::new("Save").action("app.save"))
-.separator().submenu("Arrange", sub)`. Items have a label, shortcut text
+.separator().submenu("Arrange", sub)`. Items have a label, an optional icon
+(`icon("bx-copy")`, 14 px in the check-mark column; check-mark items show only
+the check mark, and submenu entries have no icon), shortcut text
 (`shortcut(...)`, or the action's last global binding in the keymap,
 formatted `Ctrl+Shift+Z`), a check mark (`checked`), `disabled`, and
 `on_select`; choosing closes the menu, returns focus, runs `on_select` and
@@ -386,6 +425,14 @@ pixel fade instead of disappearing.
 
 ## Known gaps
 
+- `Menu`, `MenuBar` and `ContextMenu` still anchor at layout bounds, so a
+  menu bar inside a scrolled view opens its menus at the unscrolled position;
+  text field IME placement has the same limit.
+- Clips are rectangular: square children paint over rounded corners.
+- `ScrollView` clamps its offset again only at the next scroll after the
+  window grows.
+- `DockView` does not shrink panels below their minimums in a narrow
+  container.
 - Builders capture state when rendered; several key presses between two
   frames act on the same state (hosts draw a frame between events).
 - Focus changes made directly with `App::focus` are noticed by text and

@@ -262,3 +262,164 @@ commands. Journal replay is dominated by `serde_json` parsing (353 of
 not allocate; vector programs are about twice as expensive, and string
 programs allocate (`concat`, `str`, `upper`) and cost a few hundred
 nanoseconds. Compilation is in the low microseconds.
+
+## NodeCanvas frames and the Linux stutter (round 14)
+
+Report: in the gallery's NodeCanvas "Stress" mode the window stutters on
+the Linux desktop (Wayland, NVIDIA RTX 5070 Ti) with no input lag, and is
+smoother on a MacBook. This section records what was measured and read,
+what changed, and what still has to be measured on that machine with the
+frame HUD (`docs/ui-host.md`, "Frame HUD and frame log"). Nothing here was
+run on a GPU, a display, Wayland or macOS: the numbers are CPU-only, from
+the shared cloud VM above.
+
+### The CPU frame, split
+
+The owner's `cargo bench -p livspeil-ui-widgets --bench node_canvas` (CPU
+frame build only: render, diff, layout, core paint list; 2000 nodes, 3000
+links) gave 1.21 ms at zoom 1 (64 nodes, Full), 2.35 ms at zoom 0.4 (324,
+Compact) and 3.25 ms fit-all (2000, Block). That bench stops before the
+two steps that run on every real frame, so
+`cargo bench -p livspeil-ui-gallery --bench frame_phases` adds them: the
+paint bridge (scene to display list, wires flattened into rotated pill
+quads) and the encoder (display list to 320-byte GPU instances). Medians
+of 200 frames on the VM, microseconds:
+
+| | build | paint | encode | total |
+|---|---|---|---|---|
+| zoom 1, before | 2274 | 340 | 1220 | 3834 |
+| zoom 1, after | 2532 | 361 | 576 | 3470 |
+| zoom 0.4, before | 7082 | 959 | 3947 | 11989 |
+| zoom 0.4, after | 6675 | 862 | 1688 | 9224 |
+| fit-all, before | 8196 | 1086 | 4682 | 13964 |
+| fit-all, after | 9735 | 843 | 2041 | 12619 |
+
+Display list sizes: 9,031 items (zoom 1), 26,985 (0.4), 29,569 (fit-all),
+that is 2.9 to 9.5 MB of instance data uploaded per frame.
+
+Wall times on this VM drift by 25 % or more between runs: `build` is code
+this round barely touched and moved from 2.3 to 3.0 ms and back, and
+`graph_cache_build_2k` (untouched) went from 1.50 to 1.19 ms between two
+runs of the criterion bench. So the instruction counts from
+`valgrind --tool=callgrind` on the same bench (5 frames per
+configuration after warm-up, three configurations; `LIVSPEIL_BENCH_ITERS=5`)
+are the number to trust:
+
+| | before | after |
+|---|---|---|
+| whole run | 6.31 G | 5.45 G (-13.6 %) |
+| `encode` | 1.90 G | 1.28 G (-32 %) |
+| `NodeCanvas::render` | 1.03 G | 0.93 G (-10 %) |
+| `App::draw_frame` (build) | 3.75 G | 3.63 G (-3 %) |
+| `PaintBridge::paint_scene` | 0.53 G | 0.41 G (-22 %, the bench now reuses its display list) |
+
+The encoder's wall time fell more than its instruction count (-53 to
+-57 % in the table) because a frame's instance vector is megabytes: a
+fresh allocation each frame is an `mmap`, page faults and an `munmap`.
+
+Where the rest goes (callgrind, whole run): taffy layout 20 % self
+(`LayoutTree::compute` 24 % inclusive), `reconcile` and the element
+builders (320-plus-byte `Element`s are moved by value through every
+builder call: `memcpy` is 15 %), `paint_node` 25 % inclusive, 15 %
+hashing (`SipHash` on `NodeId`, `EntityId`, `Rc<str>` keys), allocation
+and `format!` for keys and names. About 4 us per element in Block LOD
+(one element per card), 20 to 35 us per card in Compact and Full (header,
+text, port dots with hover transitions and three closures each). The
+1 ms target at 2000 nodes is not reachable by trimming `NodeCanvas`
+alone: every frame of a pan re-renders the view, re-diffs and re-lays-out
+every visible card, although a pan only changes the canvas transform. The
+next step with real payoff is in the core: a paint-only transform update
+for `canvas()` elements (and keeping per-card elements across frames),
+which would make a pan cost the paint list and nothing else.
+
+### What changed in this round
+
+- `render::encode_into` reuses the previous frame's vectors, skips the
+  sort when layers are already ordered, memoizes OKLab to sRGB (a wire's
+  segments, and most quads, share a few colors) and writes instances in
+  place; the renderer reuses the instance upload buffer. `PaintRenderer`
+  keeps its display list and frame, and no longer clones the whole scene
+  to widen text runs (`TextContext::width_slack`).
+- `NodeCanvas` stopped cloning the visible `NodeGeom`s (each with its
+  port and parameter vectors) and stopped building one minimap rect per
+  node (2,000 of them) on every frame; the wire list is built in one pass.
+- Goldens are unchanged (`cargo xtask shot` and the shot tests pass).
+
+Not done, with the reason: caching flattened wires per zoom bucket.
+Wires are laid out relative to the visible rect, whose origin moves with
+every pan frame, so a cache keyed on the wire misses on every pan frame; a
+cache in canvas coordinates needs the wire layer to span the whole graph,
+which changes the float arithmetic (and so the pixels) of every wire.
+Paint is 0.3 to 1.1 ms of the frame above, so the gain is small anyway.
+Lowering the minimum of 4 segments per wire at Block LOD would remove
+about 4,000 quads at fit-all but moves pixels; left alone ("do not change
+visuals").
+
+### Candidate causes of the stutter
+
+Read from the code (no GPU here), ordered by how likely they are to matter
+on NVIDIA and Wayland and not on Metal. "HUD" says where to look.
+
+1. **A new multi-megabyte staging buffer every frame.** The renderer
+   uploads all instances with `Queue::write_buffer` each frame (2.9 MB at
+   zoom 1, 8.6 to 9.5 MB at zoom 0.4 and fit-all). wgpu-core creates a
+   fresh staging buffer for each `write_buffer` call and frees it after the
+   submission; on a discrete GPU under Vulkan that is a large
+   `vkAllocateMemory` plus a PCIe copy per frame, which is exactly the
+   kind of cost that is cheap on Apple's unified memory and shows up as
+   occasional long frames elsewhere. Not changed (it needs a GPU to
+   verify): the options are a smaller instance (320 bytes now; much of it
+   is the inverse transform, clip and gradient fields most quads do not
+   use), a persistent `StagingBelt`, or skipping instances outside the
+   viewport earlier. HUD: `submit` (p95 and max, in ms) and `MB` on the
+   last line, at zoom 1 versus fit-all. If `submit` max is several
+   milliseconds and grows with the upload size, this is it.
+2. **Swapchain reconfiguration every frame.** After presenting, a
+   `Suboptimal` surface is reconfigured (recreating the swapchain); so are
+   `Outdated` and `Lost`. Some Wayland and NVIDIA combinations report
+   suboptimal constantly (fractional scaling, surface transform). HUD:
+   "swapchain reconfigures" must stay at a handful after the window
+   settles; if it grows by one per frame, that is the stutter.
+3. **Present mode and frame latency.** Default is FIFO with a maximum
+   frame latency of 1 (wgpu asks Vulkan for two images, or the driver's
+   minimum). With FIFO the CPU blocks in `acquire` until vsync; that time
+   is shown separately, so a frame whose `build + paint + encode + submit`
+   is under the refresh interval but whose interval is two refreshes
+   means the swapchain ran dry (try `LIVSPEIL_FRAME_LATENCY=2`).
+   `LIVSPEIL_PRESENT_MODE=mailbox` (never blocks, newest frame wins) and
+   `immediate` (tears) separate "the compositor paces badly" from "our
+   frames are slow". The HUD shows requested and actual mode and the
+   modes the surface supports.
+4. **Frame pacing in the host** (read, nothing wrong found). A redraw is
+   requested once per event batch while the app needs a frame, and again
+   right after each presented frame while an animation runs, never when
+   idle; `pre_present_notify` is called before every present, so Wayland
+   frame callbacks are requested. `FrameScheduler` derives `dt` from the
+   wall clock (clamped to 50 ms), so a slow frame shows as a bigger step,
+   not as a slowdown. Redraws that only re-render the last scene
+   (expose) are counted ("re-render only") and redraws that drew nothing
+   are counted ("empty redraws") to catch redraw requests while idle.
+5. **CPU frame cost** (measured above): at 1.2 to 3.3 ms of CPU build on
+   the owner's machine (plus paint, encode and submit, about 0.5 to 2 ms
+   by the table scaled by the same factor) a frame fits a 60 Hz or 144 Hz
+   interval, so uneven *CPU* time is not the first suspect.
+6. **Per-frame GPU object creation** (read): the instance buffer, atlas
+   textures, blur level textures and pipelines persist between frames
+   (the buffer grows to the next power of two); a bind group and a
+   command encoder are created per frame (cheap), and blur level textures
+   only when the surface size changes. Nothing to fix.
+7. **Allocations per frame**: the scene clone for text widening, the
+   display list, the encoded frame and the upload bytes were all fresh
+   allocations per frame; fixed above. Remaining per-frame allocation is
+   the element tree itself and one `Vec` per wire (flattening) and per
+   shadowed quad.
+
+### What to send back
+
+Run the gallery with `--hud` on the Linux desktop (checklist in the PR
+description and `docs/ui-host.md`), open the Node canvas page, switch to
+Stress, zoom and pan for 20 s, press F4 and send
+`~/.local/state/livspeil/gallery-frames.log`. Repeat with
+`LIVSPEIL_PRESENT_MODE=mailbox` and `LIVSPEIL_FRAME_LATENCY=2`. The log
+holds the graphics report, the run summary and a CSV line per frame
+(`interval_us`, every phase, items, instances, upload bytes).

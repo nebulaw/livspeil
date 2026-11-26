@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use livspeil_ui_core::{
     App, Element, ElementId, EventCx, Key, Keymap, Keystroke, MouseButton, NamedKey, PointerKind,
-    Render, Role as CoreRole, SharedString, View, ViewContext, actions as core, div, text,
+    Render, Role as CoreRole, SharedString, View, ViewContext, actions as core, div, icon, text,
 };
 use livspeil_ui_layout::{Point, Rect, Vec2};
 use livspeil_ui_text::{LayoutOptions, TextLayout, TextStyle};
@@ -29,7 +29,7 @@ const PAD: f32 = 4.0;
 const SEPARATOR: f32 = 9.0;
 /// Margin kept from the window edges.
 const MARGIN: f32 = 4.0;
-/// Width of the check-mark and submenu-arrow columns.
+/// Width of the mark (check or icon) and submenu-arrow columns.
 const MARK: f32 = 14.0;
 /// Gap between label and shortcut.
 const SHORTCUT_GAP: f32 = 24.0;
@@ -44,6 +44,7 @@ pub struct MenuItem {
     shortcut: Option<SharedString>,
     action: Option<SharedString>,
     checked: Option<bool>,
+    icon: Option<SharedString>,
     disabled: bool,
     on_select: Option<MenuCallback>,
 }
@@ -54,6 +55,7 @@ impl fmt::Debug for MenuItem {
             .field("label", &self.label)
             .field("action", &self.action)
             .field("checked", &self.checked)
+            .field("icon", &self.icon)
             .field("disabled", &self.disabled)
             .finish_non_exhaustive()
     }
@@ -68,6 +70,7 @@ impl MenuItem {
             shortcut: None,
             action: None,
             checked: None,
+            icon: None,
             disabled: false,
             on_select: None,
         }
@@ -85,6 +88,15 @@ impl MenuItem {
     #[must_use]
     pub fn shortcut(mut self, s: impl Into<SharedString>) -> Self {
         self.shortcut = Some(s.into());
+        self
+    }
+
+    /// Show the icon `name` (a Boxicons name) before the label, in the
+    /// check-mark column. Check-mark items ([`MenuItem::checked`]) show
+    /// only their check mark.
+    #[must_use]
+    pub fn icon(mut self, name: impl Into<SharedString>) -> Self {
+        self.icon = Some(name.into());
         self
     }
 
@@ -877,6 +889,20 @@ impl Render for MenuPopup {
                             }
                             _ => (false, None, true),
                         };
+                        let mark = match e {
+                            MenuEntry::Item(it) if it.checked.is_none() => it.icon.clone(),
+                            _ => None,
+                        };
+                        let mark = match mark {
+                            Some(name) => icon(name.clone())
+                                .name(format!("icon:{name}"))
+                                .size(MARK, MARK)
+                                .text_color(fg)
+                                .hit_test(false),
+                            None => text(if check { "✓" } else { "" })
+                                .font_size(m.font)
+                                .text_color(fg),
+                        };
                         let mut row = div()
                             .key(format!("item-{i}"))
                             .name(format!("menuitem:{}", e.label()))
@@ -891,13 +917,7 @@ impl Render for MenuPopup {
                             } else {
                                 theme.accent().with_alpha(0.0)
                             })
-                            .child(
-                                div().key("mark").w(MARK).hit_test(false).child(
-                                    text(if check { "✓" } else { "" })
-                                        .font_size(m.font)
-                                        .text_color(fg),
-                                ),
-                            )
+                            .child(div().key("mark").w(MARK).hit_test(false).child(mark))
                             .child(
                                 text(SharedString::from(e.label()))
                                     .key("label")

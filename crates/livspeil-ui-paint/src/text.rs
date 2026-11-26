@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 //! Text: a shaped-layout cache shared with the core's [`TextMeasurer`],
-//! glyph rasterization into one [`GlyphAtlas`], and atlas uploads.
+//! glyph and icon rasterization into one [`GlyphAtlas`], and atlas uploads.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -10,11 +10,12 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use livspeil_ui_core::{FontSpec, TextMeasurer};
+use livspeil_ui_icons::{IconId, IconRasterizer};
 use livspeil_ui_layout::Size;
 use livspeil_ui_render::{AtlasUpdate, GlyphSprite, Rect as RRect};
 use livspeil_ui_text::{
-    FamilySpec, FontSystem, GlyphAtlas, GlyphQuad, GlyphRasterizer, LayoutOptions, LineHeight,
-    SubpixelMode, TextError, TextLayout, TextStyle,
+    AtlasKey, AtlasRect, FamilySpec, FontSystem, GlyphAtlas, GlyphMask, GlyphQuad, GlyphRasterizer,
+    LayoutOptions, LineHeight, SubpixelMode, TextError, TextLayout, TextStyle,
 };
 
 /// Layouts unused for this many frames are dropped.
@@ -61,12 +62,11 @@ impl StyleKey {
     }
 }
 
-/// Where prepared glyphs were placed: scale, the fractional part of the
-/// physical origin (1/64 px), and the atlas generation they live in.
+/// What prepared glyphs depend on: the scale and the atlas generation they
+/// live in (runs snap to whole pixels, so the origin does not matter).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct PlaceKey {
     scale: u32,
-    frac: (u8, u8),
     generation: u64,
 }
 
@@ -91,7 +91,7 @@ pub struct TextCacheStats {
     pub shaped: u64,
     /// Glyph placements reused (no atlas lookups) since creation.
     pub placements_reused: u64,
-    /// Glyphs in the atlas.
+    /// Glyphs and icons in the atlas.
     pub atlas_glyphs: usize,
 }
 
@@ -198,6 +198,17 @@ impl TextMeasurer for BridgeMeasurer {
             Err(_) => Size::new(0.0, 0.0),
         }
     }
+
+    // The painter's own line breaker, so a box is as tall as what is drawn.
+    fn wrapped_height(&self, text: &str, font: &FontSpec, width: f32) -> f32 {
+        match self.shaper.try_borrow_mut() {
+            Ok(mut s) => {
+                let at = s.lookup(text, &text_style(font), Some(width));
+                s.entry(at).map_or(0.0, |e| e.layout.height())
+            }
+            Err(_) => 0.0,
+        }
+    }
 }
 
 /// The `livspeil-ui-text` style of a core font (UI family).
@@ -224,15 +235,22 @@ pub(crate) struct Placement {
     pub scale: f32,
 }
 
-/// Fonts, layout cache, rasterizers and the glyph atlas.
+/// Fonts, layout cache, rasterizers and the atlas of glyphs and icons.
 #[derive(Debug)]
 pub struct TextContext {
+    /// Logical pixels added to the width of every text run that has one
+    /// before deciding whether it wraps (0 by default). Layout rounds box
+    /// sizes to whole pixels, so a label measured at 65.8 px can get a
+    /// 65 px box and wrap; hosts set 1.0 to absorb the rounding without
+    /// copying the scene.
+    pub width_slack: f32,
     pub(crate) shaper: Rc<RefCell<Shaper>>,
     atlas: GlyphAtlas,
     atlas_id: u32,
     uploaded: Option<u64>,
     whole: GlyphRasterizer,
     quarter: GlyphRasterizer,
+    icons: IconRasterizer,
 }
 
 /// Default atlas side in texels.
@@ -247,12 +265,14 @@ impl TextContext {
     /// A context with atlas id `atlas_id` of `size` x `size` texels.
     pub fn with_atlas(fonts: FontSystem, atlas_id: u32, size: u32) -> TextContext {
         TextContext {
+            width_slack: 0.0,
             shaper: Rc::new(RefCell::new(Shaper::new(fonts))),
             atlas: GlyphAtlas::new(size, size),
             atlas_id,
             uploaded: None,
             whole: GlyphRasterizer::new(SubpixelMode::None),
             quarter: GlyphRasterizer::new(SubpixelMode::Quarter),
+            icons: IconRasterizer::new(),
         }
     }
 
@@ -299,7 +319,7 @@ impl TextContext {
         }
     }
 
-    /// Drops every glyph; the next upload is a full one.
+    /// Drops every glyph and icon; the next upload is a full one.
     pub fn clear_atlas(&mut self) {
         self.atlas.clear();
     }
@@ -331,14 +351,12 @@ impl TextContext {
         let key = shaper.lookup(text, style, at.max_width);
         let scale = at.scale;
         let (px, py) = (at.origin.0 * scale, at.origin.1 * scale);
-        let (ix, iy) = (px.floor(), py.floor());
-        let frac = (
-            ((px - ix) * 64.0).round().min(63.0) as u8,
-            ((py - iy) * 64.0).round().min(63.0) as u8,
-        );
+        // The whole run snaps to the pixel grid once. Snapping glyph by
+        // glyph from a fractional origin would change letter spacing and
+        // line positions while the text moves (zoomed or dragged cards).
+        let (ix, iy) = ((px + 0.5).floor(), (py + 0.5).floor());
         let place = PlaceKey {
             scale: scale.to_bits(),
-            frac,
             generation: self.atlas.generation(),
         };
         let mode = SubpixelMode::for_scale(scale);
@@ -358,13 +376,9 @@ impl TextContext {
                     q.clone()
                 }
                 _ => {
-                    let origin = (
-                        f32::from(frac.0) / 64.0 / scale,
-                        f32::from(frac.1) / 64.0 / scale,
-                    );
                     let q = entry
                         .layout
-                        .prepare_glyphs(origin, scale, rasterizer, atlas)?;
+                        .prepare_glyphs((0.0, 0.0), scale, rasterizer, atlas)?;
                     entry.prepared = Some((place, q.clone()));
                     q
                 }
@@ -386,6 +400,28 @@ impl TextContext {
                 texels: [q.atlas.x, q.atlas.y, q.atlas.width, q.atlas.height],
             })
             .collect())
+    }
+
+    /// Where `icon` rasterized at `size_px` physical pixels is in the
+    /// atlas, rasterizing it on the first use.
+    pub(crate) fn icon(&mut self, icon: IconId, size_px: f32) -> Result<AtlasRect, TextError> {
+        let key = AtlasKey::Icon {
+            icon: u32::from(icon.index()),
+            size_bits: size_px.to_bits(),
+        };
+        let raster = &mut self.icons;
+        let entry = self.atlas.get_or_insert_with(key, || {
+            // Cannot fail for the embedded set (tested in its crate).
+            let mask = raster.rasterize(icon, size_px).ok()?;
+            Some(GlyphMask {
+                width: mask.side,
+                height: mask.side,
+                left: 0,
+                top: 0,
+                data: mask.data,
+            })
+        })?;
+        Ok(entry.rect)
     }
 
     /// Atlas uploads since the last call: everything after a clear (or the

@@ -126,7 +126,7 @@ fn fixture(scheme: Scheme, at: (f32, f32), placement: Placement) -> Fx {
                     .child(Button::new("First").render(&theme))
                     .child(Button::new("Second").render(&theme))
             })
-            .trigger(|theme| IconButton::new("bx-cog", "Settings").render(theme))
+            .trigger(|theme| IconButton::new("bx-gear", "Settings").render(theme))
             .placement(placement)
             .size(120.0, 120.0)
             .label("Grid settings"),

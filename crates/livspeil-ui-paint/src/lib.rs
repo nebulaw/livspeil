@@ -27,12 +27,17 @@
 //!   (as screen-space rectangles: rounded clips clip to their bounds).
 //! - **Text**: shaped with `livspeil-ui-text` and cached by text, style
 //!   and wrap width (unchanged labels are neither reshaped nor
-//!   re-rasterized; glyph placements are reused while the origin's
-//!   subpixel phase, scale and atlas generation match); unused layouts are
+//!   re-rasterized; each run snaps to whole pixels, so glyph placements are
+//!   reused while scale and atlas generation match); unused layouts are
 //!   evicted after ~240 frames. Glyphs are rasterized into one
 //!   [`GlyphAtlas`](livspeil_ui_text::GlyphAtlas) (whole-pixel positions
 //!   below 1.5x, quarter-pixel above). A full atlas is cleared and the
 //!   scene painted again; the next upload is then a full one.
+//! - **Icons**: an [`IconRun`](livspeil_ui_core::IconRun) is rasterized
+//!   (`livspeil-ui-icons`) at its size on screen into the same atlas and
+//!   drawn as one glyph sprite, tinted like text and snapped to the
+//!   physical pixel grid under translation and uniform scale. Unknown names
+//!   draw an outlined box.
 //! - **Layout**: [`TextContext::measurer`] is a core
 //!   [`TextMeasurer`](livspeil_ui_core::TextMeasurer) sharing the same
 //!   cache, so labels measured for layout are painted without reshaping.

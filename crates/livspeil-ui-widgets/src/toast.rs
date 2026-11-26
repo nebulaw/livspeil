@@ -484,7 +484,7 @@ impl Render for Toasts {
                 );
             }
             el = el.child(
-                IconButton::new("bx-x", "Dismiss")
+                IconButton::close("Dismiss")
                     .size(IconSize::S14)
                     .disabled(leaving)
                     .on_click(move |_, cx| Toasts::dismiss(view, cx, id))
