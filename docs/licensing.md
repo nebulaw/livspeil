@@ -15,11 +15,15 @@ Livspeil is free software in the sense of the four freedoms (run, study and chan
 | Future server components (store, sync) | AGPL-3.0 (not yet used) |
 | Docs and specs | CC BY 4.0 |
 | Inter font | SIL OFL 1.1 |
-| Boxicons Free icons | CC BY 4.0 (keep in a separate directory with its license) |
+| Boxicons Free icons | CC BY 4.0 (kept in `assets/icons/boxicons/` with its license) |
 | Sample assets | CC0 preferred; provenance recorded in `assets.lock` |
 | Names and logos | Not licensed; see `TRADEMARKS.md` |
 
 MPL-2.0 is file-level copyleft: changes to MPL files stay open, but larger works that use them may carry any license. It is FSF-approved and GPL-compatible, and it avoids the Rust static-linking problems of the LGPL. If a stronger or looser choice proves necessary later, the CLA's open-source lock allows relicensing within free licenses.
+
+## Third-party attribution
+
+**Boxicons** (free set), Copyright 2025 Boxicons, <https://boxicons.com>, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The 49 SVG files in [`assets/icons/boxicons/`](../assets/icons/boxicons/README.md) are unmodified (only their directory layout was flattened) and are embedded in Livspeil UI binaries, which rasterize them and tint them at draw time. Anything that ships those binaries must carry this attribution; an in-app credits screen does not exist yet.
 
 ## Scenes, Rooms and Charms (published by others)
 A Room package (`*.room`) can ship its own Charms, assets and scripts, and authors choose their licenses. Rules:

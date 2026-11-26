@@ -73,3 +73,9 @@ path = ["crates/livspeil-ui-*/goldens/**"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Livspeil contributors"
 SPDX-License-Identifier = "MPL-2.0"
+
+[[annotations]]
+path = ["assets/icons/boxicons/*.svg", "assets/icons/boxicons/LICENSE.txt"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2025 Boxicons (https://boxicons.com)"
+SPDX-License-Identifier = "CC-BY-4.0"
