@@ -63,7 +63,7 @@ pub use color::{Color, linear_to_srgb, oklab_to_srgb, srgb_to_linear};
 pub use cpu::{render_cpu, render_cpu_with};
 pub use encode::{
     BlurPlan, Frame, FrameOptions, INSTANCE_FLOATS, Instance, MAX_BLUR_LEVELS, Op, TEXT_GAMMA,
-    corner_params, encode, kawase_params, level_size,
+    corner_params, encode, encode_into, kawase_params, level_size,
 };
 pub use geom::{Affine, Rect};
 pub use gpu::{GpuContext, Renderer, TARGET_FORMAT};

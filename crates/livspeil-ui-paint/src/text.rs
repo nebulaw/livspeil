@@ -227,6 +227,12 @@ pub(crate) struct Placement {
 /// Fonts, layout cache, rasterizers and the glyph atlas.
 #[derive(Debug)]
 pub struct TextContext {
+    /// Logical pixels added to the width of every text run that has one
+    /// before deciding whether it wraps (0 by default). Layout rounds box
+    /// sizes to whole pixels, so a label measured at 65.8 px can get a
+    /// 65 px box and wrap; hosts set 1.0 to absorb the rounding without
+    /// copying the scene.
+    pub width_slack: f32,
     pub(crate) shaper: Rc<RefCell<Shaper>>,
     atlas: GlyphAtlas,
     atlas_id: u32,
@@ -247,6 +253,7 @@ impl TextContext {
     /// A context with atlas id `atlas_id` of `size` x `size` texels.
     pub fn with_atlas(fonts: FontSystem, atlas_id: u32, size: u32) -> TextContext {
         TextContext {
+            width_slack: 0.0,
             shaper: Rc::new(RefCell::new(Shaper::new(fonts))),
             atlas: GlyphAtlas::new(size, size),
             atlas_id,

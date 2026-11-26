@@ -182,6 +182,8 @@ pub struct Renderer {
     sampler: wgpu::Sampler,
     globals: wgpu::Buffer,
     instances: Option<wgpu::Buffer>,
+    /// Instance bytes of the frame being uploaded (capacity reused).
+    upload: Vec<u8>,
     levels: Vec<wgpu::Texture>,
     levels_for: (u32, u32),
     atlas_layout: wgpu::BindGroupLayout,
@@ -439,6 +441,7 @@ impl Renderer {
             sampler,
             globals,
             instances: None,
+            upload: Vec::new(),
             levels: Vec::new(),
             levels_for: (0, 0),
             atlas_layout,
@@ -574,8 +577,9 @@ impl Renderer {
             globals.extend_from_slice(&v.to_le_bytes());
         }
         queue.write_buffer(&self.globals, 0, &globals);
-        let bytes = frame.instance_bytes();
-        let needed = (bytes.len() as u64).max((INSTANCE_FLOATS * 4) as u64);
+        frame.instance_bytes_into(&mut self.upload);
+        let byte_len = self.upload.len() as u64;
+        let needed = byte_len.max((INSTANCE_FLOATS * 4) as u64);
         if self.instances.as_ref().is_none_or(|b| b.size() < needed) {
             self.instances = Some(device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("instances"),
@@ -587,8 +591,8 @@ impl Renderer {
         let Some(instances) = self.instances.as_ref() else {
             return Err(RenderError::Device("instance buffer missing".into()));
         };
-        if !bytes.is_empty() {
-            queue.write_buffer(instances, 0, &bytes);
+        if byte_len > 0 {
+            queue.write_buffer(instances, 0, &self.upload);
         }
         let globals_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("globals"),
