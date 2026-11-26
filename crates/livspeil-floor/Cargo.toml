@@ -54,7 +54,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 # Test client (fixture for the demo and for protocol tests).
 smithay-client-toolkit = { version = "0.19", default-features = false }
 wayland-client = "0.31"
-png = "0.17"
+png = "0.18"
 
 [lints]
 workspace = true

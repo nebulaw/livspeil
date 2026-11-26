@@ -10,3 +10,9 @@
 //! See `docs/decisions/floor-renderer.md` and `docs/floor-spike-checklist.md`.
 
 pub mod geometry;
+
+#[cfg(target_os = "linux")]
+pub mod state;
+
+#[cfg(target_os = "linux")]
+pub mod testclient;

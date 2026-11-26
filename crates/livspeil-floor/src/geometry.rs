@@ -84,11 +84,27 @@ pub enum Hit {
 pub struct FrameLayout {
     pub origin: (i32, i32),
     pub client: (i32, i32),
+    /// Titlebar height: [`TITLEBAR_HEIGHT`], or 0 for clients that draw
+    /// their own decorations.
+    pub titlebar_h: i32,
 }
 
 impl FrameLayout {
     pub fn new(origin: (i32, i32), client: (i32, i32)) -> Self {
-        FrameLayout { origin, client }
+        FrameLayout {
+            origin,
+            client,
+            titlebar_h: TITLEBAR_HEIGHT,
+        }
+    }
+
+    /// A frame without a titlebar (client-side decorations).
+    pub fn undecorated(origin: (i32, i32), client: (i32, i32)) -> Self {
+        FrameLayout {
+            origin,
+            client,
+            titlebar_h: 0,
+        }
     }
 
     /// Outer rectangle: titlebar plus client.
@@ -97,19 +113,19 @@ impl FrameLayout {
             self.origin.0,
             self.origin.1,
             self.client.0,
-            self.client.1 + TITLEBAR_HEIGHT,
+            self.client.1 + self.titlebar_h,
         )
     }
 
     pub fn titlebar(&self) -> Rect {
-        Rect::new(self.origin.0, self.origin.1, self.client.0, TITLEBAR_HEIGHT)
+        Rect::new(self.origin.0, self.origin.1, self.client.0, self.titlebar_h)
     }
 
     /// Where the client's window geometry is placed.
     pub fn client_rect(&self) -> Rect {
         Rect::new(
             self.origin.0,
-            self.origin.1 + TITLEBAR_HEIGHT,
+            self.origin.1 + self.titlebar_h,
             self.client.0,
             self.client.1,
         )
@@ -127,8 +143,7 @@ impl FrameLayout {
     }
 
     fn button(&self, index_from_right: i32) -> Rect {
-        let x = self.origin.0 + self.client.0
-            - (BUTTON_GAP + BUTTON_SIZE) * (index_from_right + 1);
+        let x = self.origin.0 + self.client.0 - (BUTTON_GAP + BUTTON_SIZE) * (index_from_right + 1);
         let y = self.origin.1 + (TITLEBAR_HEIGHT - BUTTON_SIZE) / 2;
         Rect::new(x, y, BUTTON_SIZE, BUTTON_SIZE)
     }
@@ -143,6 +158,9 @@ impl FrameLayout {
         // a corner pixel that is fully transparent still belongs to it.
         if self.client_rect().contains(px, py) {
             return Hit::Client;
+        }
+        if self.titlebar_h == 0 {
+            return Hit::None;
         }
         // Buttons get a slightly larger target than they are drawn.
         for (rect, hit) in [
@@ -266,14 +284,31 @@ mod tests {
         assert_eq!(l.hit_test(150.0, 100.0), Hit::Client);
         assert_eq!(l.hit_test(20.0, 5.0), Hit::Titlebar);
         let c = l.close_button();
-        assert_eq!(l.hit_test(f64::from(c.x + 3), f64::from(c.y + 3)), Hit::Close);
+        assert_eq!(
+            l.hit_test(f64::from(c.x + 3), f64::from(c.y + 3)),
+            Hit::Close
+        );
         let m = l.maximize_button();
-        assert_eq!(l.hit_test(f64::from(m.x + 3), f64::from(m.y + 3)), Hit::Maximize);
+        assert_eq!(
+            l.hit_test(f64::from(m.x + 3), f64::from(m.y + 3)),
+            Hit::Maximize
+        );
         let n = l.minimize_button();
-        assert_eq!(l.hit_test(f64::from(n.x + 3), f64::from(n.y + 3)), Hit::Minimize);
+        assert_eq!(
+            l.hit_test(f64::from(n.x + 3), f64::from(n.y + 3)),
+            Hit::Minimize
+        );
         // Bottom edge exclusive.
         assert_eq!(l.hit_test(10.0, 232.0), Hit::None);
         assert_eq!(l.hit_test(10.0, 231.5), Hit::Client);
+    }
+
+    #[test]
+    fn undecorated_frame_has_no_titlebar() {
+        let l = FrameLayout::undecorated((10, 10), (100, 50));
+        assert_eq!(l.outer(), l.client_rect());
+        assert_eq!(l.hit_test(20.0, 12.0), Hit::Client);
+        assert_eq!(l.hit_test(9.0, 12.0), Hit::None);
     }
 
     #[test]
@@ -312,12 +347,17 @@ mod tests {
             // Abramowitz-Stegun 7.1.26 erf.
             let t = 1.0 / (1.0 + 0.327_591_1 * (x / 2f64.sqrt()).abs());
             let y = 1.0
-                - (((((1.061_405_429 * t - 1.453_152_027) * t) + 1.421_413_741) * t - 0.284_496_736)
+                - (((((1.061_405_429 * t - 1.453_152_027) * t) + 1.421_413_741) * t
+                    - 0.284_496_736)
                     * t
                     + 0.254_829_592)
                     * t
                     * (-(x * x) / 2.0).exp();
-            if x >= 0.0 { 0.5 * (1.0 + y) } else { 0.5 * (1.0 - y) }
+            if x >= 0.0 {
+                0.5 * (1.0 + y)
+            } else {
+                0.5 * (1.0 - y)
+            }
         }
         let blur = 32.0;
         let sigma = f64::from(blur) / 2.0;
@@ -338,7 +378,11 @@ mod tests {
         let below = shadow_alpha((cx, 300.0 + 20.0), outer, CORNER_RADIUS);
         assert!(below > above * 2.0, "{below} vs {above}");
         // Beyond the margin the shadow is negligible.
-        let far = shadow_alpha((cx, 300.0 + SHADOW_MARGIN as f32 + SHADOW_OFFSET_Y as f32), outer, CORNER_RADIUS);
+        let far = shadow_alpha(
+            (cx, 300.0 + SHADOW_MARGIN as f32 + SHADOW_OFFSET_Y as f32),
+            outer,
+            CORNER_RADIUS,
+        );
         assert!(far < 0.02, "{far}");
         // Never exceeds the configured opacity.
         assert!(shadow_alpha((cx, 200.0), outer, CORNER_RADIUS) <= SHADOW_ALPHA);
@@ -355,7 +399,10 @@ mod tests {
     #[test]
     fn neutral_surfaces_match_spec_lightness() {
         // surface.0 L=0.10, surface.1 L=0.15 ... (D59): neutral, monotonic.
-        let v: Vec<u8> = [0.10, 0.15, 0.19, 0.23].iter().map(|l| neutral_srgb(*l)).collect();
+        let v: Vec<u8> = [0.10, 0.15, 0.19, 0.23]
+            .iter()
+            .map(|l| neutral_srgb(*l))
+            .collect();
         assert!(v.windows(2).all(|w| w[0] < w[1]), "{v:?}");
         assert_eq!(neutral_srgb(1.0), 255);
         assert_eq!(neutral_srgb(0.0), 0);
@@ -371,7 +418,10 @@ mod tests {
     #[test]
     fn rect_intersect() {
         let a = Rect::new(0, 0, 10, 10);
-        assert_eq!(a.intersect(Rect::new(5, 5, 10, 10)), Some(Rect::new(5, 5, 5, 5)));
+        assert_eq!(
+            a.intersect(Rect::new(5, 5, 10, 10)),
+            Some(Rect::new(5, 5, 5, 5))
+        );
         assert_eq!(a.intersect(Rect::new(10, 0, 5, 5)), None);
     }
 }
