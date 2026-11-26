@@ -489,6 +489,9 @@ impl Encoder {
 
     /// Common setup: transform, clip, opacity. `None` when the instance is
     /// invisible (singular transform, zero opacity, fully clipped).
+    // The shared fields of every primitive, written into `inst` in place
+    // (an 80-float instance is too big to return by value cheaply).
+    #[allow(clippy::too_many_arguments)]
     fn base(
         &self,
         inst: &mut Instance,
