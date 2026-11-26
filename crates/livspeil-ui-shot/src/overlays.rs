@@ -431,17 +431,19 @@ fn sheet_for(scheme: Scheme) -> fn(f32) -> Result<Shot, ShotError> {
     }
 }
 
+type Named = (
+    &'static str,
+    &'static str,
+    fn(f32) -> Result<Shot, ShotError>,
+);
+
 /// The overlay and tab scenes at 1x, dark and light.
 pub fn scenes() -> Vec<Scene> {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let (width, height) = (SIZE.width as u32, SIZE.height as u32);
     let mut v = Vec::new();
     for scheme in [Scheme::Dark, Scheme::Light] {
-        let names: [(
-            &'static str,
-            &'static str,
-            fn(f32) -> Result<Shot, ShotError>,
-        ); 6] = match scheme {
+        let names: [Named; 6] = match scheme {
             Scheme::Dark => [
                 (
                     "icon-buttons-dark",
