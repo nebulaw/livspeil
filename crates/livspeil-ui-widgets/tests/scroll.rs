@@ -302,3 +302,64 @@ fn focus_and_a11y_scroll_into_view() {
     h.run_until_idle(300);
     assert_eq!(sv.read(&h.app).offset().y, 0.0);
 }
+
+/// What macOS sends after a hard flick into the end of a list: the finger
+/// events, then the OS's own momentum events (decaying deltas) for a second
+/// or more, all as pixel deltas one frame apart.
+fn os_momentum_into_the_end(s: &mut Scroller, p: &ScrollPhysics) -> u64 {
+    let mut t = 0;
+    let mut dy = -40.0_f32;
+    for _ in 0..80 {
+        s.pixel_scroll(Vec2::new(0.0, dy), Duration::from_millis(t), p);
+        s.tick(DT, p, spring());
+        dy *= 0.95;
+        t += 16;
+    }
+    t
+}
+
+#[test]
+fn hard_flick_into_the_end_has_bounded_overscroll_and_springs_back() {
+    let p = ScrollPhysics::default();
+    let mut s = scroller();
+    s.jump_to(Vec2::new(0.0, 800.0));
+    os_momentum_into_the_end(&mut s, &p);
+    // The stretch never exceeds the rubber-band of the limit.
+    let cap = 800.0 + rubber_band(200.0 * p.overscroll_limit, 200.0, 0.55);
+    assert!(s.offset().y <= cap + 1e-3, "{} > {cap}", s.offset().y);
+    // Dropped momentum events do not hold it stretched: a pause lets it
+    // return quickly.
+    let frames = run(&mut s, &p, spring(), 600);
+    assert!(frames < 120, "returns in {frames} frames");
+    assert_eq!(s.offset().y, 800.0);
+}
+
+#[test]
+fn reversing_after_a_hard_flick_responds_immediately() {
+    let p = ScrollPhysics::default();
+    let mut s = scroller();
+    s.jump_to(Vec2::new(0.0, 800.0));
+    let t = os_momentum_into_the_end(&mut s, &p);
+    let stretched = s.offset().y;
+    assert!(stretched > 800.0);
+    // The user scrolls back up at once, 15 px per event.
+    flick(&mut s, &p, 15.0, 6, t);
+    let y = s.offset().y;
+    assert!(
+        y < stretched - 20.0,
+        "already moving back: {y} (was {stretched})"
+    );
+    // Keep going: after 12 events (180 px of finger travel) it is back
+    // inside the list and following the finger.
+    flick(&mut s, &p, 15.0, 6, t + 100);
+    assert!(s.offset().y < 800.0, "{}", s.offset().y);
+}
+
+#[test]
+fn slow_pulls_below_the_limit_are_unchanged() {
+    let p = ScrollPhysics::default();
+    let mut s = scroller();
+    flick(&mut s, &p, 20.0, 5, 0); // 100 px: below the 120 px limit
+    assert!(s.is_tracking());
+    assert!((s.offset().y - rubber_band(-100.0, 200.0, 0.55)).abs() < 1e-3);
+}

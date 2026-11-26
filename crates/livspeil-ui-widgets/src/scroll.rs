@@ -86,6 +86,11 @@ pub struct ScrollPhysics {
     pub rubber_coefficient: f32,
     /// A gesture counts as released after this long without a pixel delta.
     pub release_delay: f32,
+    /// Most a gesture can pull past an end, as a fraction of the viewport
+    /// extent (unresisted distance). Further outward deltas (for example the
+    /// operating system's momentum events after a hard flick) start the
+    /// spring-back and are dropped until the stream pauses or reverses.
+    pub overscroll_limit: f32,
     /// Scrollbars stay this long after the last scroll or hover (seconds).
     pub bar_linger: f32,
 }
@@ -100,6 +105,7 @@ impl Default for ScrollPhysics {
             rubber_band: true,
             rubber_coefficient: 0.55,
             release_delay: 0.06,
+            overscroll_limit: 0.6,
             bar_linger: 0.9,
         }
     }
@@ -164,6 +170,10 @@ pub struct Scroller {
     content: Size,
     phase: ScrollPhase,
     tracker: VelocityTracker,
+    /// While `Some(idle)`: a hard pull hit the overscroll limit and is
+    /// springing back; outward deltas are dropped; `idle` is the time since
+    /// the last dropped delta.
+    drain: Option<f32>,
 }
 
 impl Scroller {
@@ -179,6 +189,7 @@ impl Scroller {
             content: Size::new(0.0, 0.0),
             phase: ScrollPhase::Idle,
             tracker: VelocityTracker::default(),
+            drain: None,
         }
     }
 
@@ -278,6 +289,22 @@ impl Scroller {
     pub fn pixel_scroll(&mut self, delta: Vec2, time: Duration, p: &ScrollPhysics) {
         let m = self.axis.mask();
         let max = self.max();
+        let step = Vec2::new(delta.x * m.x, delta.y * m.y);
+        if let Some(idle) = self.drain {
+            // Springing back from the limit: more of the same stream (OS
+            // momentum) is dropped; a pause or a reversal is a new gesture.
+            let before = self.offset;
+            let outward = (before.x < 0.0 && step.x > 0.0)
+                || (before.x > max.x && step.x < 0.0)
+                || (before.y < 0.0 && step.y > 0.0)
+                || (before.y > max.y && step.y < 0.0);
+            let same_stream = idle < p.release_delay && (outward || step == Vec2::ZERO);
+            if same_stream {
+                self.drain = Some(0.0);
+                return;
+            }
+            self.drain = None;
+        }
         if !self.is_tracking() {
             self.raw = Vec2::new(
                 self.raw_from_offset(self.offset.x, max.x, self.viewport.width, p),
@@ -286,18 +313,33 @@ impl Scroller {
             self.tracker.reset();
             self.tracker.push(time, self.raw);
         }
-        self.raw -= Vec2::new(delta.x * m.x, delta.y * m.y);
+        self.raw -= step;
         // Without rubber band the gesture cannot build up overscroll.
         if !p.rubber_band {
             self.raw = self.clamp(self.raw);
         }
+        // Bounded overscroll: an unbounded raw offset would make a reversal
+        // wait until the whole excess had been undone.
+        let limit_x = self.viewport.width * p.overscroll_limit;
+        let limit_y = self.viewport.height * p.overscroll_limit;
+        let limited = Vec2::new(
+            self.raw.x.clamp(-limit_x, max.x + limit_x),
+            self.raw.y.clamp(-limit_y, max.y + limit_y),
+        );
+        let hit_limit = p.rubber_band && limited != self.raw;
+        self.raw = limited;
         self.tracker.push(time, self.raw);
         self.offset = Vec2::new(
             self.overscroll_view(self.raw.x, max.x, self.viewport.width, p),
             self.overscroll_view(self.raw.y, max.y, self.viewport.height, p),
         );
         self.velocity = Vec2::ZERO;
-        self.phase = ScrollPhase::Tracking(0.0);
+        if hit_limit {
+            self.phase = ScrollPhase::Settling(self.clamp(self.offset));
+            self.drain = Some(0.0);
+        } else {
+            self.phase = ScrollPhase::Tracking(0.0);
+        }
     }
 
     /// A wheel delta in lines: an animated scroll (no overscroll).
@@ -336,6 +378,9 @@ impl Scroller {
     /// Advance by `dt` seconds with springs from `spring` (an `Instant`
     /// spec jumps). Returns whether still moving.
     pub fn tick(&mut self, dt: f32, p: &ScrollPhysics, spring: MotionSpec) -> bool {
+        if let Some(idle) = self.drain {
+            self.drain = Some(idle + dt);
+        }
         match self.phase {
             ScrollPhase::Idle => return false,
             ScrollPhase::Tracking(idle) => {
