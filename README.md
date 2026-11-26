@@ -18,6 +18,7 @@ Status: **Phase 0 (kernel) and Phase 1 (UI toolkit)**. This repository holds the
 | `crates/livspeil-script` | Script worker host: out-of-process scripts, capabilities, limits (M0.14) |
 | `crates/livspeil-wasm-host` | Sandboxed WebAssembly node packages (third-party Charms in process) |
 | `crates/livspeil-cli` | `livspeil` headless command line (`validate`, `fmt`, `cook`, `diff`, `assets`, `run`) |
+| `crates/livspeil-floor` | The Floor, Livspeil's Wayland compositor (Smithay), Linux only: spike with a nested build and a bare-metal skeleton; see `docs/decisions/floor-renderer.md` (GPL-3.0-or-later) |
 | `crates/livspeil-ui-core` | UI core: models, views, element diffing, input and focus, animation driver, frame loop, paint list (MPL-2.0, like every UI crate) |
 | `crates/livspeil-ui-layout` | Geometry, Taffy flex/grid/block layout over a retained tree, dock and infinite-canvas layouts |
 | `crates/livspeil-ui-theme` | Design tokens, materials, motion profiles, theme/motion config loading and hot reload |
@@ -350,6 +351,14 @@ C toolchain with `pkg-config` for the build):
   NVIDIA), and `fontconfig`. `mesa` provides the OpenGL ES fallback.
 - **Debian/Ubuntu**: `mesa-vulkan-drivers libfontconfig1-dev` (plus your
   vendor's driver on NVIDIA).
+
+Building the whole workspace on Linux also compiles the Floor
+(`livspeil-floor`), which needs the xkbcommon development files
+(`libxkbcommon` on Arch, `libxkbcommon-dev` on Debian/Ubuntu). Its `tty`
+feature additionally needs libseat, libinput, udev, GBM and DRM
+(`seatd libinput systemd-libs libdrm mesa` on Arch;
+`libseat-dev libinput-dev libudev-dev libgbm-dev libdrm-dev` on Debian).
+macOS never builds the Floor.
 
 winit 0.30 picks the backend itself: Wayland when `WAYLAND_DISPLAY` (or
 `WAYLAND_SOCKET`) is set and not empty, otherwise X11 through `DISPLAY`.
