@@ -972,8 +972,9 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
             .style(fill)
             .canvas(self.canvas);
 
-        // Wires below the cards.
-        let mut wires = Vec::new();
+        // Wires below the cards, relative to the wire layer's origin.
+        let origin = visible.origin();
+        let mut wires = Vec::with_capacity(shown.len() * 2);
         for (l, b) in &cache.links {
             if !b.intersects(&visible) {
                 continue;
@@ -984,27 +985,24 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
                 if hot {
                     w.width = WIRE_WIDTH * 1.5;
                 }
+                w.from -= origin;
+                w.c1 -= origin;
+                w.c2 -= origin;
+                w.to -= origin;
                 wires.push(w);
             }
         }
-        let origin = visible.origin();
-        let rel = |mut w: Wire| {
-            w.from -= origin;
-            w.c1 -= origin;
-            w.c2 -= origin;
-            w.to -= origin;
-            w
-        };
         let n_wires = wires.len();
         canvas = canvas.child(
             div()
                 .key("wires")
                 .absolute(visible)
                 .hit_test(false)
-                .wires(wires.into_iter().map(rel).collect()),
+                .wires(wires),
         );
-        let cards: Vec<NodeGeom> = shown.iter().map(|i| cache.nodes[*i].clone()).collect();
-        for n in &cards {
+        // The cards are read straight from the cache (no copies).
+        for i in &shown {
+            let n = &cache.nodes[*i];
             let c = CardCx {
                 theme: &theme,
                 cache: &cache,
@@ -1049,7 +1047,7 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
         self.stats = CanvasStats {
             nodes: cache.nodes.len(),
             links: cache.links.len(),
-            visible_nodes: cards.len(),
+            visible_nodes: shown.len(),
             visible_wires: n_wires,
             lod,
         };
@@ -1083,34 +1081,40 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
             let bounds = minimap_bounds(&cache);
             let (k, off) = minimap_mapping(bounds, MINIMAP, 8.0);
             let sel_count = self.selection.len();
-            let rects: Vec<(Rect, bool)> = cache
-                .nodes
-                .iter()
-                .map(|n| {
-                    let r = n.rect;
-                    (
-                        Rect::new(
-                            r.x * k + off.x,
-                            r.y * k + off.y,
-                            (r.width * k).max(1.0),
-                            (r.height * k).max(1.0),
-                        ),
-                        self.selection.contains(&n.id),
-                    )
-                })
-                .collect();
-            let content = Rc::new(rects);
+            // One rect per node: rebuilt only when the model or the
+            // selection changed, not on every pan or zoom frame.
+            let content = || {
+                Rc::new(
+                    cache
+                        .nodes
+                        .iter()
+                        .map(|n| {
+                            let r = n.rect;
+                            (
+                                Rect::new(
+                                    r.x * k + off.x,
+                                    r.y * k + off.y,
+                                    (r.width * k).max(1.0),
+                                    (r.height * k).max(1.0),
+                                ),
+                                self.selection.contains(&n.id),
+                            )
+                        })
+                        .collect::<Vec<(Rect, bool)>>(),
+                )
+            };
             let mini_view = match self.minimap {
                 Some((v, rev, sel)) if rev == revision && sel == sel_count => v,
                 Some((v, _, _)) => {
+                    let rects = content();
                     v.update(cx, |mm, mcx| {
-                        mm.rects = content.clone();
+                        mm.rects = rects;
                         mcx.notify();
                     });
                     v
                 }
                 None => cx.new_view(MinimapNodes {
-                    rects: content.clone(),
+                    rects: content(),
                     color: col.text_secondary.with_alpha(0.55),
                     selected: theme.accent(),
                 }),

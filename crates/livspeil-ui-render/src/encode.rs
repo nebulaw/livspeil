@@ -442,7 +442,9 @@ impl Encoder {
         let [a, b, c, d, _, _] = g.transform.m;
         let exact = a == 1.0 && b == 0.0 && c == 0.0 && d == 1.0;
         for sprite in &g.glyphs {
-            let Some((mut inst, ppu)) = self.base(
+            let mut inst = [0.0; INSTANCE_FLOATS];
+            let Some(ppu) = self.base(
+                &mut inst,
                 index,
                 sprite.rect,
                 g.transform,
@@ -489,13 +491,14 @@ impl Encoder {
     /// invisible (singular transform, zero opacity, fully clipped).
     fn base(
         &self,
+        inst: &mut Instance,
         index: usize,
         rect: Rect,
         transform: Affine,
         clip: Option<Rect>,
         opacity: f32,
         kind_value: f32,
-    ) -> Result<Option<(Instance, f32)>, RenderError> {
+    ) -> Result<Option<f32>, RenderError> {
         if !rect.is_valid() {
             return Err(invalid(index, "rect is not finite or has negative size"));
         }
@@ -516,16 +519,15 @@ impl Encoder {
             Some(c) => [c.x * s, c.y * s, c.right() * s, c.bottom() * s],
             None => NO_CLIP,
         };
-        let mut inst = [0.0; INSTANCE_FLOATS];
-        put(&mut inst, field::RECT, [rect.x, rect.y, rect.w, rect.h]);
+        put(inst, field::RECT, [rect.x, rect.y, rect.w, rect.h]);
         let [a, b, c, d, e, f] = transform.m;
-        put(&mut inst, field::XFORM, [a, b, c, d]);
-        put(&mut inst, field::XFORM2, [e, f, ppu, kind_value]);
+        put(inst, field::XFORM, [a, b, c, d]);
+        put(inst, field::XFORM2, [e, f, ppu, kind_value]);
         let [ia, ib, ic, id, ie, iff] = inv.m;
-        put(&mut inst, field::INV, [ia, ib, ic, id]);
-        put(&mut inst, field::INV2, [ie, iff, opacity, 0.0]);
-        put(&mut inst, field::CLIP, clip_px);
-        Ok(Some((inst, ppu)))
+        put(inst, field::INV, [ia, ib, ic, id]);
+        put(inst, field::INV2, [ie, iff, opacity, 0.0]);
+        put(inst, field::CLIP, clip_px);
+        Ok(Some(ppu))
     }
 
     /// Sets the draw bounds; returns false if they are off screen.
@@ -588,8 +590,16 @@ impl Encoder {
     }
 
     fn quad(&mut self, index: usize, q: &Quad) -> Result<(), RenderError> {
-        let Some((mut inst, ppu)) =
-            self.base(index, q.rect, q.transform, q.clip, q.opacity, kind::QUAD)?
+        let mut inst = [0.0; INSTANCE_FLOATS];
+        let Some(ppu) = self.base(
+            &mut inst,
+            index,
+            q.rect,
+            q.transform,
+            q.clip,
+            q.opacity,
+            kind::QUAD,
+        )?
         else {
             return Ok(());
         };
@@ -664,7 +674,9 @@ impl Encoder {
     }
 
     fn backdrop(&mut self, index: usize, b: &Backdrop) -> Result<(), RenderError> {
-        let Some((mut inst, ppu)) = self.base(
+        let mut inst = [0.0; INSTANCE_FLOATS];
+        let Some(ppu) = self.base(
+            &mut inst,
             index,
             b.rect,
             b.transform,
