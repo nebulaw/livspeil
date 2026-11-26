@@ -131,6 +131,13 @@ impl SegmentedControl {
         let sel = self.selected.min(n.saturating_sub(1));
         #[allow(clippy::cast_precision_loss)]
         let pill_x = w * sel as f32;
+        // Dark: a lighter pill on a dark track. Light: a bright pill on a
+        // slightly darker track, like macOS.
+        let (track, pill) = if c.surface[3].l > c.surface[1].l {
+            (c.surface[1], c.surface[3])
+        } else {
+            (c.surface[2], c.surface[0])
+        };
         let mut el = div()
             .name("segmented")
             .key_context("SegmentedControl")
@@ -138,14 +145,14 @@ impl SegmentedControl {
             .flex_row()
             .p(SEGMENT_INSET)
             .rounded(m.radius)
-            .bg(c.surface[1])
+            .bg(track)
             .border(1.0, style::hairline(theme))
             .child(
                 div()
                     .key("pill")
                     .absolute(Rect::new(SEGMENT_INSET, SEGMENT_INSET, w, inner_h))
                     .rounded((m.radius - SEGMENT_INSET).max(2.0))
-                    .bg(c.surface[3])
+                    .bg(pill)
                     .elevation(Elevation::E1)
                     .opacity(if n == 0 { 0.0 } else { 1.0 })
                     .translate(Vec2::new(pill_x, 0.0))
