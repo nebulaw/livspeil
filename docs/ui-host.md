@@ -62,9 +62,8 @@ The standard `SceneRenderer`: the `livspeil-ui-paint` bridge turns each
 scene into a display list plus glyph atlas uploads, which it applies to a
 `livspeil-ui-render` `Renderer` before encoding and drawing the frame.
 It rebuilds the GPU renderer (and re-uploads the whole glyph atlas) when
-the surface format changes, and when the surface cannot be sampled
-(no `TEXTURE_BINDING`) it replaces every backdrop with an opaque quad of
-its tint (`without_backdrops`: the T0 / Reduce transparency look). It
+the surface format changes, and picks a blur path per frame (see "Backdrop
+blur paths" below). It
 also widens each text run by one pixel (`widen_text_runs`): layout rounds
 boxes to whole pixels, and the paint bridge wraps text that exceeds its
 box by more than half a pixel, which would break labels laid out at their
@@ -97,7 +96,7 @@ pub trait SceneRenderer {
 always a non-sRGB 8-bit format (`Bgra8Unorm` on macOS). The UI composites
 gamma-encoded sRGB (UI spec, section 3), so an `*Srgb` surface would
 encode twice. The usage includes `TEXTURE_BINDING` when the surface
-supports it, which backdrop blur needs. The renderer submits on
+supports it; blur works either way (see "Backdrop blur paths"). The renderer submits on
 `gpu.queue`, and the host presents. Errors are logged and the frame is
 skipped. External renderers report failures as
 `HostError::Renderer(Box<dyn Error>)`, or as `HostError::Render(RenderError)`.
@@ -289,6 +288,46 @@ default), and stalls are clamped to 50 ms.
 Frame times (CPU time from redraw to present) are collected in
 `FrameTimes` (count, skipped, last, moving average, maximum), available as
 `Host::frame_times()`, and logged at exit through the `log` crate.
+
+## Backdrop blur paths
+
+Backdrop blur samples what was drawn before it, so the frame has to be
+somewhere a shader can read. `Renderer::render` picks one of three paths
+from the renderer's device check and the target's format and usage (the
+pure function `choose_blur_path`, unit-tested):
+
+| Path | When | What happens |
+|---|---|---|
+| `Direct` | target has `TEXTURE_BINDING` (Vulkan swapchains) | draw into the target, sample it |
+| `Offscreen` | render-only target (Metal drawables) | draw into an internal texture, sample that, blit it 1:1 into the target |
+| `Fallback(reason)` | blur pipelines or the `Rgba16Float` level format were rejected at `Renderer::new`, or the format is not `Bgra8Unorm`/`Rgba8Unorm`, or the target is not renderable | every backdrop is drawn as a plain opaque quad of its own colour (`DisplayList::without_backdrops`, no blur, no extra tint) |
+
+Why `Offscreen` exists: wgpu-hal 30's Metal `surface_capabilities` lists
+`COLOR_TARGET | COPY_SRC | COPY_DST | STORAGE_*` and not `RESOURCE`
+(`TEXTURE_BINDING`), so a Metal surface can never be sampled. The host
+asks only for what the surface offers, and before this path existed the
+renderer silently dropped every backdrop to an opaque quad on macOS.
+
+Fallback is never silent (decision D63): `PaintRenderer` logs one
+`warn!` with the reason when the path becomes `Fallback`, `info!` for the
+other two, `PaintRenderer::on_blur_path` reports every change, and the
+gallery's Materials page shows a note while blur is off.
+`Renderer::blur_support()` is `Supported` or `Fallback(reason)`;
+`Renderer::render` refuses a frame with backdrops in fallback
+(`RenderError::BlurUnavailable`), so callers cannot hide it.
+
+### `--gpu-info`
+
+```sh
+cargo run -p livspeil-ui-gallery -- --gpu-info
+```
+
+Opens a small window, prints the backend, adapter, driver, surface
+formats, usages and present modes, the format capabilities the blur needs,
+the renderer's device check and the chosen blur path, then exits (library
+entry: `livspeil_ui_host_winit::gpu_info()`). Paste the output into bug
+reports. `RUST_LOG=info` also logs the surface capabilities and the blur
+path when the app starts.
 
 ## Surface details
 

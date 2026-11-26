@@ -287,6 +287,11 @@ cargo run -p livspeil-ui-gallery            # opens on Buttons
 cargo run -p livspeil-ui-gallery -- dock    # or any page by its slug (below)
 ```
 
+`cargo run -p livspeil-ui-gallery -- --gpu-info` prints the GPU backend,
+adapter, driver, surface formats and usages, and which backdrop-blur path
+is chosen (see `docs/ui-host.md`, "Backdrop blur paths"); paste it into
+bug reports.
+
 A window with a Frost sidebar of pages and a toolbar opens (Metal on
 macOS, Vulkan or OpenGL ES on Linux). The sidebar is grouped and scrolls
 when the window is short:

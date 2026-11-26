@@ -12,14 +12,22 @@ use livspeil_ui_theme::Theme;
 
 use crate::{HostError, RenderTarget, SceneRenderer};
 
+/// Observer of blur path changes.
+type BlurObserver = Box<dyn FnMut(&render::BlurPath)>;
+
 /// Draws scenes with the paint bridge: each scene becomes a display list
 /// plus glyph atlas uploads, applied to the GPU renderer before the frame.
 ///
 /// - The GPU renderer is (re)built for the surface format; a new renderer
 ///   has no atlas texture, so the whole glyph atlas is uploaded again.
-/// - Backdrop blur samples the surface. When the surface cannot be sampled
-///   (no `TEXTURE_BINDING` usage), every backdrop becomes an opaque quad of
-///   its tint: the materials' T0 / "Reduce transparency" look.
+/// - Backdrop blur samples what was drawn so far. A surface that can be
+///   sampled (Vulkan) is drawn into directly; a render-only one (Metal
+///   drawables) goes through an internal texture and a blit
+///   ([`BlurPath`]). When blur cannot run at all (the device rejected the
+///   blur pipelines, or the surface is not renderable), every backdrop
+///   becomes an opaque quad of its own colour, one warning is logged with
+///   the reason, and [`PaintRenderer::on_blur_path`] observers are told
+///   (decision D63).
 ///
 /// Give the app the bridge's text measurer
 /// (`app.set_text_measurer(renderer.bridge().text.measurer())`) so labels
@@ -28,6 +36,8 @@ pub struct PaintRenderer {
     bridge: PaintBridge,
     clear: render::Color,
     renderer: Option<(wgpu::TextureFormat, render::Renderer)>,
+    blur_path: Option<render::BlurPath>,
+    on_blur_path: Option<BlurObserver>,
 }
 
 impl std::fmt::Debug for PaintRenderer {
@@ -35,6 +45,7 @@ impl std::fmt::Debug for PaintRenderer {
         f.debug_struct("PaintRenderer")
             .field("clear", &self.clear)
             .field("format", &self.renderer.as_ref().map(|(f, _)| *f))
+            .field("blur_path", &self.blur_path)
             .finish_non_exhaustive()
     }
 }
@@ -47,7 +58,22 @@ impl PaintRenderer {
             bridge,
             clear,
             renderer: None,
+            blur_path: None,
+            on_blur_path: None,
         }
+    }
+
+    /// Call `f` with the blur path whenever it is first known or changes
+    /// (the first frame, a new surface format). The gallery uses this to
+    /// show a note on its Materials page when blur is in fallback.
+    pub fn on_blur_path(&mut self, f: impl FnMut(&render::BlurPath) + 'static) {
+        self.on_blur_path = Some(Box::new(f));
+    }
+
+    /// The blur path chosen for the last frame (`None` before the first).
+    #[must_use]
+    pub fn blur_path(&self) -> Option<&render::BlurPath> {
+        self.blur_path.as_ref()
     }
 
     /// A renderer clearing to the theme's `surface.0`.
@@ -119,21 +145,10 @@ fn renderer_error(e: impl std::error::Error + Send + Sync + 'static) -> HostErro
     HostError::Renderer(Box::new(e))
 }
 
-/// Replace every backdrop with an opaque quad of its tint (surfaces that
-/// cannot be sampled; what T0 and "Reduce transparency" look like).
+/// Replace every backdrop with an opaque quad of its own colour (blur
+/// unavailable; what T0 and "Reduce transparency" look like).
 pub fn without_backdrops(list: &mut render::DisplayList) {
-    for item in &mut list.items {
-        if let render::Primitive::Backdrop(b) = &item.primitive {
-            let mut q = render::Quad::new(b.rect, b.tint.with_alpha(1.0));
-            q.radii = b.radii;
-            q.corners = b.corners;
-            q.shadows = b.shadows.clone();
-            q.clip = b.clip;
-            q.opacity = b.opacity;
-            q.transform = b.transform;
-            item.primitive = render::Primitive::Quad(q);
-        }
-    }
+    list.without_backdrops();
 }
 
 impl SceneRenderer for PaintRenderer {
@@ -160,8 +175,27 @@ impl SceneRenderer for PaintRenderer {
             .bridge
             .paint_scene(&scene, target.scale, &mut list)
             .map_err(renderer_error)?;
-        if !target.usage.contains(wgpu::TextureUsages::TEXTURE_BINDING) {
-            without_backdrops(&mut list);
+        let path = renderer.blur_path(target.usage);
+        if self.blur_path.as_ref() != Some(&path) {
+            match &path {
+                render::BlurPath::Direct => {
+                    log::info!("backdrop blur: direct (surface is sampled)")
+                }
+                render::BlurPath::Offscreen => log::info!(
+                    "backdrop blur: through an offscreen texture (the surface cannot be sampled, usage {:?})",
+                    target.usage
+                ),
+                render::BlurPath::Fallback(why) => log::warn!(
+                    "backdrop blur disabled, drawing plain opaque colours instead: {why}"
+                ),
+            }
+            if let Some(f) = &mut self.on_blur_path {
+                f(&path);
+            }
+            self.blur_path = Some(path.clone());
+        }
+        if matches!(path, render::BlurPath::Fallback(_)) {
+            list.without_backdrops();
         }
         renderer.update_atlases(&gpu.device, &gpu.queue, &updates)?;
         let frame = render::encode(

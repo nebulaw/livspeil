@@ -57,6 +57,7 @@ mod gpu;
 mod image;
 mod list;
 mod shade;
+mod support;
 
 pub use atlas::{AtlasStore, AtlasUpdate, MAX_ATLAS_SIZE};
 pub use color::{Color, linear_to_srgb, oklab_to_srgb, srgb_to_linear};
@@ -73,6 +74,7 @@ pub use list::{
     GradientStop, Highlight, HighlightKind, Image, Item, MAX_GRADIENT_STOPS, Primitive, Quad,
     Radii, Shadow,
 };
+pub use support::{BlurPath, BlurSupport, choose_blur_path};
 
 /// Errors from encoding or rendering.
 #[derive(Debug, Clone, PartialEq)]
@@ -101,6 +103,9 @@ pub enum RenderError {
     Device(String),
     /// The target texture does not match the frame or renderer.
     Target(&'static str),
+    /// Backdrop blur is unavailable on this device or target (see
+    /// [`BlurSupport`]); the text says why.
+    BlurUnavailable(String),
     /// Reading the target back failed.
     Readback(String),
     /// An atlas update is invalid.
@@ -122,6 +127,7 @@ impl std::fmt::Display for RenderError {
             RenderError::NoAdapter(e) => write!(f, "no GPU adapter available: {e}"),
             RenderError::Device(e) => write!(f, "GPU device error: {e}"),
             RenderError::Target(e) => write!(f, "target texture: {e}"),
+            RenderError::BlurUnavailable(e) => write!(f, "backdrop blur unavailable: {e}"),
             RenderError::Readback(e) => write!(f, "reading back the target failed: {e}"),
             RenderError::Atlas(e) => write!(f, "atlas update: {e}"),
         }

@@ -18,6 +18,7 @@ use crate::atlas::AtlasUpdate;
 use crate::cpu::{PassParams, blur_passes};
 use crate::encode::{Frame, INSTANCE_FLOATS, MAX_BLUR_LEVELS, Op, level_size};
 use crate::image::RgbaImage;
+use crate::support::{BlurPath, BlurSupport, choose_blur_path};
 
 /// Format of the offscreen targets made by [`GpuContext::render_to_image`].
 pub const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -101,7 +102,20 @@ impl GpuContext {
         });
         let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         renderer.render(&self.device, &self.queue, frame, &target)?;
+        let img = self.read_texture(&target, w, h);
+        if let Some(err) = pollster::block_on(scope.pop()) {
+            return Err(RenderError::Device(err.to_string()));
+        }
+        img
+    }
 
+    /// Reads back a 4-byte-per-pixel texture (needs `COPY_SRC`).
+    pub fn read_texture(
+        &self,
+        target: &wgpu::Texture,
+        w: u32,
+        h: u32,
+    ) -> Result<RgbaImage, RenderError> {
         let unpadded = w as usize * 4;
         let padded = unpadded.div_ceil(256) * 256;
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -117,7 +131,7 @@ impl GpuContext {
             });
         enc.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
-                texture: &target,
+                texture: target,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -137,9 +151,6 @@ impl GpuContext {
             },
         );
         self.queue.submit([enc.finish()]);
-        if let Some(err) = pollster::block_on(scope.pop()) {
-            return Err(RenderError::Device(err.to_string()));
-        }
         let slice = buffer.slice(..);
         let (tx, rx) = mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |r| {
@@ -179,6 +190,10 @@ pub struct Renderer {
     globals_layout: wgpu::BindGroupLayout,
     texture_layout: wgpu::BindGroupLayout,
     pass_layout: wgpu::BindGroupLayout,
+    blit_pipeline: wgpu::RenderPipeline,
+    blit_layout: wgpu::BindGroupLayout,
+    blur_support: BlurSupport,
+    offscreen: Option<wgpu::Texture>,
     sampler: wgpu::Sampler,
     globals: wgpu::Buffer,
     instances: Option<wgpu::Buffer>,
@@ -229,6 +244,23 @@ fn create_atlas(
     (texture, bind_group)
 }
 
+fn create_level(device: &wgpu::Device, w: u32, h: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("blur level"),
+        size: wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: LEVEL_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    })
+}
+
 impl Renderer {
     /// Usages a target texture needs: render attachment, plus texture
     /// binding so backdrops can blur it.
@@ -247,6 +279,10 @@ impl Renderer {
         let blur_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("blur.wgsl"),
             source: wgpu::ShaderSource::Wgsl(blur_src.into()),
+        });
+        let blit_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("blit.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/blit.wgsl").into()),
         });
         let vis = wgpu::ShaderStages::VERTEX_FRAGMENT;
         let globals_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -324,6 +360,19 @@ impl Renderer {
                 count: None,
             }],
         });
+        let blit_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("blit"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            }],
+        });
         let premul = wgpu::BlendState {
             color: wgpu::BlendComponent {
                 src_factor: wgpu::BlendFactor::One,
@@ -383,6 +432,9 @@ impl Renderer {
             format,
             Some(premul),
         );
+        // Everything blur needs is built inside a validation scope: a
+        // device that rejects it must not take the whole UI down (D63).
+        let blur_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let backdrop_pipeline = pipeline(
             "backdrop",
             &[Some(&globals_layout), Some(&texture_layout)],
@@ -410,6 +462,15 @@ impl Renderer {
             LEVEL_FORMAT,
             None,
         );
+        let blit_pipeline = pipeline(
+            "blit",
+            &[Some(&blit_layout)],
+            &blit_module,
+            "vs_blit",
+            "fs_blit",
+            format,
+            None,
+        );
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("linear clamp"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -427,7 +488,35 @@ impl Renderer {
         });
         // Zero-initialized: glyphs whose atlas is missing draw nothing.
         let (_, empty_atlas) = create_atlas(device, &atlas_layout, [1, 1]);
+        // Probe the level format the way a blur pass uses it: a render
+        // attachment that a filtering sampler reads.
+        let probe = create_level(device, 1, 1);
+        let probe_view = probe.create_view(&wgpu::TextureViewDescriptor::default());
+        let _probe_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("blur probe"),
+            layout: &texture_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&probe_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+        let blur_support = match pollster::block_on(blur_scope.pop()) {
+            None => BlurSupport::Supported,
+            Some(e) => BlurSupport::Fallback(format!(
+                "blur pipelines or the {LEVEL_FORMAT:?} blur level format were rejected: {e}"
+            )),
+        };
         Renderer {
+            blit_pipeline,
+            blit_layout,
+            blur_support,
+            offscreen: None,
             format,
             quad_pipeline,
             backdrop_pipeline,
@@ -521,30 +610,39 @@ impl Renderer {
             return;
         }
         self.levels = (1..=MAX_BLUR_LEVELS)
-            .map(|l| {
-                device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("blur level"),
-                    size: wgpu::Extent3d {
-                        width: level_size(w, l),
-                        height: level_size(h, l),
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: LEVEL_FORMAT,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::TEXTURE_BINDING,
-                    view_formats: &[],
-                })
-            })
+            .map(|l| create_level(device, level_size(w, l), level_size(h, l)))
             .collect();
         self.levels_for = (w, h);
     }
 
+    /// Whether this renderer can blur backdrops on its device (found when
+    /// it was created). When it is `Fallback`, draw the frame from
+    /// [`DisplayList::without_backdrops`](crate::DisplayList::without_backdrops).
+    pub fn blur_support(&self) -> &BlurSupport {
+        &self.blur_support
+    }
+
+    /// Turns blur off as if the device had rejected it (tests, and the
+    /// `LIVSPEIL_NO_BLUR` style overrides of hosts).
+    pub fn force_blur_fallback(&mut self, reason: impl Into<String>) {
+        self.blur_support = BlurSupport::Fallback(reason.into());
+    }
+
+    /// How a frame with backdrops would reach a target of this renderer's
+    /// format and the given `usage` (see [`choose_blur_path`]).
+    pub fn blur_path(&self, usage: wgpu::TextureUsages) -> BlurPath {
+        choose_blur_path(&self.blur_support, self.format, usage)
+    }
+
     /// Records and submits a frame into `target` (which must have
-    /// [`Renderer::TARGET_USAGE`] and the renderer's format, and the
-    /// frame's size).
+    /// [`wgpu::TextureUsages::RENDER_ATTACHMENT`], the renderer's format
+    /// and the frame's size).
+    ///
+    /// A frame with backdrops draws straight into `target` when it also
+    /// has `TEXTURE_BINDING` ([`Renderer::TARGET_USAGE`]); otherwise (Metal
+    /// surface textures) into an internal texture that is then blitted
+    /// into `target`. With [`BlurSupport::Fallback`] such a frame is
+    /// refused: draw it from `DisplayList::without_backdrops` instead.
     pub fn render(
         &mut self,
         device: &wgpu::Device,
@@ -559,6 +657,83 @@ impl Renderer {
         if target.width() != w || target.height() != h {
             return Err(RenderError::Target("size differs from the frame's"));
         }
+        if !frame.ops.iter().any(|op| matches!(op, Op::Backdrop { .. })) {
+            return self.render_direct(device, queue, frame, target);
+        }
+        match self.blur_path(target.usage()) {
+            BlurPath::Direct => self.render_direct(device, queue, frame, target),
+            BlurPath::Fallback(reason) => Err(RenderError::BlurUnavailable(reason)),
+            BlurPath::Offscreen => {
+                let off = match self.offscreen.take() {
+                    Some(t) if t.width() == w && t.height() == h => t,
+                    _ => device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("offscreen frame"),
+                        size: wgpu::Extent3d {
+                            width: w,
+                            height: h,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: self.format,
+                        usage: Renderer::TARGET_USAGE,
+                        view_formats: &[],
+                    }),
+                };
+                let result = self.render_direct(device, queue, frame, &off);
+                if result.is_ok() {
+                    self.blit(device, queue, &off, target);
+                }
+                self.offscreen = Some(off);
+                result
+            }
+        }
+    }
+
+    /// Copies `src` into `dst` (same size and format) with a render pass.
+    fn blit(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        src: &wgpu::Texture,
+        dst: &wgpu::Texture,
+    ) {
+        let src_view = src.create_view(&wgpu::TextureViewDescriptor::default());
+        let dst_view = dst.create_view(&wgpu::TextureViewDescriptor::default());
+        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("blit"),
+            layout: &self.blit_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&src_view),
+            }],
+        });
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("blit"),
+        });
+        {
+            let mut pass = target_pass(
+                &mut enc,
+                &dst_view,
+                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                "blit",
+            );
+            pass.set_pipeline(&self.blit_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        queue.submit([enc.finish()]);
+    }
+
+    fn render_direct(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        frame: &Frame,
+        target: &wgpu::Texture,
+    ) -> Result<(), RenderError> {
+        let (w, h) = (frame.options.width, frame.options.height);
         let has_backdrops = frame.ops.iter().any(|op| matches!(op, Op::Backdrop { .. }));
         if has_backdrops
             && !target
