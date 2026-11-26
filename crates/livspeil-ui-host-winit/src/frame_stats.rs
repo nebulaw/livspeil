@@ -291,6 +291,7 @@ pub struct FrameStats {
     last_at: Option<Duration>,
     seq: u64,
     skipped: u64,
+    reconfigures: u64,
 }
 
 impl Default for FrameStats {
@@ -309,6 +310,7 @@ impl FrameStats {
             last_at: None,
             seq: 0,
             skipped: 0,
+            reconfigures: 0,
         }
     }
 
@@ -333,6 +335,19 @@ impl FrameStats {
     /// Count a redraw that drew nothing (occluded, surface unavailable).
     pub fn skip(&mut self) {
         self.skipped += 1;
+    }
+
+    /// Count a surface reconfiguration forced by the driver (a suboptimal,
+    /// outdated or lost swapchain). Reconfiguring recreates the swapchain:
+    /// if this grows every frame, that is the stutter.
+    pub fn reconfigured(&mut self) {
+        self.reconfigures += 1;
+    }
+
+    /// Surface reconfigurations forced by the driver.
+    #[must_use]
+    pub fn reconfigures(&self) -> u64 {
+        self.reconfigures
     }
 
     /// Redraws that drew nothing.
@@ -618,9 +633,10 @@ pub fn dump_text(label: &str, report: &GpuReport, stats: &FrameStats, seconds: f
     }
     let _ = writeln!(
         out,
-        "presented {} frames, {} redraws drew nothing; summary of the last {} stored:",
+        "presented {} frames, {} redraws drew nothing, {} swapchain reconfigurations (suboptimal/outdated/lost); summary of the last {} stored:",
         stats.total_frames(),
         stats.skipped(),
+        stats.reconfigures(),
         stats.len()
     );
     for l in stats.summary_all().lines() {
@@ -721,8 +737,9 @@ mod tests {
         });
         s.skip();
         s.skip();
+        s.reconfigured();
         assert_eq!(s.summary_all().rerenders, 1);
-        assert_eq!(s.skipped(), 2);
+        assert_eq!((s.skipped(), s.reconfigures()), (2, 1));
     }
 
     #[test]

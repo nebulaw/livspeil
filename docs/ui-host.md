@@ -329,6 +329,57 @@ entry: `livspeil_ui_host_winit::gpu_info()`). Paste the output into bug
 reports. `RUST_LOG=info` also logs the surface capabilities and the blur
 path when the app starts.
 
+## Frame HUD and frame log
+
+The host measures every presented frame when `HostOptions::frame_hud` is
+set (the gallery sets it). Nothing is measured, and F3 and F4 stay with the
+app, when it is `None`. Pure code, unit-tested headlessly: `frame_stats`
+(samples, ring buffer, statistics, log path, dump text) and `hud` (options
+and the overlay's paint commands).
+
+Per frame, in order: **build** (`App::draw_frame`: render, diff, layout,
+core paint list), **acquire** (`Surface::get_current_texture`; blocks on
+vsync under FIFO), **paint** (scene to display list and atlas uploads),
+**encode** (display list to GPU instance data), **submit** (recording and
+submitting the GPU commands; CPU time, the GPU runs asynchronously) and
+**present**. The renderer reports paint, encode and submit through
+`SceneRenderer::take_timings` (`RenderTimings`, also display list items,
+instances, draw calls and bytes uploaded); a renderer that does not
+override it reports zeros. The *interval* is the time between two
+presents; gaps over 250 ms (the window was idle, as designed) are not
+intervals. *Late* frames have an interval over 1.5 times the median
+interval.
+
+- **F3** shows or hides the overlay (bottom right; it covers the last 120
+  frames). **F4** appends to the frame log: the graphics report, the
+  summary of every stored frame (the last 16,384) and a CSV line per frame
+  of the last 10 s (`HudOptions::dump_seconds`), and prints the summary to
+  stderr. The log is also written once more when the window closes, and
+  the file is replaced at each start. Path:
+  `$XDG_STATE_HOME/livspeil/gallery-frames.log`, else
+  `~/.local/state/livspeil/` (Linux), `~/Library/Logs/livspeil/` (macOS),
+  `%LOCALAPPDATA%\livspeil\` (Windows); the gallery prints it at startup.
+- The overlay is appended to the scene for the render only and removed
+  again, so the app never sees it. It costs a little itself (a summary of
+  120 frames and about a dozen text runs per frame); judge CPU times with
+  it off if a few tenths of a millisecond matter.
+- The overlay and the log also show the **backend**, **adapter**,
+  **driver** and driver info, the **present mode** (requested and actual,
+  plus what the surface supports), **surface format**, **composite alpha**,
+  **frame latency**, **scale factor**, **monitor refresh rate**, surface
+  size, redraws that drew nothing, and **swapchain reconfigurations**
+  (suboptimal, outdated or lost surfaces: each one recreates the
+  swapchain, so a count that grows every frame is a stutter by itself).
+- Environment: `LIVSPEIL_PRESENT_MODE` = `fifo`, `mailbox`, `immediate` or
+  `auto` (`AutoVsync`; also `autonovsync`), `LIVSPEIL_FRAME_LATENCY` = 1 to
+  3 (`desired_maximum_frame_latency`; wgpu asks the swapchain for latency
+  plus one images, at least the driver's minimum). The host applies them
+  only where the embedding app asks (`SurfaceOptions::with_env`); the
+  gallery does. A mode the surface does not support falls back to FIFO, is
+  logged, and shows as `present Fifo (asked Mailbox)`. Gallery flags:
+  `--hud` (or `LIVSPEIL_HUD=1`) starts with the overlay on,
+  `--present-mode=MODE` beats the environment variable.
+
 ## Surface details
 
 - Scale factor changes: positions are tracked in logical pixels. The

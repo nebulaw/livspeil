@@ -341,6 +341,20 @@ Things to look at:
 - **Hot reload**: edit `~/.config/livspeil/ui/{theme,motion,keymap}.toml`
   (see `docs/ui-config.md`) while it runs; the toolbar follows.
 - **Idle**: when nothing moves the process draws no frames.
+- **Frame HUD**: F3 shows or hides a frame-time overlay (bottom right),
+  F4 writes a summary and the per-frame CSV of the last 10 s to the frame
+  log (on macOS hold fn for F3 and F4). Start with it visible using
+  `--hud` or `LIVSPEIL_HUD=1`. It shows FPS, interval avg/p95/max, late
+  frames (interval over 1.5x the median), the CPU phases (build, paint,
+  encode, submit, acquire, present), wgpu backend, adapter, driver,
+  present mode, surface format, frame latency, scale factor and monitor
+  refresh rate. The log is `$XDG_STATE_HOME/livspeil/gallery-frames.log`
+  (`~/.local/state/livspeil/` by default; `~/Library/Logs/livspeil/` on
+  macOS); the path is printed at startup. Send that file when reporting
+  stutter. `LIVSPEIL_PRESENT_MODE=fifo|mailbox|immediate|auto` (or
+  `--present-mode=`) and `LIVSPEIL_FRAME_LATENCY=1..3` change how frames
+  are presented; the HUD shows what the surface actually uses. Details:
+  `docs/ui-host.md`, "Frame HUD and frame log".
 - **Window**: on macOS the gallery draws its own titlebar under the
   transparent native one (drag it to move the window, double-click to
   zoom). On Linux the window keeps the system's decorations.

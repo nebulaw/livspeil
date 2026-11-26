@@ -203,6 +203,12 @@ impl Hud {
     /// report.
     fn lines(&self) -> Vec<String> {
         let mut lines = self.stats.summary(HUD_WINDOW).hud_lines();
+        lines.push(format!(
+            "frames {}  empty redraws {}  swapchain reconfigures {}",
+            self.stats.total_frames(),
+            self.stats.skipped(),
+            self.stats.reconfigures()
+        ));
         lines.extend(self.report.hud_lines());
         let (hotkeys, dumps) = (crate::hud::HUD_KEY, crate::hud::DUMP_KEY);
         lines.push(match &self.log {
@@ -445,6 +451,9 @@ impl<R: SceneRenderer> Host<R> {
     }
 
     fn reconfigure(&mut self) {
+        if let Some(hud) = &mut self.hud {
+            hud.stats.reconfigured();
+        }
         if let Some(gfx) = &mut self.gfx {
             let size = gfx.window.inner_size();
             if size.width > 0 && size.height > 0 {
