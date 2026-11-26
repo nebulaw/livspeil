@@ -93,8 +93,10 @@ surface; D63 blur fallback is never silent; D64 Floor spike.
 
 Answers given in a local session (2026-11-26), numbers not yet assigned:
 - Finish P1 polish before starting P2: the visual design is not there yet.
-- The Floor spike (P3) is not pulled earlier. This conflicts with D64 and the
-  merged spike; to be confirmed.
+- The Floor spike is part of this round, as D64 records (confirmed
+  2026-11-26). This replaces the earlier "not yet" answer from the same day.
+- From 2026-11-26 the project is run from local Claude Code sessions and this
+  document is the only decision log. New decisions start at D65.
 - The hub doc, kernel spec and repository conventions are published in the
   repository (`docs/`, `specs/`).
 
