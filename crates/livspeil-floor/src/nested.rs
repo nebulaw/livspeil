@@ -7,36 +7,30 @@
 use std::{
     cell::RefCell,
     path::PathBuf,
-    process::{Child, Command},
     rc::Rc,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
 use smithay::{
     backend::{
         allocator::Fourcc,
-        input::{
-            AbsolutePositionEvent, Axis, ButtonState, InputEvent, KeyState, KeyboardKeyEvent,
-            PointerAxisEvent, PointerButtonEvent,
-        },
         renderer::{ExportMem, ImportDma, gles::GlesRenderer},
         winit::{self, WinitEvent, WinitGraphicsBackend},
     },
     output::Mode,
     reexports::{
-        calloop::{EventLoop, Interest, Mode as PollMode, PostAction, generic::Generic},
+        calloop::EventLoop,
         wayland_server::Display,
         winit::{dpi::LogicalSize, window::Window},
     },
     utils::{Rectangle, Transform},
-    wayland::socket::ListeningSocketSource,
 };
 
 use crate::{
+    common::{BackendError, Children, Data, ctx, handle_input, insert_wayland_sources},
     geometry::Rect,
     render::{Effects, FloorRenderer, Panel},
-    state::{ClientState, FloorState},
+    state::FloorState,
     stats::FrameStats,
 };
 
@@ -73,37 +67,13 @@ impl Default for Options {
 }
 
 /// Fatal error of the nested compositor.
-#[derive(Debug)]
-pub struct NestedError(pub String);
-
-impl std::fmt::Display for NestedError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-impl std::error::Error for NestedError {}
+pub type NestedError = BackendError;
 
 fn e(what: &str, err: impl std::fmt::Display) -> NestedError {
-    NestedError(format!("{what}: {err}"))
-}
-
-struct Data {
-    state: FloorState,
-    display: Display<FloorState>,
+    ctx(what, err)
 }
 
 type Backend = Rc<RefCell<WinitGraphicsBackend<GlesRenderer>>>;
-
-/// Kills spawned clients on exit.
-struct Children(Vec<Child>);
-impl Drop for Children {
-    fn drop(&mut self) {
-        for c in &mut self.0 {
-            let _ = c.kill();
-            let _ = c.wait();
-        }
-    }
-}
 
 fn handle_winit(data: &mut Data, event: WinitEvent) {
     let state = &mut data.state;
@@ -121,28 +91,7 @@ fn handle_winit(data: &mut Data, event: WinitEvent) {
         WinitEvent::Redraw => state.needs_redraw = true,
         WinitEvent::CloseRequested => state.quit = true,
         WinitEvent::Focus(_) => {}
-        WinitEvent::Input(input) => match input {
-            InputEvent::Keyboard { event } => {
-                state.key(event.key_code(), event.state() == KeyState::Pressed);
-            }
-            InputEvent::PointerMotionAbsolute { event } => {
-                let (w, h) = state.output_size();
-                state.pointer_motion(event.x_transformed(w), event.y_transformed(h));
-            }
-            InputEvent::PointerButton { event } => {
-                state.pointer_button(event.button_code(), event.state() == ButtonState::Pressed);
-            }
-            InputEvent::PointerAxis { event } => {
-                let step = |axis| {
-                    event
-                        .amount(axis)
-                        .or_else(|| event.amount_v120(axis).map(|v| v * 15.0 / 120.0))
-                        .unwrap_or(0.0)
-                };
-                state.pointer_axis(step(Axis::Horizontal), step(Axis::Vertical));
-            }
-            _ => {}
-        },
+        WinitEvent::Input(input) => handle_input(state, input),
     }
 }
 
@@ -190,37 +139,7 @@ pub fn run(opts: Options) -> Result<(), NestedError> {
         EventLoop::try_new().map_err(|err| e("event loop", err))?;
     let handle = event_loop.handle();
 
-    let socket = ListeningSocketSource::new_auto().map_err(|err| e("wayland socket", err))?;
-    let socket_name = socket.socket_name().to_string_lossy().into_owned();
-    handle
-        .insert_source(socket, |stream, _, data| {
-            if let Err(err) = data
-                .display
-                .handle()
-                .insert_client(stream, Arc::new(ClientState::default()))
-            {
-                tracing::warn!("client rejected: {err}");
-            }
-        })
-        .map_err(|err| e("socket source", err))?;
-
-    // The display's poll fd wakes the loop when clients send requests.
-    let poll_fd = display
-        .backend()
-        .poll_fd()
-        .try_clone_to_owned()
-        .map_err(|err| e("poll fd", err))?;
-    handle
-        .insert_source(
-            Generic::new(poll_fd, Interest::READ, PollMode::Level),
-            |_, _, data| {
-                if let Err(err) = data.display.dispatch_clients(&mut data.state) {
-                    tracing::warn!("dispatch: {err}");
-                }
-                Ok(PostAction::Continue)
-            },
-        )
-        .map_err(|err| e("display source", err))?;
+    let socket_name = insert_wayland_sources(&handle, &mut display)?;
     handle
         .insert_source(winit_loop, |event, _, data| handle_winit(data, event))
         .map_err(|err| e("winit source", err))?;
@@ -230,18 +149,9 @@ pub fn run(opts: Options) -> Result<(), NestedError> {
         "run clients with:  WAYLAND_DISPLAY={socket_name} foot   (Ctrl+Alt+Q or closing the window quits)"
     );
 
-    let mut children = Children(Vec::new());
+    let mut children = Children::default();
     for cmd in &opts.spawn {
-        match Command::new("sh")
-            .arg("-c")
-            .arg(cmd)
-            .env("WAYLAND_DISPLAY", &socket_name)
-            .env_remove("DISPLAY")
-            .spawn()
-        {
-            Ok(c) => children.0.push(c),
-            Err(err) => tracing::warn!("cannot start {cmd:?}: {err}"),
-        }
+        children.spawn(cmd, &socket_name);
     }
 
     let mut data = Data { state, display };
@@ -351,7 +261,7 @@ pub fn run(opts: Options) -> Result<(), NestedError> {
             data.state.quit = true;
         }
         if started.elapsed() > Duration::from_secs(120) && opts.screenshot.is_some() {
-            return Err(NestedError(
+            return Err(BackendError(
                 "screenshot timed out: clients never mapped".into(),
             ));
         }

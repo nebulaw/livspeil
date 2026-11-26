@@ -64,6 +64,8 @@ pub struct Effects {
     pub shadows: bool,
     pub rounded: bool,
     pub blur: bool,
+    /// Draw a software pointer (the TTY build has no host cursor).
+    pub cursor: bool,
 }
 
 impl Default for Effects {
@@ -72,6 +74,7 @@ impl Default for Effects {
             shadows: true,
             rounded: true,
             blur: true,
+            cursor: false,
         }
     }
 }
@@ -288,6 +291,7 @@ impl FloorRenderer {
             if let (Some(p), Some(chain)) = (panel, self.chain.as_ref()) {
                 self.draw_frost(&mut frame, p.rect, &chain.out)?;
             }
+            self.draw_cursor(&mut frame, state, fx)?;
             sync = frame.finish()?;
         } else {
             let mut frame = renderer.render(target, out_size, target_transform)?;
@@ -311,6 +315,7 @@ impl FloorRenderer {
                     ],
                 )?;
             }
+            self.draw_cursor(&mut frame, state, fx)?;
             sync = frame.finish()?;
         }
         Ok(sync)
@@ -483,6 +488,16 @@ impl FloorRenderer {
             self.draw_client(frame, w, &layout, d, fx)?;
         }
         Ok(())
+    }
+
+    /// A small neutral dot: enough to see where the pointer is on a bare TTY.
+    fn draw_cursor(&self, frame: &mut GlesFrame<'_, '_>, state: &FloorState, fx: Effects) -> Result<(), RenderError> {
+        if !fx.cursor {
+            return Ok(());
+        }
+        let (x, y) = state.pointer;
+        let r = Rect::new(x as i32 - 1, y as i32 - 1, 14, 14);
+        self.rounded_box(frame, r, [7.0; 4], [1.0, 1.0, 1.0, 0.95], [0.0, 0.0, 0.0, 0.8])
     }
 
     fn draw_shadow(

@@ -13,6 +13,9 @@ pub mod geometry;
 pub mod stats;
 
 #[cfg(target_os = "linux")]
+pub mod common;
+
+#[cfg(target_os = "linux")]
 pub mod state;
 
 #[cfg(target_os = "linux")]

@@ -140,6 +140,8 @@ pub struct FloorState {
     /// A press was consumed by the Floor; swallow its release.
     swallow_release: bool,
     pub quit: bool,
+    /// Set by Ctrl+Alt+F1..F12; the TTY backend performs the switch.
+    pub vt_switch: Option<i32>,
     pub needs_redraw: bool,
 }
 
@@ -206,6 +208,7 @@ impl FloorState {
             drag: None,
             swallow_release: false,
             quit: false,
+            vt_switch: None,
             needs_redraw: true,
         }
     }
@@ -433,15 +436,15 @@ impl FloorState {
         pointer.frame(self);
     }
 
-    /// Keyboard key (evdev code + 8 is added by the caller as an XKB code).
-    /// Returns `true` when the Floor consumed the key.
+    /// Keyboard key (the XKB keycode: evdev code + 8). Compositor shortcuts
+    /// are intercepted here.
     pub fn key(&mut self, keycode: smithay::input::keyboard::Keycode, pressed: bool) {
         let Some(kb) = self.seat.get_keyboard() else {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();
         let time = self.time_ms();
-        let quit = kb.input::<bool, _>(
+        let action = kb.input::<Action, _>(
             self,
             keycode,
             if pressed {
@@ -452,16 +455,26 @@ impl FloorState {
             serial,
             time,
             |_, mods, handle| {
-                // Ctrl+Alt+Q quits the Floor (nested and TTY).
-                if pressed && mods.ctrl && mods.alt && handle.modified_sym() == Keysym::q {
-                    FilterResult::Intercept(true)
+                let sym = handle.modified_sym();
+                let vt_first = Keysym::XF86_Switch_VT_1.raw();
+                let vt_last = Keysym::XF86_Switch_VT_12.raw();
+                if !pressed {
+                    FilterResult::Forward
+                } else if mods.ctrl && mods.alt && sym == Keysym::q {
+                    // Ctrl+Alt+Q quits the Floor (nested and TTY).
+                    FilterResult::Intercept(Action::Quit)
+                } else if (vt_first..=vt_last).contains(&sym.raw()) {
+                    // Ctrl+Alt+Fn arrives as XF86Switch_VT_n.
+                    FilterResult::Intercept(Action::SwitchVt((sym.raw() - vt_first + 1) as i32))
                 } else {
                     FilterResult::Forward
                 }
             },
         );
-        if quit == Some(true) {
-            self.quit = true;
+        match action {
+            Some(Action::Quit) => self.quit = true,
+            Some(Action::SwitchVt(n)) => self.vt_switch = Some(n),
+            None => {}
         }
     }
 
@@ -472,6 +485,13 @@ impl FloorState {
 }
 
 const BTN_LEFT: u32 = 0x110;
+
+/// A compositor shortcut intercepted from the keyboard.
+#[derive(Debug, Clone, Copy)]
+enum Action {
+    Quit,
+    SwitchVt(i32),
+}
 
 /// Global serial counter.
 pub static SERIAL_COUNTER: smithay::utils::SerialCounter = smithay::utils::SerialCounter::new();
