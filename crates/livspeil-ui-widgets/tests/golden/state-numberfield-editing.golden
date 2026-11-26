@@ -1,12 +1,12 @@
 quad button:Save 12,12 53x32 r=6 fill=oklch(0.68 0.16 255 / 1)
 text label 24,20 29x17 "Save" size=13 color=oklch(1 0 0 / 0.96)
-quad button:Cancel 73,12 67x32 r=6 fill=oklch(0.2 0.01 265 / 1) border=1 oklch(1 0 0 / 0.06)
+quad button:Cancel 73,12 67x32 r=6 fill=oklch(0.19 0 0 / 1) border=1 oklch(1 0 0 / 0.06)
 text label 85,20 43x17 "Cancel" size=13 color=oklch(0.97 0 0 / 0.92)
 text label 160,20 28x17 "More" size=13 color=oklch(0.97 0 0 / 0.92)
 quad button:Delete 208,12 67x32 r=6 fill=oklch(0.66 0.2 25 / 1)
 text label 220,20 43x17 "Delete" size=13 color=oklch(1 0 0 / 0.96)
 opacity 0.4
-  quad button:Off 283,12 45x32 r=6 fill=oklch(0.2 0.01 265 / 1) border=1 oklch(1 0 0 / 0.06)
+  quad button:Off 283,12 45x32 r=6 fill=oklch(0.19 0 0 / 1) border=1 oklch(1 0 0 / 0.06)
   text label 295,20 21x17 "Off" size=13 color=oklch(0.97 0 0 / 0.92)
 pop
 quad icon:bx-trash 344,20 16x16 r=4 border=1.5 oklch(0.97 0 0 / 0.74)
@@ -16,7 +16,7 @@ transform [1 0 0 1 16 0]
 pop
 text label 56,54 14x17 "On" size=13 color=oklch(0.97 0 0 / 0.92)
 opacity 0.4
-  quad track 78,52 36x20 r=10 fill=oklch(0.24 0.01 265 / 1)
+  quad track 78,52 36x20 r=10 fill=oklch(0.23 0 0 / 1)
   quad thumb 80,54 16x16 r=8 fill=oklch(1 0 0 / 1)
 pop
 quad box 122,54 16x16 r=4 fill=oklch(0.68 0.16 255 / 1) border=1 oklch(0.68 0.16 255 / 1)
@@ -24,36 +24,36 @@ text mark 127,54 7x17 "✓" size=12.8 color=oklch(1 0 0 / 0.96)
 quad box 146,54 16x16 r=4 fill=oklch(0.68 0.16 255 / 1) border=1 oklch(0.68 0.16 255 / 1)
 text mark 151,54 7x17 "–" size=12.8 color=oklch(1 0 0 / 0.96)
 text label 170,54 36x17 "Mixed" size=13 color=oklch(0.97 0 0 / 0.92)
-quad box 214,54 16x16 r=4 fill=oklch(0.17 0.01 265 / 1) border=1 oklch(0.97 0 0 / 0.42)
+quad box 214,54 16x16 r=4 fill=oklch(0.15 0 0 / 1) border=1 oklch(0.97 0 0 / 0.42)
 opacity 0.4
-  quad circle 12,88 16x16 r=8 fill=oklch(0.17 0.01 265 / 1) border=1 oklch(0.97 0 0 / 0.42)
+  quad circle 12,88 16x16 r=8 fill=oklch(0.15 0 0 / 1) border=1 oklch(0.97 0 0 / 0.42)
   text label 36,88 7x17 "A" size=13 color=oklch(0.97 0 0 / 0.92)
 pop
 quad circle 51,88 16x16 r=8 fill=oklch(0.68 0.16 255 / 1) border=1 oklch(0.68 0.16 255 / 1)
 quad dot 56,93 6x6 r=3.2 fill=oklch(1 0 0 / 1)
 text label 75,88 7x17 "B" size=13 color=oklch(0.97 0 0 / 0.92)
-quad segmented 90,80 164x32 r=6 fill=oklch(0.17 0.01 265 / 1) border=1 oklch(1 0 0 / 0.06)
+quad segmented 90,80 164x32 r=6 fill=oklch(0.15 0 0 / 1) border=1 oklch(1 0 0 / 0.06)
 transform [1 0 0 1 80 0]
-  quad pill 92,82 80x28 r=4 fill=oklch(0.24 0.01 265 / 1) shadow=E1
+  quad pill 92,82 80x28 r=4 fill=oklch(0.23 0 0 / 1) shadow=E1
 pop
 text label 122,88 21x17 "Day" size=13 color=oklch(0.97 0 0 / 0.62)
 text label 198,88 29x17 "Week" size=13 color=oklch(0.97 0 0 / 0.92)
-quad track 12,134 120x4 r=2 fill=oklch(0.24 0.01 265 / 1)
+quad track 12,134 120x4 r=2 fill=oklch(0.23 0 0 / 1)
 quad fill 12,134 39x4 r=2 fill=oklch(0.68 0.16 255 / 0.7)
 transform [1 0 0 1 31.2 0]
   quad thumb 12,128 16x16 r=8 fill=oklch(1 0 0 / 1) border=1 oklch(0.68 0.16 255 / 1) shadow=E1
 pop
 text value 140,128 14x17 "30" size=13 features=tnum=1 color=oklch(0.97 0 0 / 0.62)
-quad number 162,120 120x32 r=6 fill=oklch(0.2 0.01 265 / 1) border=1 oklch(0.68 0.16 255 / 1)
+quad number 162,120 120x32 r=6 fill=oklch(0.19 0 0 / 1) border=1 oklch(0.68 0.16 255 / 1)
 clip 162,120 120x32 r=6
   quad selection-0 174,128 29x16 fill=oklch(0.68 0.16 255 / 0.35)
   text text 174,128 29x16 "1.25" size=13 color=oklch(0.97 0 0 / 0.92)
 pop
-quad text 12,160 140x32 r=6 fill=oklch(0.17 0.01 265 / 1) border=1 oklch(1 0 0 / 0.06)
+quad text 12,160 140x32 r=6 fill=oklch(0.15 0 0 / 1) border=1 oklch(1 0 0 / 0.06)
 clip 12,160 140x32 r=6
   text text 24,168 67x16 "hello world" size=13 color=oklch(0.97 0 0 / 0.92)
 pop
-quad select 160,160 120x32 r=6 fill=oklch(0.2 0.01 265 / 1) border=1 oklch(1 0 0 / 0.06)
+quad select 160,160 120x32 r=6 fill=oklch(0.19 0 0 / 1) border=1 oklch(1 0 0 / 0.06)
 text value 172,168 81x17 "Linear" size=13 color=oklch(0.97 0 0 / 0.92)
 text chevron 261,168 7x17 "▾" size=13 color=oklch(0.97 0 0 / 0.62)
 text label 288,168 36x17 "Label" size=13 color=oklch(0.97 0 0 / 0.62)

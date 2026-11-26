@@ -78,7 +78,7 @@ speed = 1.2
 - Spacing: 2, 4, 8, 12, 16, 24, 32. Radii: xs 4, sm 6, md 10, lg 14, window 12 (continuous corners).
 - Type (Inter): 11, 12, 13, 15, 17, 22, 28; weights 400, 500, 600; Simple density 13/15 body, Pro 12/13.
 - Row heights: Simple 32, Pro 24. Icon sizes: 14, 16, 20, 24.
-- Color roles (dark-first, OKLCH): `surface.0..3` at L ≈ 0.14, 0.17, 0.20, 0.24; `text.primary/secondary/tertiary` (high, 62%, 42% alpha); `accent` (adaptive, clamped for contrast); `danger`, `warning`, `success`, `focus-ring`.
+- Color roles (dark-first, OKLCH): `surface.0..3` neutral (chroma 0): dark L ≈ 0.10, 0.15, 0.19, 0.23, light #FAFAFA then L ≈ 0.95, 0.92, 0.89 (D59, D62); `text.primary/secondary/tertiary` (high, 62%, 42% alpha); `accent` (adaptive, clamped for contrast); `danger`, `warning`, `success`, `focus-ring`.
 - Elevation (two-layer shadows): e1 `0 1 2`; e2 `0 4 12` + `0 1 2`; e3 `0 12 32` + `0 2 6`; e4 `0 24 64` + `0 4 12`.
 
 ## 8. Materials

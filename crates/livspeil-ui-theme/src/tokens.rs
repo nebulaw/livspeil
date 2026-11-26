@@ -152,7 +152,8 @@ impl ColorRoles {
     pub fn dark() -> Self {
         let text = Color::oklch(0.97, 0.0, 0.0, 1.0);
         ColorRoles {
-            surface: [0.14, 0.17, 0.20, 0.24].map(|l| Color::oklch(l, 0.008, 265.0, 1.0)),
+            // Neutral (chroma 0) black ramp: no blue cast (D59).
+            surface: [0.10, 0.15, 0.19, 0.23].map(|l| Color::oklch(l, 0.0, 0.0, 1.0)),
             text_primary: text.with_alpha(0.92),
             text_secondary: text.with_alpha(0.62),
             text_tertiary: text.with_alpha(0.42),
@@ -169,7 +170,13 @@ impl ColorRoles {
     pub fn light() -> Self {
         let text = Color::oklch(0.16, 0.0, 0.0, 1.0);
         ColorRoles {
-            surface: [0.97, 0.95, 0.92, 0.89].map(|l| Color::oklch(l, 0.004, 265.0, 1.0)),
+            // `surface.0` is #FAFAFA (D62); the other surfaces stay neutral.
+            surface: [
+                Color::srgb8(0xFA, 0xFA, 0xFA, 0xFF),
+                Color::oklch(0.95, 0.0, 0.0, 1.0),
+                Color::oklch(0.92, 0.0, 0.0, 1.0),
+                Color::oklch(0.89, 0.0, 0.0, 1.0),
+            ],
             text_primary: text.with_alpha(0.90),
             text_secondary: text.with_alpha(0.62),
             text_tertiary: text.with_alpha(0.42),
@@ -325,22 +332,24 @@ impl Default for Tokens {
                 row_height: 24.0,
             },
             icons: IconSizes([14.0, 16.0, 20.0, 24.0]),
+            // Soft, wide, low-alpha stacks (D60): no hard dark bands on light
+            // surfaces.
             elevations: [
                 Shadow {
-                    key: ShadowLayer::new(0.0, 1.0, 2.0, 0.30),
+                    key: ShadowLayer::new(0.0, 1.0, 3.0, 0.12),
                     contact: None,
                 },
                 Shadow {
-                    key: ShadowLayer::new(0.0, 4.0, 12.0, 0.24),
-                    contact: Some(ShadowLayer::new(0.0, 1.0, 2.0, 0.20)),
+                    key: ShadowLayer::new(0.0, 6.0, 20.0, 0.12),
+                    contact: Some(ShadowLayer::new(0.0, 1.0, 2.0, 0.08)),
                 },
                 Shadow {
-                    key: ShadowLayer::new(0.0, 12.0, 32.0, 0.28),
-                    contact: Some(ShadowLayer::new(0.0, 2.0, 6.0, 0.20)),
+                    key: ShadowLayer::new(0.0, 14.0, 40.0, 0.16),
+                    contact: Some(ShadowLayer::new(0.0, 2.0, 6.0, 0.10)),
                 },
                 Shadow {
-                    key: ShadowLayer::new(0.0, 24.0, 64.0, 0.32),
-                    contact: Some(ShadowLayer::new(0.0, 4.0, 12.0, 0.22)),
+                    key: ShadowLayer::new(0.0, 24.0, 64.0, 0.20),
+                    contact: Some(ShadowLayer::new(0.0, 4.0, 12.0, 0.12)),
                 },
             ],
             dark: ColorRoles::dark(),
