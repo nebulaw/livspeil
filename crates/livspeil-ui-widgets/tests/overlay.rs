@@ -166,8 +166,8 @@ fn select_popup_is_on_top_animates_and_chooses_by_pointer() {
     f.h.step();
     let list = find(&f.h, "listbox");
     f.h.step();
-    let s = f.h.app.scale_of(list).unwrap();
-    assert!(s > 0.97 && s < 1.0, "scaling in: {s}");
+    // Popups fade (and slide a few pixels) in; they never scale.
+    assert_eq!(f.h.app.scale_of(list), Some(1.0), "no scale on open");
     f.h.run_until_idle(200);
     // Clicking outside closes without choosing.
     f.h.click(470.0, 350.0);
