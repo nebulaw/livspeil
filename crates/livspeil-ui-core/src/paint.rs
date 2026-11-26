@@ -293,6 +293,16 @@ fn paint_node(input: &PaintInput<'_>, id: ElementId, scene: &mut Scene, stats: &
         .map(|e| (e, input.theme.shadow(e)));
     let fill = match material {
         Some((_, r)) if r.tint.alpha > 0.0 => Some(Fill::Solid(r.tint)),
+        _ if v.gradient.is_some() => v.gradient.map(|g| {
+            let r = node.bounds;
+            let at = |f: f32| Vec2::new(r.x + r.width * f, r.y);
+            Fill::LinearGradient {
+                start: at(g.start),
+                end: at(g.end),
+                from: g.from,
+                to: g.to,
+            }
+        }),
         _ if bg.alpha > 0.0 => Some(Fill::Solid(bg)),
         _ => None,
     };
