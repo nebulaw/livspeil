@@ -384,8 +384,14 @@ impl LayoutTree {
     }
 
     /// Pixel-snap the subtree under `root`, like Taffy's own rounding (edges
-    /// are rounded in absolute coordinates, so adjacent boxes stay flush),
-    /// but walking real children instead of hoisted lists.
+    /// are rounded in a shared frame, so adjacent boxes stay flush), but
+    /// walking real children instead of hoisted lists.
+    ///
+    /// Unlike Taffy, every out-of-flow box starts a new frame: its size is
+    /// rounded on its own and its subtree is rounded relative to its origin.
+    /// Moving such a box by a fraction of a pixel therefore never shifts or
+    /// resizes its contents relative to it (a dragged node card and its
+    /// labels move as one).
     fn round(&mut self, root: NodeId) {
         // (node, unrounded absolute origin) for the ancestor chain.
         let mut chain: Vec<(NodeId, f32, f32)> = Vec::new();
@@ -416,15 +422,20 @@ impl LayoutTree {
             let l = self.taffy.unrounded_layout(node);
             let x = bx + l.location.x;
             let y = by + l.location.y;
-            let rect = Rect::new(
-                round(x) - round(px),
-                round(y) - round(py),
-                round(x + l.size.width) - round(x),
-                round(y + l.size.height) - round(y),
-            );
+            let new_frame = out_of_flow && !chain.is_empty();
+            let (width, height) = if new_frame {
+                (round(l.size.width), round(l.size.height))
+            } else {
+                (
+                    round(x + l.size.width) - round(x),
+                    round(y + l.size.height) - round(y),
+                )
+            };
+            let rect = Rect::new(round(x) - round(px), round(y) - round(py), width, height);
             self.rects.insert(node, rect);
             let depth = chain.len();
-            chain.push((node, x, y));
+            let (fx, fy) = if new_frame { (0.0, 0.0) } else { (x, y) };
+            chain.push((node, fx, fy));
             if let Ok(children) = self.taffy.children(node) {
                 stack.extend(children.into_iter().rev().map(|c| (c, Some(depth))));
             }

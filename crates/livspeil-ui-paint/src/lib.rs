@@ -27,8 +27,8 @@
 //!   (as screen-space rectangles: rounded clips clip to their bounds).
 //! - **Text**: shaped with `livspeil-ui-text` and cached by text, style
 //!   and wrap width (unchanged labels are neither reshaped nor
-//!   re-rasterized; glyph placements are reused while the origin's
-//!   subpixel phase, scale and atlas generation match); unused layouts are
+//!   re-rasterized; each run snaps to whole pixels, so glyph placements are
+//!   reused while scale and atlas generation match); unused layouts are
 //!   evicted after ~240 frames. Glyphs are rasterized into one
 //!   [`GlyphAtlas`](livspeil_ui_text::GlyphAtlas) (whole-pixel positions
 //!   below 1.5x, quarter-pixel above). A full atlas is cleared and the

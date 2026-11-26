@@ -30,7 +30,7 @@ opacity 0.4
   text label 32,72 7x16 "A" size=12 color=oklch(0.16 0 0 / 0.9)
 pop
 quad circle 45,73 14x14 r=7 fill=oklch(0.56 0.18 255 / 1) border=1 oklch(0.56 0.18 255 / 1)
-quad dot 49,77 5x6 r=2.8 fill=oklch(1 0 0 / 1)
+quad dot 49,77 6x6 r=2.8 fill=oklch(1 0 0 / 1)
 text label 65,72 6x16 "B" size=12 color=oklch(0.16 0 0 / 0.9)
 quad segmented 79,68 132x24 r=4 fill=oklch(0.92 0 0 / 1) border=1 oklch(0 0 0 / 0.1)
 transform [1 0 0 1 64 0]

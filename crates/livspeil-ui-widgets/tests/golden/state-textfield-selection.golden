@@ -47,8 +47,8 @@ text value 140,128 14x17 "30" size=13 features=tnum=1 color=oklch(0.97 0 0 / 0.6
 quad number 162,120 120x32 r=6 fill=oklch(0.15 0 0 / 1) border=1 oklch(1 0 0 / 0.06)
 clip 162,120 120x32 r=6
   quad fill 162,120 15x32 fill=oklch(0.68 0.16 255 / 0.18)
-  text label 200,128 8x17 "X" size=13 color=oklch(0.97 0 0 / 0.62)
-  text value 216,128 28x17 "1.25" size=13 features=tnum=1 color=oklch(0.97 0 0 / 0.92)
+  text label 200,128 7x17 "X" size=13 color=oklch(0.97 0 0 / 0.62)
+  text value 215,128 29x17 "1.25" size=13 features=tnum=1 color=oklch(0.97 0 0 / 0.92)
 pop
 quad text 12,160 140x32 r=6 fill=oklch(0.19 0 0 / 1) border=1 oklch(0.68 0.16 255 / 1)
 clip 12,160 140x32 r=6
