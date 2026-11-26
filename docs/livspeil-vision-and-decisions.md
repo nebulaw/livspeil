@@ -134,6 +134,9 @@ All `crates/livspeil-ui-*` are MPL-2.0 and testable headlessly (CPU reference ra
 - Round 14 (#39–#43, #45): optional Linux AT-SPI feature, neutral colours and softer shadows, popups without scaling, bounded trackpad overscroll, macOS blur path with fallback, IconButton styles, Tabs, Popover, Dialog/Sheet, Toast.
 - Round 14 (#47, merged locally): frame HUD (F3) and frame log (F4), present-mode overrides, NodeCanvas CPU trims. The stutter cause is not yet identified and the 1 ms target is not met.
 - Floor spike (#46, merged locally): `crates/livspeil-floor` (GPL, Linux only), nested compositor and untested TTY skeleton; renderer recommendation in `docs/decisions/floor-renderer.md`.
+- M1.12: Boxicons free set (49 icons, CC BY 4.0) in `assets/icons/boxicons/`, `livspeil-ui-icons`, icons in `IconButton` and menus.
+- M1.13: tab overflow affordance, wrapped text measured at its real height, narrow and short gallery windows; ranked critique in `docs/design-critique.md`.
+- M1.14: text no longer trails the box it moves with (layout rounds each out-of-flow box in its own frame; text runs snap once).
 - First real-window check by the owner (2026-11-26, Hyprland on Wayland, NVIDIA RTX 5070 Ti): everything works; the design needs more work.
 
 ## Roadmap
@@ -170,3 +173,5 @@ All `crates/livspeil-ui-*` are MPL-2.0 and testable headlessly (CPU reference ra
 1. What exactly is off in the design (spacing, type, colour, materials, motion, controls), and what is the reference to match?
 2. Which parts of P1 polish gate P2: only the visual design, or also NodeCanvas performance, damage tracking and the screen-reader pass?
 3. The development machine has an NVIDIA RTX 5070 Ti, while the baseline is Intel iGPU laptops (D16, "NVIDIA later"). When is the iGPU laptop measured?
+4. Which items of `docs/design-critique.md` come first? The top one (the dark surface ramp reads as near black) would change D59.
+5. The icon set has no cross, trash, plus or lock icon, so close buttons stay a text sign. Which icons are added next?

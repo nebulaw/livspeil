@@ -424,3 +424,21 @@ fn moving_text_keeps_its_glyph_spacing() {
         }
     }
 }
+
+/// Layout asks for the height of wrapped text; the bridge answers with its
+/// own line breaking, so boxes fit what is painted.
+#[test]
+fn wrapped_height_follows_the_painted_lines() {
+    let bridge = PaintBridge::new(FontSystem::test());
+    let measurer = bridge.text.measurer();
+    let font = FontSpec::sized(13.0);
+    let text = "one two three four five six seven eight nine ten";
+    let one_line = measurer.measure(text, &font);
+    let wide = measurer.wrapped_height(text, &font, one_line.width + 1.0);
+    assert!((wide - one_line.height).abs() < 0.5, "{wide} {one_line:?}");
+    let narrow = measurer.wrapped_height(text, &font, one_line.width / 3.0);
+    assert!(
+        narrow >= one_line.height * 3.0 - 0.5,
+        "{narrow} {one_line:?}"
+    );
+}

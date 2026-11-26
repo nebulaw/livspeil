@@ -198,6 +198,17 @@ impl TextMeasurer for BridgeMeasurer {
             Err(_) => Size::new(0.0, 0.0),
         }
     }
+
+    // The painter's own line breaker, so a box is as tall as what is drawn.
+    fn wrapped_height(&self, text: &str, font: &FontSpec, width: f32) -> f32 {
+        match self.shaper.try_borrow_mut() {
+            Ok(mut s) => {
+                let at = s.lookup(text, &text_style(font), Some(width));
+                s.entry(at).map_or(0.0, |e| e.layout.height())
+            }
+            Err(_) => 0.0,
+        }
+    }
 }
 
 /// The `livspeil-ui-text` style of a core font (UI family).

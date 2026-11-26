@@ -150,6 +150,7 @@ The original M1.1–M1.6 plan was re-cut into smaller PRs:
 | M1.10 | #36 | ScrollView, VirtualList, Panel, DockView, Menu/MenuBar/ContextMenu, Titlebar with window requests, Bézier wires, NodeCanvas over `NodeGraphModel` |
 | M1.11 | #38 | gallery pages for containers and NodeCanvas; host applies window requests; Linux run docs |
 | Round 14 | #39–#43, #45 | optional Linux AT-SPI feature; neutral colours and softer shadows (D59, D60, D62); popups fade without scaling (D61); bounded trackpad overscroll; macOS blur path and fallback (D63); IconButton styles, Tabs, Popover, Dialog/Sheet, Toast |
+| M1.12–M1.14 | round 14 polish | Boxicons icon atlas (`livspeil-ui-icons`); tab overflow affordance, wrapped-text height, narrow gallery layouts; text moves with its box |
 
 Not built yet: Tree, Table, ColorPicker, CurveEditor, Viewport, auto-generated inspector; `Image` drawing (icons do not use it); the `Surface` primitive; layout animations; adaptive accent from the scene (the accent is only contrast-clamped); drag and drop between elements; Bevy and layer-shell hosts; damage tracking and blur caching; high contrast and text scale; NodeCanvas node delete, unlink-by-drag and keyboard navigation.
 

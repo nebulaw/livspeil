@@ -379,7 +379,7 @@ impl Render for Select {
                     .grow(),
             )
             .child(
-                text("▾")
+                text("⌄")
                     .key("chevron")
                     .font_size(m.font)
                     .text_color(c.text_secondary)

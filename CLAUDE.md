@@ -3,7 +3,7 @@
 Guidance for AI coding agents working in this repository.
 
 ## What this is
-Livspeil: an Arch-based OS whose desktop is a user-authored scene (Dream Mode edits it, Live Mode uses it), built from Charms (typed-port node graphs). This repo contains the Phase 0 headless kernel (`livspeil-node-api`, `-graph`, `-params`, `-doc`, `-cmd`, `-nodes-core`, `-script`, `-wasm-host`, `-cli`) and the Phase 1 UI crates (`crates/livspeil-ui-*`: core, layout, theme, render, text, paint, widgets, a11y, shot, host-winit, gallery; see `README.md`), and the Linux-only Floor spike `livspeil-floor` (GPL research code). Design specs are in `specs/`; component docs in `docs/`. Vision, numbered decisions, roadmap, risks and open questions are in `docs/livspeil-vision-and-decisions.md`; read it before planning work.
+Livspeil: an Arch-based OS whose desktop is a user-authored scene (Dream Mode edits it, Live Mode uses it), built from Charms (typed-port node graphs). This repo contains the Phase 0 headless kernel (`livspeil-node-api`, `-graph`, `-params`, `-doc`, `-cmd`, `-nodes-core`, `-script`, `-wasm-host`, `-cli`) and the Phase 1 UI crates (`crates/livspeil-ui-*`: core, layout, theme, render, text, icons, paint, widgets, a11y, shot, host-winit, gallery; see `README.md`), and the Linux-only Floor spike `livspeil-floor` (GPL research code). Design specs are in `specs/`; component docs in `docs/`. Vision, numbered decisions, roadmap, risks and open questions are in `docs/livspeil-vision-and-decisions.md`; read it before planning work.
 
 ## Hard rules
 - The kernel crates never depend on Bevy, wgpu, Wayland, or any UI crate. Keep them headless and cross-platform (macOS and Linux).

@@ -56,5 +56,5 @@ clip 12,132 140x24 r=4
 pop
 quad select 160,132 120x24 r=4 fill=oklch(0.92 0 0 / 1) border=1 oklch(0 0 0 / 0.1)
 text value 168,136 91x16 "Linear" size=12 color=oklch(0.16 0 0 / 0.9)
-text chevron 265,136 7x16 "▾" size=12 color=oklch(0.16 0 0 / 0.62)
+text chevron 265,136 7x16 "⌄" size=12 color=oklch(0.16 0 0 / 0.62)
 text label 288,136 33x16 "Label" size=12 color=oklch(0.16 0 0 / 0.62)
