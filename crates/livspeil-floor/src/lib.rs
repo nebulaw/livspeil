@@ -29,3 +29,6 @@ pub mod testclient;
 
 #[cfg(target_os = "linux")]
 pub mod nested;
+
+#[cfg(all(target_os = "linux", feature = "tty"))]
+pub mod tty;

@@ -27,6 +27,7 @@ tty = [
   "smithay/backend_libinput",
   "smithay/backend_udev",
   "smithay/backend_session_libseat",
+  "smithay/renderer_multi",
 ]
 
 [[bin]]
@@ -36,6 +37,7 @@ path = "src/bin/floor-nested.rs"
 [[bin]]
 name = "floor-tty"
 path = "src/bin/floor-tty.rs"
+required-features = ["tty"]
 
 [[bin]]
 name = "floor-test-client"

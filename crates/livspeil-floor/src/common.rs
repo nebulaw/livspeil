@@ -12,8 +12,8 @@ use std::{
 
 use smithay::{
     backend::input::{
-        AbsolutePositionEvent, Axis, ButtonState, InputBackend, InputEvent, KeyState, KeyboardKeyEvent,
-        PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
+        AbsolutePositionEvent, Axis, ButtonState, InputBackend, InputEvent, KeyState,
+        KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
     },
     reexports::{
         calloop::{Interest, LoopHandle, Mode as PollMode, PostAction, generic::Generic},
@@ -32,7 +32,9 @@ pub struct Data {
 
 impl std::fmt::Debug for Data {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Data").field("state", &self.state).finish_non_exhaustive()
+        f.debug_struct("Data")
+            .field("state", &self.state)
+            .finish_non_exhaustive()
     }
 }
 
@@ -79,12 +81,15 @@ pub fn insert_wayland_sources(
         .try_clone_to_owned()
         .map_err(|e| ctx("poll fd", e))?;
     handle
-        .insert_source(Generic::new(poll_fd, Interest::READ, PollMode::Level), |_, _, data| {
-            if let Err(err) = data.display.dispatch_clients(&mut data.state) {
-                tracing::warn!("dispatch: {err}");
-            }
-            Ok(PostAction::Continue)
-        })
+        .insert_source(
+            Generic::new(poll_fd, Interest::READ, PollMode::Level),
+            |_, _, data| {
+                if let Err(err) = data.display.dispatch_clients(&mut data.state) {
+                    tracing::warn!("dispatch: {err}");
+                }
+                Ok(PostAction::Continue)
+            },
+        )
         .map_err(|e| ctx("display source", e))?;
     Ok(name)
 }

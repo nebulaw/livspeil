@@ -491,13 +491,24 @@ impl FloorRenderer {
     }
 
     /// A small neutral dot: enough to see where the pointer is on a bare TTY.
-    fn draw_cursor(&self, frame: &mut GlesFrame<'_, '_>, state: &FloorState, fx: Effects) -> Result<(), RenderError> {
+    fn draw_cursor(
+        &self,
+        frame: &mut GlesFrame<'_, '_>,
+        state: &FloorState,
+        fx: Effects,
+    ) -> Result<(), RenderError> {
         if !fx.cursor {
             return Ok(());
         }
         let (x, y) = state.pointer;
         let r = Rect::new(x as i32 - 1, y as i32 - 1, 14, 14);
-        self.rounded_box(frame, r, [7.0; 4], [1.0, 1.0, 1.0, 0.95], [0.0, 0.0, 0.0, 0.8])
+        self.rounded_box(
+            frame,
+            r,
+            [7.0; 4],
+            [1.0, 1.0, 1.0, 0.95],
+            [0.0, 0.0, 0.0, 0.8],
+        )
     }
 
     fn draw_shadow(
