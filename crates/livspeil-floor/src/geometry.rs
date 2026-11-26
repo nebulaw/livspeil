@@ -195,6 +195,10 @@ pub const SHADOW_ALPHA: f32 = 0.35;
 /// Margin around the outer rect that contains the whole key shadow
 /// (blur radius plus offset, rounded up).
 pub const SHADOW_MARGIN: i32 = 48;
+/// Contact shadow layer of elevation e3 (`0 2 6`): offset y, blur, opacity.
+pub const CONTACT_OFFSET_Y: i32 = 2;
+pub const CONTACT_BLUR: f32 = 6.0;
+pub const CONTACT_ALPHA: f32 = 0.30;
 
 /// Signed distance from `p` to a rounded box centred at `c` with half-size
 /// `half`; `radii` are `[top-left, top-right, bottom-right, bottom-left]`.
@@ -227,17 +231,18 @@ pub fn shadow_falloff(d: f32, blur: f32) -> f32 {
     1.0 / (1.0 + (1.702 * d / sigma).exp())
 }
 
-/// Shadow opacity of a rounded box at point `p` (reference for the shader).
+/// Shadow opacity of a rounded box at point `p` (reference for the shader):
+/// the key layer and the contact layer composited "over" each other.
 pub fn shadow_alpha(p: (f32, f32), outer: Rect, radius: f32) -> f32 {
     let (cx, cy) = outer.center();
-    let c = (cx, cy + SHADOW_OFFSET_Y as f32);
-    let d = rounded_box_sdf(
-        p,
-        c,
-        (outer.w as f32 * 0.5, outer.h as f32 * 0.5),
-        [radius; 4],
-    );
-    SHADOW_ALPHA * shadow_falloff(d, SHADOW_BLUR)
+    let half = (outer.w as f32 * 0.5, outer.h as f32 * 0.5);
+    let layer = |dy: i32, blur: f32, alpha: f32| {
+        let d = rounded_box_sdf(p, (cx, cy + dy as f32), half, [radius; 4]);
+        alpha * shadow_falloff(d, blur)
+    };
+    let key = layer(SHADOW_OFFSET_Y, SHADOW_BLUR, SHADOW_ALPHA);
+    let contact = layer(CONTACT_OFFSET_Y, CONTACT_BLUR, CONTACT_ALPHA);
+    key + contact * (1.0 - key)
 }
 
 /// sRGB (0..=255) of a neutral (chroma 0) OKLCH lightness, as used by the
@@ -253,16 +258,14 @@ pub fn neutral_srgb(l: f32) -> u8 {
     (s * 255.0).round().clamp(0.0, 255.0) as u8
 }
 
-/// Dual-Kawase pass plan for a backdrop blur of `radius` logical pixels:
-/// number of down/up levels. Level `n` samples at `1/2^n` resolution; the
-/// effective radius of `n` levels with a 1-texel offset is roughly
-/// `2^(n+1)` pixels per side, so pick the smallest `n` that reaches it.
-pub fn kawase_levels(radius: f32) -> u32 {
-    let mut n = 1;
-    while ((1u32 << (n + 1)) as f32) < radius && n < 5 {
-        n += 1;
-    }
-    n
+/// Number of down/up levels of the backdrop blur (quarter resolution).
+pub const BLUR_LEVELS: u32 = 2;
+
+/// Dual-Kawase sampling offset (in source texels) that reaches roughly
+/// `radius` pixels per side with [`BLUR_LEVELS`] levels: each level
+/// doubles the footprint, so the reach is about `offset * 2^(levels + 1)`.
+pub fn kawase_offset(radius: f32) -> f32 {
+    (radius / (1u32 << (BLUR_LEVELS + 1)) as f32).clamp(1.0, 4.0)
 }
 
 #[cfg(test)]
@@ -385,7 +388,13 @@ mod tests {
         );
         assert!(far < 0.02, "{far}");
         // Never exceeds the configured opacity.
-        assert!(shadow_alpha((cx, 200.0), outer, CORNER_RADIUS) <= SHADOW_ALPHA);
+        assert!(shadow_alpha((cx, 200.0), outer, CORNER_RADIUS) <= 1.0);
+        // The contact layer darkens right at the edge more than the key layer alone.
+        let edge = shadow_alpha((cx, 300.0 + 1.0), outer, CORNER_RADIUS);
+        assert!(
+            edge > SHADOW_ALPHA * shadow_falloff(1.0 - SHADOW_OFFSET_Y as f32, SHADOW_BLUR),
+            "{edge}"
+        );
     }
 
     #[test]
@@ -409,10 +418,10 @@ mod tests {
     }
 
     #[test]
-    fn kawase_levels_grow_with_radius() {
-        assert_eq!(kawase_levels(4.0), 1);
-        assert!(kawase_levels(24.0) >= 3);
-        assert!(kawase_levels(1000.0) <= 5);
+    fn kawase_offset_scales_with_radius_and_clamps() {
+        assert_eq!(kawase_offset(24.0), 3.0);
+        assert_eq!(kawase_offset(2.0), 1.0);
+        assert_eq!(kawase_offset(1000.0), 4.0);
     }
 
     #[test]

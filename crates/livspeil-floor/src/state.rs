@@ -278,10 +278,10 @@ impl FloorState {
         let surface = self.windows.last().and_then(|w| w.surface());
         for (i, w) in self.windows.iter().enumerate() {
             let active = i + 1 == self.windows.len();
-            if w.window.set_activated(active) {
-                if let Some(t) = w.window.toplevel() {
-                    t.send_pending_configure();
-                }
+            if w.window.set_activated(active)
+                && let Some(t) = w.window.toplevel()
+            {
+                t.send_pending_configure();
             }
         }
         if let Some(kb) = self.seat.get_keyboard() {
@@ -413,6 +413,26 @@ impl FloorState {
         }
     }
 
+    /// Scroll by `h`/`v` in logical pixels (positive is right/down).
+    pub fn pointer_axis(&mut self, h: f64, v: f64) {
+        use smithay::{
+            backend::input::{Axis, AxisSource},
+            input::pointer::AxisFrame,
+        };
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let mut frame = AxisFrame::new(self.time_ms()).source(AxisSource::Wheel);
+        if h != 0.0 {
+            frame = frame.value(Axis::Horizontal, h);
+        }
+        if v != 0.0 {
+            frame = frame.value(Axis::Vertical, v);
+        }
+        pointer.axis(self, frame);
+        pointer.frame(self);
+    }
+
     /// Keyboard key (evdev code + 8 is added by the caller as an XKB code).
     /// Returns `true` when the Floor consumed the key.
     pub fn key(&mut self, keycode: smithay::input::keyboard::Keycode, pressed: bool) {
@@ -481,10 +501,10 @@ impl CompositorHandler for FloorState {
         self.popups.commit(surface);
 
         if let Some(PopupKind::Xdg(popup)) = self.popups.find_popup(surface) {
-            if !popup.is_initial_configure_sent() {
-                if let Err(e) = popup.send_configure() {
-                    tracing::warn!("popup configure failed: {e}");
-                }
+            if !popup.is_initial_configure_sent()
+                && let Err(e) = popup.send_configure()
+            {
+                tracing::warn!("popup configure failed: {e}");
             }
             self.needs_redraw = true;
             return;
@@ -493,10 +513,10 @@ impl CompositorHandler for FloorState {
         if let Some(i) = self.index_of_surface(surface) {
             let was_mapped = self.windows[i].is_mapped();
             self.windows[i].window.on_commit();
-            if let Some(t) = self.windows[i].window.toplevel() {
-                if !t.is_initial_configure_sent() {
-                    t.send_configure();
-                }
+            if let Some(t) = self.windows[i].window.toplevel()
+                && !t.is_initial_configure_sent()
+            {
+                t.send_configure();
             }
             if !was_mapped && self.windows[i].is_mapped() {
                 self.output.enter(surface);

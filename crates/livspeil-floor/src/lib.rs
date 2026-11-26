@@ -10,9 +10,19 @@
 //! See `docs/decisions/floor-renderer.md` and `docs/floor-spike-checklist.md`.
 
 pub mod geometry;
+pub mod stats;
 
 #[cfg(target_os = "linux")]
 pub mod state;
 
 #[cfg(target_os = "linux")]
+pub mod shaders;
+
+#[cfg(target_os = "linux")]
+pub mod render;
+
+#[cfg(target_os = "linux")]
 pub mod testclient;
+
+#[cfg(target_os = "linux")]
+pub mod nested;
