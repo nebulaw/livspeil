@@ -850,7 +850,6 @@ impl Render for MenuPopup {
                 .rounded(theme.tokens.radii.sm + 2.0)
                 .material(Material::Glass)
                 .opacity(if appearing { 0.0 } else { 1.0 })
-                .scale(if appearing { 0.98 } else { 1.0 })
                 .transition(MotionClass::Standard)
                 .on_pointer_down(|_, cx| cx.stop_propagation());
             for (i, e) in l.menu.entries.iter().enumerate() {

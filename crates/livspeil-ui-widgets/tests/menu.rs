@@ -392,3 +392,29 @@ fn a_registered_bar_that_is_not_shown_ignores_mnemonics() {
     assert_eq!(bar.read(&h.app).open_menu(), None);
     assert!(env.menus().is_none_or(|p| !p.read(&h.app).is_open()));
 }
+
+#[test]
+fn popups_fade_in_without_scaling() {
+    let mut f = fixture();
+    let p = Point::new(100.0, 100.0);
+    pointer(
+        &mut f.h,
+        PointerKind::Down(MouseButton::Right),
+        p,
+        Modifiers::NONE,
+    );
+    pointer(
+        &mut f.h,
+        PointerKind::Up(MouseButton::Right),
+        p,
+        Modifiers::NONE,
+    );
+    // Sample every frame of the open animation: the scale never leaves 1.
+    for _ in 0..6 {
+        f.h.step();
+        if let Some(level) = f.h.app.find("menu-level-0") {
+            assert_eq!(f.h.app.scale_of(level), Some(1.0), "menu must not scale");
+        }
+    }
+    assert_eq!(f.depth(), 1);
+}

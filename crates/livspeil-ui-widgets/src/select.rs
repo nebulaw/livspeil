@@ -282,7 +282,6 @@ fn popup(view: View<Select>, app: &App, appearing: bool) -> Vec<Element> {
         .rounded(theme.tokens.radii.sm)
         .material(Material::Glass)
         .opacity(if appearing { 0.0 } else { 1.0 })
-        .scale(if appearing { 0.97 } else { 1.0 })
         .translate(Vec2::new(0.0, if appearing { -4.0 } else { 0.0 }))
         .transition(MotionClass::Standard)
         .semantics(|x| x.role(livspeil_ui_core::Role::ListBox));
