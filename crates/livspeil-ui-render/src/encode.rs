@@ -166,13 +166,26 @@ impl Frame {
 
     /// Instance data as little-endian bytes (for upload).
     pub fn instance_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(self.instances.len() * INSTANCE_FLOATS * 4);
+        let mut out = Vec::new();
+        self.instance_bytes_into(&mut out);
+        out
+    }
+
+    /// Size of the instance data in bytes.
+    pub fn instance_byte_len(&self) -> usize {
+        self.instances.len() * INSTANCE_FLOATS * 4
+    }
+
+    /// As [`Frame::instance_bytes`], into `out` (cleared first; its
+    /// capacity is reused).
+    pub fn instance_bytes_into(&self, out: &mut Vec<u8>) {
+        out.clear();
+        out.reserve(self.instances.len() * INSTANCE_FLOATS * 4);
         for inst in &self.instances {
             for v in inst {
                 out.extend_from_slice(&v.to_le_bytes());
             }
         }
-        out
     }
 }
 
@@ -276,42 +289,95 @@ struct Encoder {
     pending_start: u32,
     pending_atlas: Option<u32>,
     viewport: Rect,
+    colors: ColorMemo,
+}
+
+/// A small direct-mapped memo of color conversions: a frame uses a few
+/// dozen distinct colors over thousands of items (a wire's segments share
+/// one), and OKLab to sRGB costs a cube root and a power per channel.
+struct ColorMemo {
+    keys: Box<[[u32; 4]; Self::SLOTS]>,
+    values: Box<[[f32; 4]; Self::SLOTS]>,
+    used: Box<[bool; Self::SLOTS]>,
+}
+
+impl ColorMemo {
+    const SLOTS: usize = 64;
+
+    fn new() -> Self {
+        ColorMemo {
+            keys: Box::new([[0; 4]; Self::SLOTS]),
+            values: Box::new([[0.0; 4]; Self::SLOTS]),
+            used: Box::new([false; Self::SLOTS]),
+        }
+    }
+
+    fn srgb_premul(&mut self, c: Color) -> [f32; 4] {
+        let key = c.to_array().map(f32::to_bits);
+        let h = key.iter().fold(0x9e37_79b9_u32, |h, k| {
+            (h.rotate_left(5) ^ k).wrapping_mul(0x85eb_ca6b)
+        });
+        let slot = (h >> 8) as usize % Self::SLOTS;
+        if self.used[slot] && self.keys[slot] == key {
+            return self.values[slot];
+        }
+        let v = c.to_srgb_premul();
+        self.keys[slot] = key;
+        self.values[slot] = v;
+        self.used[slot] = true;
+        v
+    }
 }
 
 /// Encodes a display list for a target.
 pub fn encode(list: &DisplayList, options: FrameOptions) -> Result<Frame, RenderError> {
+    let mut frame = Frame {
+        options,
+        clear: [0.0; 4],
+        instances: Vec::new(),
+        ops: Vec::new(),
+    };
+    encode_into(list, options, &mut frame)?;
+    Ok(frame)
+}
+
+/// As [`encode`], into `frame`, whose instance and operation buffers are
+/// reused (a frame of thousands of instances is megabytes: encoding into
+/// the previous frame avoids allocating, and page-faulting, them anew
+/// every frame). On error `frame` is left cleared.
+pub fn encode_into(
+    list: &DisplayList,
+    options: FrameOptions,
+    frame: &mut Frame,
+) -> Result<(), RenderError> {
+    frame.instances.clear();
+    frame.ops.clear();
     if options.width == 0 || options.height == 0 {
         return Err(RenderError::EmptyTarget);
     }
     if !(options.scale.is_finite() && options.scale > 0.0) {
         return Err(RenderError::InvalidScale(options.scale));
     }
-    let mut order: Vec<usize> = (0..list.items.len()).collect();
-    order.sort_by_key(|&i| list.items[i].layer);
     let mut enc = Encoder {
         options,
-        instances: Vec::with_capacity(list.items.len() * 2),
-        ops: Vec::new(),
+        instances: std::mem::take(&mut frame.instances),
+        ops: std::mem::take(&mut frame.ops),
         pending_start: 0,
         pending_atlas: None,
         viewport: Rect::new(0.0, 0.0, options.width as f32, options.height as f32),
+        colors: ColorMemo::new(),
     };
-    for index in order {
-        match &list.items[index].primitive {
-            Primitive::Quad(q) => enc.quad(index, q)?,
-            Primitive::Backdrop(b) => enc.backdrop(index, b)?,
-            Primitive::Glyphs(g) => enc.glyphs(index, g)?,
-            // Typed hook: images draw nothing yet.
-            Primitive::Image(_) => {}
-        }
-    }
+    let result = enc.run(list);
     enc.flush();
-    Ok(Frame {
-        options,
-        clear: options.clear.to_srgb_premul(),
-        instances: enc.instances,
-        ops: enc.ops,
-    })
+    frame.options = options;
+    frame.clear = options.clear.to_srgb_premul();
+    frame.instances = enc.instances;
+    frame.ops = enc.ops;
+    if result.is_err() {
+        frame.instances.clear();
+        frame.ops.clear();
+    }
+    result
 }
 
 fn invalid(index: usize, reason: &'static str) -> RenderError {
@@ -323,6 +389,31 @@ fn put(inst: &mut Instance, at: usize, v: [f32; 4]) {
 }
 
 impl Encoder {
+    fn run(&mut self, list: &DisplayList) -> Result<(), RenderError> {
+        let sorted = list.items.windows(2).all(|w| w[0].layer <= w[1].layer);
+        // Layers in order (the usual case): no index vector needed.
+        let order: Option<Vec<usize>> = (!sorted).then(|| {
+            let mut order: Vec<usize> = (0..list.items.len()).collect();
+            order.sort_by_key(|&i| list.items[i].layer);
+            order
+        });
+        self.instances.reserve(list.items.len());
+        for k in 0..list.items.len() {
+            let index = match &order {
+                Some(order) => order[k],
+                None => k,
+            };
+            match &list.items[index].primitive {
+                Primitive::Quad(q) => self.quad(index, q)?,
+                Primitive::Backdrop(b) => self.backdrop(index, b)?,
+                Primitive::Glyphs(g) => self.glyphs(index, g)?,
+                // Typed hook: images draw nothing yet.
+                Primitive::Image(_) => {}
+            }
+        }
+        Ok(())
+    }
+
     fn flush(&mut self) {
         let end = self.instances.len() as u32;
         if end > self.pending_start {
@@ -343,7 +434,7 @@ impl Encoder {
         if !g.color.to_array().iter().all(|v| v.is_finite()) {
             return Err(invalid(index, "glyph color is not finite"));
         }
-        let color = g.color.to_srgb_premul();
+        let color = self.colors.srgb_premul(g.color);
         let lightness = g.color.l.clamp(0.0, 1.0);
         // Texels map 1:1 to pixels only without rotation or scale; then the
         // instance covers exactly its rect. Otherwise grow it by a pixel so
@@ -483,7 +574,8 @@ impl Encoder {
                 field::SHADOW,
                 [sh.offset[0], sh.offset[1], sh.spread, sigma],
             );
-            put(&mut inst, field::SHADOW_COLOR, sh.color.to_srgb_premul());
+            let shadow_color = self.colors.srgb_premul(sh.color);
+            put(&mut inst, field::SHADOW_COLOR, shadow_color);
             let shape = rect
                 .translate(sh.offset[0], sh.offset[1])
                 .inflate(sh.spread.max(-0.5 * rect.w.min(rect.h)));
@@ -511,7 +603,8 @@ impl Encoder {
             None => inst[field::FILL] = fill_kind::NONE,
             Some(Fill::Solid(c)) => {
                 inst[field::FILL] = fill_kind::SOLID;
-                put(&mut inst, field::STOPS, c.to_srgb_premul());
+                let c = self.colors.srgb_premul(*c);
+                put(&mut inst, field::STOPS, c);
             }
             Some(Fill::Linear { start, end, stops }) => {
                 inst[field::FILL] = fill_kind::LINEAR;
@@ -557,11 +650,8 @@ impl Encoder {
                     return Err(invalid(index, "border width is not finite"));
                 }
             };
-            put(
-                &mut inst,
-                field::BORDER_COLOR,
-                border.color.to_srgb_premul(),
-            );
+            let border_color = self.colors.srgb_premul(border.color);
+            put(&mut inst, field::BORDER_COLOR, border_color);
             inst[field::BORDER] = w;
         }
         if inst[field::FILL] == fill_kind::NONE && inst[field::BORDER] == 0.0 {
@@ -597,11 +687,13 @@ impl Encoder {
         let (ext, exps) = corner_params(b.rect, b.radii, b.corners);
         put(&mut inst, field::RADII, ext);
         put(&mut inst, field::EXPS, exps);
-        put(&mut inst, field::STOPS, b.tint.to_srgb_premul());
+        let tint = self.colors.srgb_premul(b.tint);
+        put(&mut inst, field::STOPS, tint);
         inst[field::INV2 + 3] = 1.0;
         let (hw, hk) = match b.highlight {
             Some(h) if h.width.is_finite() && h.width > 0.0 && h.color.alpha > 0.0 => {
-                put(&mut inst, field::BORDER_COLOR, h.color.to_srgb_premul());
+                let rim = self.colors.srgb_premul(h.color);
+                put(&mut inst, field::BORDER_COLOR, rim);
                 let k = match h.kind {
                     HighlightKind::Full => 0.0,
                     HighlightKind::TopRim => 1.0,
@@ -698,6 +790,66 @@ fn put_stops(index: usize, inst: &mut Instance, stops: &[GradientStop]) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn opts() -> FrameOptions {
+        FrameOptions {
+            width: 200,
+            height: 100,
+            scale: 2.0,
+            clear: Color::BLACK,
+        }
+    }
+
+    fn sample_list(n: usize) -> DisplayList {
+        let mut list = DisplayList::new();
+        for i in 0..n {
+            let c = Color::oklab(0.3 + 0.01 * (i % 7) as f32, 0.02, -0.01);
+            let mut q = Quad::new(Rect::new(i as f32 * 3.0, 4.0, 20.0, 10.0), c);
+            q.radii = Radii::all(3.0);
+            // Out of order layers exercise the sorted path too.
+            list.push(if i % 5 == 0 { 1 } else { 0 }, q);
+        }
+        list
+    }
+
+    #[test]
+    fn encode_into_reuses_buffers_and_matches_encode() {
+        let list = sample_list(40);
+        let fresh = encode(&list, opts()).unwrap();
+        let mut frame = encode(&sample_list(300), opts()).unwrap();
+        let cap = frame.instances.capacity();
+        encode_into(&list, opts(), &mut frame).unwrap();
+        assert_eq!(frame, fresh);
+        assert!(frame.instances.capacity() >= cap, "capacity is kept");
+        // Layer-ordered input takes the no-sort path and gives the same.
+        let mut flat = DisplayList::new();
+        for it in &list.items {
+            flat.push(0, it.primitive.clone());
+        }
+        let a = encode(&flat, opts()).unwrap();
+        encode_into(&flat, opts(), &mut frame).unwrap();
+        assert_eq!(frame, a);
+    }
+
+    #[test]
+    fn encode_into_clears_the_frame_on_error() {
+        let mut frame = encode(&sample_list(3), opts()).unwrap();
+        let bad = FrameOptions { width: 0, ..opts() };
+        assert!(encode_into(&sample_list(3), bad, &mut frame).is_err());
+        assert!(frame.instances.is_empty() && frame.ops.is_empty());
+    }
+
+    #[test]
+    fn color_memo_matches_direct_conversion() {
+        let mut memo = ColorMemo::new();
+        for i in 0..500 {
+            let c = Color::oklab(0.001 * i as f32, 0.0005 * (i % 13) as f32, -0.01)
+                .with_alpha(0.5 + 0.001 * (i % 7) as f32);
+            assert_eq!(memo.srgb_premul(c), c.to_srgb_premul());
+            // Again: a hit.
+            assert_eq!(memo.srgb_premul(c), c.to_srgb_premul());
+        }
+    }
 
     #[test]
     fn circular_corners_are_circles() {
