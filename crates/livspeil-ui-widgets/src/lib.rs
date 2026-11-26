@@ -69,6 +69,7 @@ mod label;
 mod menu;
 mod node_canvas;
 mod number_field;
+mod popover;
 mod scroll;
 mod segmented;
 mod select;
@@ -100,6 +101,7 @@ pub use node_canvas::{
     graph_bounds, minimap_mapping, oriented, palette_color, rect_from, rubber_select,
 };
 pub use number_field::{NumberField, Scrub, scrub_precision};
+pub use popover::{POPOVER_GAP, POPOVER_MARGIN, Placement, Popover, place_popover};
 pub use scroll::{
     OVERSCAN, SCROLL_SCOPE, ScrollAxis, ScrollContent, ScrollInfo, ScrollPhysics, ScrollView,
     Scroller, VirtualList, rubber_band, scroll_actions, visible_range,

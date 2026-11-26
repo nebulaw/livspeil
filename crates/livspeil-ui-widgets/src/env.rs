@@ -15,6 +15,7 @@ use livspeil_ui_core::{
 };
 use livspeil_ui_layout::Rect;
 use livspeil_ui_text::FontSystem;
+use livspeil_ui_theme::{MotionClass, MotionSpec, PropertyKind};
 
 use crate::keymap;
 use crate::tooltip;
@@ -62,7 +63,28 @@ pub(crate) enum OverlayPhase {
     Appearing,
     /// Fully shown.
     Shown,
+    /// Rendered in its initial (hidden) look so it animates out; removed
+    /// after [`LEAVE_TIME`] seconds (at once when motion is instant).
+    Leaving(f32),
 }
+
+/// How long an overlay layer stays mounted while it animates out.
+pub const LEAVE_TIME: f32 = 0.2;
+
+/// What an overlay layer should look like this render.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Look {
+    /// First render: the hidden look, so the next render animates in.
+    Entering,
+    /// Fully shown.
+    Shown,
+    /// Animating out: the hidden look again; must not take input.
+    Leaving,
+}
+
+/// Builds an overlay layer (popover, dialog, toast stack) in window
+/// coordinates; unlike a popup it learns when it is leaving.
+pub(crate) type LayerBuilder = Rc<dyn Fn(&App, Look) -> Vec<Element>>;
 
 /// Builds a popup's elements in window coordinates (direct, absolutely
 /// positioned children of the overlay layer); `appearing` is true for the
@@ -72,6 +94,7 @@ pub(crate) type PopupBuilder = Rc<dyn Fn(&App, bool) -> Vec<Element>>;
 #[derive(Clone)]
 pub(crate) enum OverlayKind {
     Popup(PopupBuilder),
+    Layer(LayerBuilder),
     Tooltip(tooltip::TooltipEntry),
 }
 
@@ -261,7 +284,7 @@ impl Env {
     pub(crate) fn show_overlay(&self, app: &mut App, key: OverlayKey, kind: OverlayKind) {
         let delay = match &kind {
             OverlayKind::Tooltip(t) => Some(t.delay),
-            OverlayKind::Popup(_) => None,
+            OverlayKind::Popup(_) | OverlayKind::Layer(_) => None,
         };
         self.inner.overlay.update(app, |s, cx| {
             let phase = match delay {
@@ -272,10 +295,26 @@ impl Env {
             match s.entries.iter_mut().find(|e| e.key == key) {
                 Some(e) => {
                     e.kind = entry.kind;
+                    if matches!(e.phase, OverlayPhase::Leaving(_)) {
+                        e.phase = OverlayPhase::Shown;
+                    }
                 }
                 None => s.entries.push(entry),
             }
             cx.notify();
+        });
+    }
+
+    /// Start animating a [`OverlayKind::Layer`] out; it is removed once
+    /// the exit has run. Showing it again meanwhile brings it back.
+    pub(crate) fn leave_overlay(&self, app: &mut App, key: OverlayKey) {
+        self.inner.overlay.update(app, |s, cx| {
+            if let Some(e) = s.entries.iter_mut().find(|e| e.key == key)
+                && !matches!(e.phase, OverlayPhase::Leaving(_))
+            {
+                e.phase = OverlayPhase::Leaving(0.0);
+                cx.notify();
+            }
         });
     }
 
@@ -359,9 +398,15 @@ impl Render for WidgetRoot {
         let mut layer = Vec::with_capacity(entries.len());
         for e in &entries {
             let appearing = e.phase == OverlayPhase::Appearing;
+            let look = match e.phase {
+                OverlayPhase::Appearing | OverlayPhase::Pending(_) => Look::Entering,
+                OverlayPhase::Shown => Look::Shown,
+                OverlayPhase::Leaving(_) => Look::Leaving,
+            };
             match (&e.kind, e.phase) {
                 (_, OverlayPhase::Pending(_)) => {}
                 (OverlayKind::Popup(build), _) => layer.extend(build(cx, appearing)),
+                (OverlayKind::Layer(build), _) => layer.extend(build(cx, look)),
                 (OverlayKind::Tooltip(t), _) => {
                     layer.push(tooltip::bubble(&env, cx, e.key, t, appearing));
                 }
@@ -372,9 +417,19 @@ impl Render for WidgetRoot {
         // appearing (a pending tooltip polls once per frame until its delay
         // has passed, then the layer is idle again).
         let mut again = false;
+        let instant = matches!(
+            cx.motion()
+                .resolve(None, MotionClass::Standard, PropertyKind::Appearance),
+            MotionSpec::Instant
+        );
         model.update(cx, |s, _| {
+            s.entries.retain(|e| match e.phase {
+                OverlayPhase::Leaving(t) => !(instant || t + dt >= LEAVE_TIME),
+                _ => true,
+            });
             for e in &mut s.entries {
                 e.phase = match (e.phase, &e.kind) {
+                    (OverlayPhase::Leaving(t), _) => OverlayPhase::Leaving(t + dt),
                     (OverlayPhase::Pending(t), OverlayKind::Tooltip(tip)) => {
                         let t = t + dt;
                         if t >= tip.delay {

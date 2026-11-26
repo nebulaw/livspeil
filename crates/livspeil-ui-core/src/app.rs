@@ -775,6 +775,12 @@ impl App {
         self.tree.nodes.get(&id).map(|n| n.anims.scale.value())
     }
 
+    /// Current (animated) opacity of an element.
+    #[must_use]
+    pub fn opacity_of(&self, id: ElementId) -> Option<f32> {
+        self.tree.nodes.get(&id).map(|n| n.anims.opacity.value())
+    }
+
     /// Current (animated) background of an element.
     #[must_use]
     pub fn background(&self, id: ElementId) -> Option<livspeil_ui_theme::Color> {
