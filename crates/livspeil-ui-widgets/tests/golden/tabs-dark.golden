@@ -1,0 +1,50 @@
+quad plain 16,16 220x32 r=6 fill=oklch(0.15 0 0 / 1) border=1 oklch(1 0 0 / 0.06)
+clip 16,16 220x32 r=6
+  quad tab-pill 82,18 74x28 r=4 fill=oklch(0.23 0 0 / 1) shadow=E1
+  clip 18,18 64x28 r=4
+    text label 32,24 36x17 "Scene" size=13 weight=500 color=oklch(0.97 0 0 / 0.62)
+  pop
+  clip 82,18 74x28 r=4
+    text label 98,24 42x17 "Charms" size=13 weight=600 color=oklch(0.97 0 0 / 0.92)
+  pop
+  clip 156,18 78x28 r=4
+    text label 166,24 58x17 "Timeline" size=13 weight=500 color=oklch(0.97 0 0 / 0.62)
+  pop
+pop
+quad closable 16,60 279x32 r=6 fill=oklch(0.15 0 0 / 1) border=1 oklch(1 0 0 / 0.06)
+clip 16,60 279x32 r=6
+  quad tab-pill 18,62 118x28 r=4 fill=oklch(0.23 0 0 / 1) shadow=E1
+  clip 18,62 118x28 r=4
+    text label 28,59 78x34 "Living room" size=13 weight=600 color=oklch(0.97 0 0 / 0.92)
+    text x 114,67 8x18 "×" size=14 color=oklch(0.97 0 0 / 0.42)
+  pop
+  clip 136,62 93x28 r=4
+    text label 147,68 51x17 "Kitchen" size=13 weight=500 color=oklch(0.97 0 0 / 0.62)
+    text x 206,67 7x18 "×" size=14 color=oklch(0.97 0 0 / 0.42)
+  pop
+  clip 229,62 64x28 r=4
+    text label 240,68 22x17 "Off" size=13 weight=500 color=oklch(0.97 0 0 / 0.42)
+    text x 270,67 8x18 "×" size=14 color=oklch(0.97 0 0 / 0.42)
+  pop
+pop
+quad overflow 16,104 190x32 r=6 fill=oklch(0.15 0 0 / 1) border=1 oklch(1 0 0 / 0.06)
+clip 16,104 190x32 r=6
+  transform [1 0 0 1 -173 0]
+    quad tab-pill 301,106 76x28 r=4 fill=oklch(0.23 0 0 / 1) shadow=E1
+    clip 18,106 64x28 r=4
+      text label 32,112 36x17 "Scene" size=13 weight=500 color=oklch(0.97 0 0 / 0.62)
+    pop
+    clip 82,106 74x28 r=4
+      text label 98,112 42x17 "Charms" size=13 weight=500 color=oklch(0.97 0 0 / 0.62)
+    pop
+    clip 156,106 78x28 r=4
+      text label 166,112 58x17 "Timeline" size=13 weight=500 color=oklch(0.97 0 0 / 0.62)
+    pop
+    clip 234,106 67x28 r=4
+      text label 246,112 43x17 "Assets" size=13 weight=500 color=oklch(0.97 0 0 / 0.62)
+    pop
+    clip 301,106 76x28 r=4
+      text label 310,112 58x17 "Settings" size=13 weight=600 color=oklch(0.97 0 0 / 0.92)
+    pop
+  pop
+pop
