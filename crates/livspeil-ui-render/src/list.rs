@@ -417,6 +417,27 @@ impl DisplayList {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
+
+    /// Replaces every backdrop with a plain quad: the backdrop's own colour
+    /// at full opacity, same shape, shadows, clip, opacity and transform;
+    /// no blur, saturation, grain or highlight, and nothing extra on top.
+    ///
+    /// This is the defined fallback (D63) when blur cannot run, and what
+    /// T0 and "Reduce transparency" look like.
+    pub fn without_backdrops(&mut self) {
+        for item in &mut self.items {
+            if let Primitive::Backdrop(b) = &item.primitive {
+                let mut q = Quad::new(b.rect, b.tint.with_alpha(1.0));
+                q.radii = b.radii;
+                q.corners = b.corners;
+                q.shadows = b.shadows.clone();
+                q.clip = b.clip;
+                q.opacity = b.opacity;
+                q.transform = b.transform;
+                item.primitive = Primitive::Quad(q);
+            }
+        }
+    }
 }
 
 impl From<Quad> for Primitive {
