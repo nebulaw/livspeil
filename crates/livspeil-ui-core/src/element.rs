@@ -242,7 +242,7 @@ impl TextSpec {
 /// The content of an icon element; an unset color is the theme's primary
 /// text color.
 #[derive(Clone, Debug, PartialEq)]
-pub struct IconSpec {
+pub(crate) struct IconSpec {
     pub(crate) name: SharedString,
     pub(crate) color: Option<Color>,
 }

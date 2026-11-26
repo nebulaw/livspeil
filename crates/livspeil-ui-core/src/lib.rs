@@ -70,8 +70,7 @@ pub use app::{
     pointer,
 };
 pub use element::{
-    Element, ElementId, IconSpec, Phase, PointerFilter, Refinement, SharedString, Transition, div,
-    icon, text,
+    Element, ElementId, Phase, PointerFilter, Refinement, SharedString, Transition, div, icon, text,
 };
 pub use entity::{AnyView, EntityId, Model, ModelContext, Render, View, ViewContext};
 pub use host::{FrameScheduler, TestHost};
