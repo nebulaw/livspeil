@@ -104,7 +104,7 @@ impl Overlays {
                         )
                 })
                 .trigger(move |theme| {
-                    IconButton::new("bx-cog", label)
+                    IconButton::new("bx-gear", label)
                         .toggle(false)
                         .size(IconSize::S20)
                         .render(theme)
@@ -193,20 +193,20 @@ pub(crate) fn page(theme: &Theme, st: &Overlays, cx: &App) -> Element {
         .child(
             row()
                 .child(caption(theme, "Styles"))
-                .child(IconButton::new("bx-plus", "Add").render(theme))
+                .child(IconButton::new("bx-grid-plus", "Add").render(theme))
                 .child(
-                    IconButton::new("bx-plus", "Add (filled)")
+                    IconButton::new("bx-grid-plus", "Add (filled)")
                         .filled()
                         .render(theme),
                 )
                 .child(
-                    IconButton::new("bx-pin", "Pin")
+                    IconButton::new("bx-bookmark-alt", "Pin")
                         .toggle(on)
                         .on_click(move |_, cx| set(pinned, cx, !on))
                         .render(theme),
                 )
                 .child(
-                    IconButton::new("bx-lock", "Locked")
+                    IconButton::new("bx-unlink", "Unlink")
                         .disabled(true)
                         .render(theme),
                 ),

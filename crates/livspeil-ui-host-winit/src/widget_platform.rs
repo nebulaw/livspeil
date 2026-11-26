@@ -243,7 +243,8 @@ impl CaretBlink {
     }
 }
 
-/// `scene` without the paint commands of `element` (quads and text runs).
+/// `scene` without the paint commands of `element` (quads, text runs and
+/// icons).
 #[must_use]
 pub fn scene_without(scene: &Scene, element: ElementId) -> Scene {
     Scene {
@@ -253,6 +254,7 @@ pub fn scene_without(scene: &Scene, element: ElementId) -> Scene {
             .filter(|c| match c {
                 PaintCmd::Quad(q) => q.element != element,
                 PaintCmd::Text(t) => t.element != element,
+                PaintCmd::Icon(i) => i.element != element,
                 _ => true,
             })
             .cloned()

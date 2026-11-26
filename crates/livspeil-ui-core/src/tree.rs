@@ -15,8 +15,8 @@ use livspeil_ui_theme::{Color, MotionClass, MotionConfig, MotionSpec, PropertyKi
 use crate::anim::{Animatable, Animated};
 use crate::app::App;
 use crate::element::{
-    Element, ElementId, ElementKind, Handlers, Refinement, SharedString, TextSpec, Transition,
-    Visual,
+    Element, ElementId, ElementKind, Handlers, IconSpec, Refinement, SharedString, TextSpec,
+    Transition, Visual,
 };
 use crate::entity::EntityId;
 
@@ -236,6 +236,7 @@ pub(crate) struct Node {
     pub(crate) label: SharedString,
     pub(crate) key: Option<SharedString>,
     pub(crate) text: Option<TextSpec>,
+    pub(crate) icon: Option<IconSpec>,
     pub(crate) view: Option<EntityId>,
     pub(crate) owner: EntityId,
     pub(crate) layout: LayoutNode,
@@ -318,6 +319,7 @@ pub(crate) fn reconcile(
         semantics,
         wires,
     } = el;
+    let mut icon = None;
     let text = match kind {
         ElementKind::View(any) => {
             let vid = any.id;
@@ -338,11 +340,17 @@ pub(crate) fn reconcile(
             return Some(layout);
         }
         ElementKind::Text(t) => Some(t),
+        ElementKind::Icon(i) => {
+            icon = Some(i);
+            None
+        }
         ElementKind::Div => None,
     };
     let label: SharedString = name.or_else(|| key.clone()).unwrap_or_else(|| {
         if text.is_some() {
             "text".into()
+        } else if icon.is_some() {
+            "icon".into()
         } else {
             "div".into()
         }
@@ -362,6 +370,7 @@ pub(crate) fn reconcile(
         node.label = label;
         node.key = key;
         node.text = text;
+        node.icon = icon;
         node.view = None;
         node.owner = owner;
         node.visual = visual;
@@ -388,6 +397,7 @@ pub(crate) fn reconcile(
                 label,
                 key,
                 text,
+                icon,
                 view: None,
                 owner,
                 layout,

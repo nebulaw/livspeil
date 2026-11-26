@@ -1,4 +1,4 @@
-quad icon:bx-cog 158,68 16x16 r=4 border=1.5 oklch(0.16 0 0 / 0.72)
+icon icon:bx-gear 158,68 16x16 bx-gear color=oklch(0.16 0 0 / 0.9)
 quad popover 106,98 120x120 r=12 fill=oklch(0.92 0 0 / 0.5) border=1 oklch(1 0 0 / 0.06) shadow=E3 material=Glass blur=16
 text text 118,110 86x17 "Snap to grid" size=13 color=oklch(0.16 0 0 / 0.9)
 quad button:First 118,135 86x32 r=6 fill=oklch(0.92 0 0 / 1) border=1 oklch(0 0 0 / 0.1)

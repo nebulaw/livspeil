@@ -15,6 +15,7 @@ publish.workspace = true
 [dependencies]
 livspeil-ui-core = { path = "../livspeil-ui-core" }
 livspeil-ui-gallery = { path = "../livspeil-ui-gallery", default-features = false }
+livspeil-ui-icons = { path = "../livspeil-ui-icons" }
 livspeil-ui-layout = { path = "../livspeil-ui-layout" }
 livspeil-ui-paint = { path = "../livspeil-ui-paint" }
 livspeil-ui-render = { path = "../livspeil-ui-render" }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 //! Text: a shaped-layout cache shared with the core's [`TextMeasurer`],
-//! glyph rasterization into one [`GlyphAtlas`], and atlas uploads.
+//! glyph and icon rasterization into one [`GlyphAtlas`], and atlas uploads.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -10,11 +10,12 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use livspeil_ui_core::{FontSpec, TextMeasurer};
+use livspeil_ui_icons::{IconId, IconRasterizer};
 use livspeil_ui_layout::Size;
 use livspeil_ui_render::{AtlasUpdate, GlyphSprite, Rect as RRect};
 use livspeil_ui_text::{
-    FamilySpec, FontSystem, GlyphAtlas, GlyphQuad, GlyphRasterizer, LayoutOptions, LineHeight,
-    SubpixelMode, TextError, TextLayout, TextStyle,
+    AtlasKey, AtlasRect, FamilySpec, FontSystem, GlyphAtlas, GlyphMask, GlyphQuad, GlyphRasterizer,
+    LayoutOptions, LineHeight, SubpixelMode, TextError, TextLayout, TextStyle,
 };
 
 /// Layouts unused for this many frames are dropped.
@@ -91,7 +92,7 @@ pub struct TextCacheStats {
     pub shaped: u64,
     /// Glyph placements reused (no atlas lookups) since creation.
     pub placements_reused: u64,
-    /// Glyphs in the atlas.
+    /// Glyphs and icons in the atlas.
     pub atlas_glyphs: usize,
 }
 
@@ -224,7 +225,7 @@ pub(crate) struct Placement {
     pub scale: f32,
 }
 
-/// Fonts, layout cache, rasterizers and the glyph atlas.
+/// Fonts, layout cache, rasterizers and the atlas of glyphs and icons.
 #[derive(Debug)]
 pub struct TextContext {
     /// Logical pixels added to the width of every text run that has one
@@ -239,6 +240,7 @@ pub struct TextContext {
     uploaded: Option<u64>,
     whole: GlyphRasterizer,
     quarter: GlyphRasterizer,
+    icons: IconRasterizer,
 }
 
 /// Default atlas side in texels.
@@ -260,6 +262,7 @@ impl TextContext {
             uploaded: None,
             whole: GlyphRasterizer::new(SubpixelMode::None),
             quarter: GlyphRasterizer::new(SubpixelMode::Quarter),
+            icons: IconRasterizer::new(),
         }
     }
 
@@ -306,7 +309,7 @@ impl TextContext {
         }
     }
 
-    /// Drops every glyph; the next upload is a full one.
+    /// Drops every glyph and icon; the next upload is a full one.
     pub fn clear_atlas(&mut self) {
         self.atlas.clear();
     }
@@ -393,6 +396,28 @@ impl TextContext {
                 texels: [q.atlas.x, q.atlas.y, q.atlas.width, q.atlas.height],
             })
             .collect())
+    }
+
+    /// Where `icon` rasterized at `size_px` physical pixels is in the
+    /// atlas, rasterizing it on the first use.
+    pub(crate) fn icon(&mut self, icon: IconId, size_px: f32) -> Result<AtlasRect, TextError> {
+        let key = AtlasKey::Icon {
+            icon: u32::from(icon.index()),
+            size_bits: size_px.to_bits(),
+        };
+        let raster = &mut self.icons;
+        let entry = self.atlas.get_or_insert_with(key, || {
+            // Cannot fail for the embedded set (tested in its crate).
+            let mask = raster.rasterize(icon, size_px).ok()?;
+            Some(GlyphMask {
+                width: mask.side,
+                height: mask.side,
+                left: 0,
+                top: 0,
+                data: mask.data,
+            })
+        })?;
+        Ok(entry.rect)
     }
 
     /// Atlas uploads since the last call: everything after a clear (or the

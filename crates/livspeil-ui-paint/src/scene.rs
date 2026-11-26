@@ -3,11 +3,12 @@
 
 //! `Scene` (core paint commands) to `DisplayList` (render primitives).
 
-use livspeil_ui_core::{Border, Fill, PaintCmd, Quad, Scene, TextRun, Wire};
+use livspeil_ui_core::{Border, Fill, IconRun, PaintCmd, Quad, Scene, TextRun, Wire};
+use livspeil_ui_icons::{IconId, MAX_ICON_PX};
 use livspeil_ui_layout::{Corners, Rect as LRect, Transform2D};
 use livspeil_ui_render::{
-    Affine, Backdrop, BorderWidth, Color, CornerStyle, DisplayList, Fill as RFill, GradientStop,
-    Highlight, HighlightKind, Quad as RQuad, Radii, Rect, Shadow as RShadow,
+    Affine, Backdrop, BorderWidth, Color, CornerStyle, DisplayList, Fill as RFill, GlyphSprite,
+    GradientStop, Highlight, HighlightKind, Quad as RQuad, Radii, Rect, Shadow as RShadow,
 };
 use livspeil_ui_text::{TextError, TextStyle};
 use livspeil_ui_theme::{MaterialRecipe, Shadow, ShadowLayer};
@@ -173,6 +174,7 @@ pub(crate) fn convert(
             PaintCmd::Quad(q) => quad(q, &st, layer, list),
             PaintCmd::Text(t) => text_run(t, &st, text, scale, layer, list)?,
             PaintCmd::Wire(w) => wire(w, &st, scale, layer, list),
+            PaintCmd::Icon(i) => icon_run(i, &st, text, scale, layer, list)?,
         }
     }
     if stack.is_empty() {
@@ -432,6 +434,87 @@ pub(crate) fn draw_text(
         },
     );
     Ok(())
+}
+
+/// Icons are rasterized in steps of this many physical pixels, which
+/// bounds the atlas entries made while a scale animates (a pressed button).
+const ICON_SIZE_STEP: f32 = 0.25;
+
+/// Draws an icon as one sprite from the atlas, the largest square centered
+/// in its box. Under translation and uniform scale it is rasterized at its
+/// size on screen and its top left snapped to a physical pixel, so texels
+/// map 1:1 to pixels; rotation or skew resamples it. The transform is the
+/// one quads get, so an icon moves with its parent. An unknown name draws
+/// an outlined box.
+fn icon_run(
+    i: &IconRun,
+    st: &State,
+    text: &mut TextContext,
+    scale: f32,
+    layer: i32,
+    list: &mut DisplayList,
+) -> Result<(), PaintError> {
+    let side = i.rect.width.min(i.rect.height);
+    if side <= 0.0 || i.color.alpha <= 0.0 || st.opacity <= 0.0 {
+        return Ok(());
+    }
+    let x = i.rect.x + (i.rect.width - side) * 0.5;
+    let y = i.rect.y + (i.rect.height - side) * 0.5;
+    let Some(id) = IconId::from_name(&i.name) else {
+        unknown_icon(Rect::new(x, y, side, side), i, st, layer, list);
+        return Ok(());
+    };
+    let raster_scale = local_scale(scale, st.transform);
+    let size_px =
+        ((side * raster_scale / ICON_SIZE_STEP).round() * ICON_SIZE_STEP).max(ICON_SIZE_STEP);
+    let raster_px = size_px.min(MAX_ICON_PX);
+    let texels = text.icon(id, raster_px).map_err(PaintError::Text)?;
+    // Only beyond the rasterizer's largest size are texels stretched.
+    let dest = texels.width as f32 * (size_px / raster_px) / raster_scale;
+    let [a, b, c, d, _, _] = st.transform.m;
+    let uniform = b == 0.0 && c == 0.0 && a > 0.0 && (a - d).abs() < 1e-6;
+    let (origin, transform) = if uniform {
+        let (cx, cy) = st.transform.apply(x + side * 0.5, y + side * 0.5);
+        let snap = |center: f32| (center * scale - size_px * 0.5).round() / raster_scale;
+        ((snap(cx), snap(cy)), Affine::scale(a, a))
+    } else {
+        ((x, y), st.transform)
+    };
+    list.push(
+        layer,
+        livspeil_ui_render::Glyphs {
+            atlas: text.atlas_id(),
+            glyphs: vec![GlyphSprite {
+                rect: Rect::new(origin.0, origin.1, dest, dest),
+                texels: [texels.x, texels.y, texels.width, texels.height],
+            }],
+            color: color(i.color),
+            clip: st.clip,
+            opacity: st.opacity,
+            transform,
+        },
+    );
+    Ok(())
+}
+
+/// The visible stand-in for a name the icon set does not have.
+fn unknown_icon(r: Rect, i: &IconRun, st: &State, layer: i32, list: &mut DisplayList) {
+    let c = color(i.color);
+    list.push(
+        layer,
+        RQuad {
+            fill: None,
+            border: Some(livspeil_ui_render::Border {
+                width: BorderWidth::Logical(1.5),
+                color: c.with_alpha(c.alpha * 0.8),
+            }),
+            radii: Radii::all(r.w * 0.25),
+            clip: st.clip,
+            opacity: st.opacity,
+            transform: st.transform,
+            ..RQuad::new(r, Color::TRANSPARENT)
+        },
+    );
 }
 
 /// Whether an error means "clear the atlas and paint again".

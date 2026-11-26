@@ -14,7 +14,8 @@
 //!   layout; visual (bidi-aware) movement takes a [`TextLayout`].
 //! - [`GlyphRasterizer`] and [`GlyphAtlas`]: grayscale glyph masks with
 //!   optional quarter-pixel horizontal positioning, packed into a CPU-side
-//!   R8 atlas that reports dirty rectangles for upload. No GPU types here:
+//!   R8 atlas (shared with icons, see [`AtlasKey`]) that reports dirty
+//!   rectangles for upload. No GPU types here:
 //!   the renderer (`livspeil-ui-render`) consumes [`GlyphQuad`]s and
 //!   [`DirtyRect`]s.
 //!
@@ -31,7 +32,7 @@ mod layout;
 mod raster;
 mod style;
 
-pub use atlas::{AtlasEntry, AtlasRect, DirtyRect, GlyphAtlas};
+pub use atlas::{AtlasEntry, AtlasKey, AtlasRect, DirtyRect, GlyphAtlas};
 pub use editor::{Direction, EditKind, EditOp, Editor, Preedit, Selection};
 pub use error::TextError;
 pub use fonts::{FontSystem, UI_FAMILY};

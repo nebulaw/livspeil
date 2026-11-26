@@ -201,8 +201,8 @@ fn file_menu(log: Model<String>) -> Menu {
         MenuItem::new(label).on_select(move |app| set(log, app, format!("File › {label}")))
     };
     Menu::new()
-        .item(cmd("New Scene").shortcut("Ctrl+N"))
-        .item(cmd("Open…").shortcut("Ctrl+O"))
+        .item(cmd("New Scene").icon("bx-grid-plus").shortcut("Ctrl+N"))
+        .item(cmd("Open…").icon("bx-folder").shortcut("Ctrl+O"))
         .submenu(
             "Open Recent",
             Menu::new()
@@ -229,7 +229,7 @@ fn edit_menu(log: Model<String>) -> Menu {
         .item(cmd("Redo").shortcut("Ctrl+Shift+Z").disabled(true))
         .separator()
         .item(cmd("Cut").shortcut("Ctrl+X"))
-        .item(cmd("Copy").shortcut("Ctrl+C"))
+        .item(cmd("Copy").icon("bx-copy").shortcut("Ctrl+C"))
         .item(cmd("Paste").shortcut("Ctrl+V"))
         .separator()
         .item(cmd("Select All").shortcut("Ctrl+A"))
@@ -287,7 +287,7 @@ fn context_menu(app: &App, log: Model<String>, checks: MenuChecks) -> Menu {
             })
     };
     Menu::new()
-        .item(cmd("Add Node…").shortcut("Shift+A"))
+        .item(cmd("Add Node…").icon("bx-grid-plus").shortcut("Shift+A"))
         .item(cmd("Paste").shortcut("Ctrl+V"))
         .item(cmd("Delete").shortcut("Del").disabled(true))
         .separator()

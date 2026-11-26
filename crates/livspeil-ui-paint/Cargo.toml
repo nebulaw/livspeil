@@ -3,7 +3,7 @@
 
 [package]
 name = "livspeil-ui-paint"
-description = "Livspeil UI paint bridge: core scenes to render display lists, text shaping and glyph atlas uploads"
+description = "Livspeil UI paint bridge: core scenes to render display lists, text shaping, icons and glyph atlas uploads"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,6 +14,7 @@ publish.workspace = true
 
 [dependencies]
 livspeil-ui-core = { path = "../livspeil-ui-core" }
+livspeil-ui-icons = { path = "../livspeil-ui-icons" }
 livspeil-ui-layout = { path = "../livspeil-ui-layout" }
 livspeil-ui-render = { path = "../livspeil-ui-render" }
 livspeil-ui-text = { path = "../livspeil-ui-text" }

@@ -33,6 +33,11 @@
 //!   [`GlyphAtlas`](livspeil_ui_text::GlyphAtlas) (whole-pixel positions
 //!   below 1.5x, quarter-pixel above). A full atlas is cleared and the
 //!   scene painted again; the next upload is then a full one.
+//! - **Icons**: an [`IconRun`](livspeil_ui_core::IconRun) is rasterized
+//!   (`livspeil-ui-icons`) at its size on screen into the same atlas and
+//!   drawn as one glyph sprite, tinted like text and snapped to the
+//!   physical pixel grid under translation and uniform scale. Unknown names
+//!   draw an outlined box.
 //! - **Layout**: [`TextContext::measurer`] is a core
 //!   [`TextMeasurer`](livspeil_ui_core::TextMeasurer) sharing the same
 //!   cache, so labels measured for layout are painted without reshaping.
