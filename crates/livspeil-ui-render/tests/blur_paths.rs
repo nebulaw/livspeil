@@ -6,8 +6,8 @@
 //! fallback draws the backdrop's plain colour. Skipped without an adapter.
 
 use livspeil_ui_render::{
-    Backdrop, BlurPath, BlurSupport, Color, DisplayList, FrameOptions, GpuContext, Quad,
-    Rect, RenderError, Renderer, RgbaImage, TARGET_FORMAT, encode,
+    Backdrop, BlurPath, BlurSupport, Color, DisplayList, FrameOptions, GpuContext, Quad, Rect,
+    RenderError, Renderer, RgbaImage, TARGET_FORMAT, encode,
 };
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -86,7 +86,9 @@ fn render_into(
 
 #[test]
 fn render_only_target_matches_the_direct_path() {
-    let Some((_g, ctx, mut r)) = gpu() else { return };
+    let Some((_g, ctx, mut r)) = gpu() else {
+        return;
+    };
     assert_eq!(*r.blur_support(), BlurSupport::Supported);
     let direct_usage = Renderer::TARGET_USAGE | wgpu::TextureUsages::COPY_SRC;
     let render_only = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC;
@@ -108,7 +110,9 @@ fn render_only_target_matches_the_direct_path() {
 
 #[test]
 fn forced_fallback_draws_the_plain_background_colour() {
-    let Some((_g, ctx, mut r)) = gpu() else { return };
+    let Some((_g, ctx, mut r)) = gpu() else {
+        return;
+    };
     let usage = Renderer::TARGET_USAGE | wgpu::TextureUsages::COPY_SRC;
     let reference = {
         let mut plain = list();
@@ -116,7 +120,10 @@ fn forced_fallback_draws_the_plain_background_colour() {
         render_into(&ctx, &mut r, &plain, usage).expect("reference")
     };
     r.force_blur_fallback("forced by the test");
-    assert_eq!(r.blur_support().fallback_reason(), Some("forced by the test"));
+    assert_eq!(
+        r.blur_support().fallback_reason(),
+        Some("forced by the test")
+    );
     // A frame with backdrops is refused with the reason...
     match render_into(&ctx, &mut r, &list(), usage) {
         Err(RenderError::BlurUnavailable(why)) => assert_eq!(why, "forced by the test"),
@@ -131,7 +138,12 @@ fn forced_fallback_draws_the_plain_background_colour() {
     // the scene behind shows through.
     let px = |img: &RgbaImage, x: usize, y: usize| {
         let i = (y * 160 + x) * 4;
-        [img.data[i], img.data[i + 1], img.data[i + 2], img.data[i + 3]]
+        [
+            img.data[i],
+            img.data[i + 1],
+            img.data[i + 2],
+            img.data[i + 3],
+        ]
     };
     let c = px(&out, 80, 60);
     assert_eq!(c[3], 255);

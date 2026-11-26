@@ -118,7 +118,10 @@ mod tests {
             (F::Bgra8Unorm, U::COPY_DST),
         ] {
             let p = choose_blur_path(&BlurSupport::Supported, format, usage);
-            assert!(matches!(&p, BlurPath::Fallback(r) if !r.is_empty()), "{p:?}");
+            assert!(
+                matches!(&p, BlurPath::Fallback(r) if !r.is_empty()),
+                "{p:?}"
+            );
         }
     }
 

@@ -25,6 +25,27 @@
 mod containers;
 mod pages;
 
+use std::sync::Mutex;
+
+/// Why backdrop blur is off, if it is (set by the app from the renderer;
+/// the Materials page shows it). `None`: blur works or is not known yet.
+static BLUR_NOTE: Mutex<Option<String>> = Mutex::new(None);
+
+/// Records why blur is in fallback (`None` clears it). Pages read it when
+/// they are built, so it shows from the next rebuild (page switch, theme
+/// edit).
+pub fn set_blur_note(reason: Option<String>) {
+    if let Ok(mut n) = BLUR_NOTE.lock() {
+        *n = reason;
+    }
+}
+
+/// The current blur fallback reason.
+#[must_use]
+pub fn blur_note() -> Option<String> {
+    BLUR_NOTE.lock().ok().and_then(|n| n.clone())
+}
+
 use std::rc::Rc;
 
 use livspeil_ui_core::{

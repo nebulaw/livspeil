@@ -14,11 +14,11 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 
 use crate::RenderError;
-use crate::support::{BlurPath, BlurSupport, choose_blur_path};
 use crate::atlas::AtlasUpdate;
 use crate::cpu::{PassParams, blur_passes};
 use crate::encode::{Frame, INSTANCE_FLOATS, MAX_BLUR_LEVELS, Op, level_size};
 use crate::image::RgbaImage;
+use crate::support::{BlurPath, BlurSupport, choose_blur_path};
 
 /// Format of the offscreen targets made by [`GpuContext::render_to_image`].
 pub const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;

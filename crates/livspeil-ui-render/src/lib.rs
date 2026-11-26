@@ -69,12 +69,12 @@ pub use encode::{
 pub use geom::{Affine, Rect};
 pub use gpu::{GpuContext, Renderer, TARGET_FORMAT};
 pub use image::RgbaImage;
-pub use support::{BlurPath, BlurSupport, choose_blur_path};
 pub use list::{
     Backdrop, Border, BorderWidth, CornerStyle, DisplayList, Fill, GlyphSprite, Glyphs,
     GradientStop, Highlight, HighlightKind, Image, Item, MAX_GRADIENT_STOPS, Primitive, Quad,
     Radii, Shadow,
 };
+pub use support::{BlurPath, BlurSupport, choose_blur_path};
 
 /// Errors from encoding or rendering.
 #[derive(Debug, Clone, PartialEq)]

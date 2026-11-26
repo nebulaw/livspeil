@@ -32,6 +32,7 @@
 
 mod accessibility;
 mod error;
+mod gpu_info;
 mod host;
 pub mod input;
 mod options;
@@ -44,7 +45,9 @@ pub mod widget_platform;
 
 pub use accessibility::Accessibility;
 pub use error::HostError;
+pub use gpu_info::{FormatReport, GpuReport, gpu_info};
 pub use host::{Host, HostEvent, run};
+pub use livspeil_ui_render::{BlurPath, BlurSupport};
 pub use options::{
     ActionHook, HostOptions, SurfaceOptions, Titlebar, WindowOptions, pick_format, surface_config,
 };

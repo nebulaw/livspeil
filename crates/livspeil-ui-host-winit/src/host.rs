@@ -264,8 +264,15 @@ impl<R: SceneRenderer> Host<R> {
             adapter_info.backend
         );
         let size = window.inner_size();
+        let caps = surface.get_capabilities(&adapter);
+        log::info!(
+            "surface: formats {:?}, usages {:?}, present modes {:?}",
+            caps.formats,
+            caps.usages,
+            caps.present_modes
+        );
         let config = surface_config(
-            &surface.get_capabilities(&adapter),
+            &caps,
             (size.width, size.height),
             self.surface_options,
             self.window_options.transparent,

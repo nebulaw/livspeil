@@ -727,7 +727,16 @@ fn materials(theme: &Theme) -> Element {
                             .render(theme),
                     ),
                 )
-                .child(caption(theme, tier)),
+                .child(caption(theme, tier))
+                .children(crate::blur_note().map(|why| {
+                    caption(
+                        theme,
+                        format!(
+                            "Blur is off on this GPU: Frost and Glass show plain colours ({why}). Run with --gpu-info for details."
+                        ),
+                    )
+                    .name("blur-fallback-note")
+                })),
         )
 }
 

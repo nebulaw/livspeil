@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
 //! `cargo run -p livspeil-ui-gallery [page]`: the component gallery in a
-//! window (see `README.md`, "Try the gallery").
+//! window (see `README.md`, "Try the gallery"). `--gpu-info` prints the GPU
+//! stack and the chosen blur path instead (see `docs/ui-host.md`).
 
 use livspeil_ui_core::{App, KEYMAP_FILE};
 use livspeil_ui_gallery::{Chrome, Page, WINDOW_SIZE, mount_with};
@@ -11,13 +12,30 @@ use livspeil_ui_paint::{FontSystem, PaintBridge};
 use livspeil_ui_theme::{ConfigKind, ConfigWatcher, config_dir};
 
 fn main() {
+    if std::env::args().any(|a| a == "--gpu-info") {
+        match livspeil_ui_host_winit::gpu_info() {
+            Ok(report) => print!("{}", report.to_text()),
+            Err(e) => {
+                eprintln!("livspeil-ui-gallery --gpu-info: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     let page = std::env::args()
         .nth(1)
         .and_then(|a| Page::ALL.into_iter().find(|p| p.slug() == a))
         .unwrap_or(Page::Buttons);
     let mut app = App::new();
-    let renderer = PaintRenderer::for_theme(PaintBridge::new(FontSystem::new()), app.theme());
+    let mut renderer = PaintRenderer::for_theme(PaintBridge::new(FontSystem::new()), app.theme());
     renderer.install_measurer(&mut app);
+    // Tell the Materials page when blur had to fall back to plain colours.
+    renderer.on_blur_path(|path| {
+        livspeil_ui_gallery::set_blur_note(match path {
+            livspeil_ui_host_winit::BlurPath::Fallback(why) => Some(why.clone()),
+            _ => None,
+        });
+    });
     // macOS: our titlebar under a transparent, full-size native one (the
     // traffic lights stay). Linux and others: system decorations, so X11
     // window managers and Wayland compositors behave natively.
