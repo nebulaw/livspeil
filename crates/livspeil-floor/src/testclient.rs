@@ -139,7 +139,7 @@ impl TestClient {
             return;
         };
         let base = i32::from(self.cfg.grey);
-        for (i, px) in canvas.chunks_exact_mut(4).enumerate() {
+        for (i, px) in canvas.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let x = (i as u32 % w) as i32;
             let y = (i as u32 / w) as i32;
             // Soft vertical gradient plus a lighter block and a grid so
@@ -152,7 +152,7 @@ impl TestClient {
                 v = 200;
             }
             let v = v.clamp(0, 255) as u8;
-            px.copy_from_slice(&[v, v, v, 255]);
+            *px = [v, v, v, 255];
         }
         let surface = self.window.wl_surface();
         surface.damage_buffer(0, 0, w as i32, h as i32);

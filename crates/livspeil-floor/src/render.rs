@@ -251,9 +251,8 @@ impl FloorRenderer {
             drawn.push(collect_window(renderer, state, i, w));
         }
 
-        let sync;
         let use_blur = fx.blur && panel.is_some();
-        if use_blur {
+        let sync = if use_blur {
             self.ensure_textures(renderer, size, panel.map(|p| p.rect))?;
             // 1. Scene into an offscreen texture.
             if let Some((mut scene, sz)) = self.scene.take() {
@@ -292,7 +291,7 @@ impl FloorRenderer {
                 self.draw_frost(&mut frame, p.rect, &chain.out)?;
             }
             self.draw_cursor(&mut frame, state, fx)?;
-            sync = frame.finish()?;
+            frame.finish()?
         } else {
             let mut frame = renderer.render(target, out_size, target_transform)?;
             self.draw_scene(&mut frame, state, &drawn, size, fx)?;
@@ -316,8 +315,8 @@ impl FloorRenderer {
                 )?;
             }
             self.draw_cursor(&mut frame, state, fx)?;
-            sync = frame.finish()?;
-        }
+            frame.finish()?
+        };
         Ok(sync)
     }
 
