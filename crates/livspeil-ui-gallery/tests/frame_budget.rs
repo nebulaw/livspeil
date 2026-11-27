@@ -90,11 +90,14 @@ fn measure(scenario: Scenario) -> Work {
 fn budget(scenario: Scenario) -> (u32, u32, usize, usize, usize, usize) {
     match scenario {
         Scenario::PanSample => (0, 0, 0, 0, 579, 185_280),
-        Scenario::PanStress => (0, 0, 0, 0, 17_894, 5_726_080),
+        Scenario::PanStress => (0, 0, 0, 0, 17_895, 5_726_400),
         Scenario::PanStressFit => (0, 0, 0, 0, 15_477, 4_952_640),
         Scenario::ZoomStress => (0, 0, 0, 0, 18_137, 5_803_840),
-        Scenario::DragStress => (88, 88, 2, 2328, 18_089, 5_788_480),
-        Scenario::ScrollList => (10, 10, 1, 388, 1777, 568_640),
+        // Still renders until P4; it reconciles the margin around the view
+        // that pan and zoom need to render nothing.
+        Scenario::DragStress => (88, 0, 2, 2607, 18_089, 5_788_480),
+        // One frame leaves the built rows.
+        Scenario::ScrollList => (1, 1, 1, 466, 1808, 578_560),
     }
 }
 

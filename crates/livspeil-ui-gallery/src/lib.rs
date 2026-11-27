@@ -383,10 +383,7 @@ pub fn mount_with(app: &mut App, fonts: FontSystem, page: Page, chrome: Chrome) 
     );
     // A new page starts at its top.
     let _ = app.observe(page.id(), move |app| {
-        scroll.update(app, |s, cx| {
-            s.scroller_mut().jump_to(Vec2::ZERO);
-            cx.notify();
-        });
+        ScrollView::jump_to(scroll, app, Vec2::ZERO);
     });
     let gallery = app.new_view(Gallery {
         env: env.clone(),

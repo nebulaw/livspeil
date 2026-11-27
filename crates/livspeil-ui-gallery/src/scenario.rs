@@ -9,7 +9,7 @@
 
 use livspeil_ui_core::App;
 use livspeil_ui_layout::{Point, Vec2};
-use livspeil_ui_widgets::{NodeCanvas, NodeGraphModel};
+use livspeil_ui_widgets::{NodeCanvas, NodeGraphModel, ScrollView};
 
 use crate::{Mounted, Page};
 
@@ -122,14 +122,13 @@ impl Scenario {
                     }
                 });
             }
-            Scenario::ScrollList => mounted.list.update(app, |s, cx| {
+            Scenario::ScrollList => {
                 // Down for a leg, then back: never past the start.
                 let leg = t % (2 * LEG);
                 let steps = leg.min(2 * LEG - leg);
                 let offset = f32::from(u16::try_from(steps).unwrap_or(u16::MAX)) * 7.0;
-                s.scroller_mut().jump_to(Vec2::new(0.0, offset));
-                cx.notify();
-            }),
+                ScrollView::jump_to(mounted.list, app, Vec2::new(0.0, offset));
+            }
         }
     }
 }
