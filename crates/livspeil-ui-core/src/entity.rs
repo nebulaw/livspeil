@@ -10,7 +10,7 @@ use std::ops::{Deref, DerefMut};
 use livspeil_ui_theme::{MotionConfig, Theme};
 
 use crate::app::App;
-use crate::element::{Element, SharedString};
+use crate::element::Element;
 use crate::layer::Layer;
 
 /// Identity of a model or view.
@@ -276,7 +276,7 @@ impl<V: Render> ViewContext<'_, V> {
     /// view is released. Attach it with
     /// [`Element::layer`](crate::Element::layer) and set its properties at
     /// any time without rendering the view again (see [`Layer`]).
-    pub fn layer(&mut self, key: impl Into<SharedString>) -> Layer {
+    pub fn layer(&mut self, key: &str) -> Layer {
         self.app.layer(self.id, key)
     }
 

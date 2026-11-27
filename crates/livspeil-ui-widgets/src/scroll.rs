@@ -743,8 +743,7 @@ fn measure_view(view: View<ScrollView>, app: &mut App) {
 fn run(view: View<ScrollView>, app: &mut App) {
     if !app.is_animating(view.id(), SCROLL_TASK) {
         app.animate(view.id(), SCROLL_TASK, move |app, dt| {
-            let motion = app.motion().clone();
-            view.update(app, |s, cx| s.step(dt, &motion, cx))
+            view.update(app, |s, cx| s.step(dt, cx))
         });
     }
 }
@@ -955,13 +954,15 @@ impl ScrollView {
 
     /// One frame of momentum, springs and the scrollbar fade. Returns
     /// whether there is more to do.
-    fn step(&mut self, dt: f32, motion: &MotionConfig, cx: &mut ViewContext<'_, Self>) -> bool {
+    fn step(&mut self, dt: f32, cx: &mut ViewContext<'_, Self>) -> bool {
+        let motion = cx.motion();
         let p = self.physics_for(motion);
         let spring = motion.resolve(
             Some(SCROLL_SCOPE),
             MotionClass::Standard,
             PropertyKind::Movement,
         );
+        let fade = motion.resolve(None, MotionClass::Standard, PropertyKind::Appearance);
         let moving = self.scroller.tick(dt, &p, spring);
         if moving || self.thumb_grab.is_some() {
             self.bar_idle = 0.0;
@@ -971,7 +972,6 @@ impl ScrollView {
         let bars = self.bar_idle < p.bar_linger;
         let alpha = if bars { 1.0 } else { 0.0 };
         if self.bar_alpha.target() != alpha {
-            let fade = motion.resolve(None, MotionClass::Standard, PropertyKind::Appearance);
             self.bar_alpha.animate_to(alpha, fade);
         }
         let fading = self.bar_alpha.step(dt);

@@ -837,21 +837,20 @@ impl App {
     }
 
     fn tick_animations(&mut self, dt: f32) {
+        // Field by field, so stepping allocates nothing.
         let nodes = &mut self.tree.nodes;
-        let mut moved = Vec::new();
+        let (revision, moved) = (&mut self.revision, &mut self.moved);
         self.driver.active.retain(|id| {
             nodes.get_mut(id).is_some_and(|n| {
                 let before = n.anims.placement();
                 let moving = n.anims.step(dt);
                 if n.anims.placement() != before {
-                    moved.push(*id);
+                    *revision += 1;
+                    moved.insert(*id, *revision);
                 }
                 moving
             })
         });
-        for id in moved {
-            self.note_moved(id);
-        }
         for slot in &mut self.driver.large {
             if let Some((id, _)) = *slot
                 && !self.driver.active.contains(&id)

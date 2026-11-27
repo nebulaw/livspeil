@@ -112,7 +112,7 @@ fn two_cards() -> State {
 
 impl Fx {
     fn layer(&mut self, key: &str) -> Layer {
-        self.h.app.layer(self.view.id(), key.to_owned())
+        self.h.app.layer(self.view.id(), key)
     }
     fn find(&self, name: &str) -> ElementId {
         self.h.app.find(name).unwrap()

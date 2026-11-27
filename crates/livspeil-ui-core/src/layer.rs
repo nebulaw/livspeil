@@ -27,7 +27,7 @@ use std::fmt;
 use livspeil_ui_layout::{Rect, Transform2D};
 
 use crate::app::App;
-use crate::element::{ElementId, SharedString};
+use crate::element::SharedString;
 use crate::entity::EntityId;
 
 /// A handle to a set of compositor properties (see the module docs).
@@ -52,70 +52,48 @@ impl Default for Props {
     }
 }
 
-#[derive(Debug)]
-struct Owned {
-    owner: EntityId,
-    key: SharedString,
-    props: Props,
-}
-
 /// Every live layer. Kept outside the element tree so views can use their
 /// layers while the tree is being reconciled.
 #[derive(Debug, Default)]
 pub(crate) struct Layers {
     next: u64,
-    live: HashMap<Layer, Owned>,
-    by_key: HashMap<(EntityId, SharedString), Layer>,
+    live: HashMap<Layer, Props>,
+    /// Looked up by `&str`, so finding a layer allocates nothing.
+    by_key: HashMap<EntityId, HashMap<SharedString, Layer>>,
     /// Layers whose frame changed since the last frame was drawn.
     pub(crate) reframed: HashSet<Layer>,
 }
 
 impl Layers {
-    pub(crate) fn get(&mut self, owner: EntityId, key: SharedString) -> Layer {
-        if let Some(l) = self.by_key.get(&(owner, key.clone())) {
+    pub(crate) fn get(&mut self, owner: EntityId, key: &str) -> Layer {
+        if let Some(l) = self.by_key.get(&owner).and_then(|k| k.get(key)) {
             return *l;
         }
         self.next += 1;
         let layer = Layer(self.next);
-        self.live.insert(
-            layer,
-            Owned {
-                owner,
-                key: key.clone(),
-                props: Props::default(),
-            },
-        );
-        self.by_key.insert((owner, key), layer);
+        self.live.insert(layer, Props::default());
+        self.by_key
+            .entry(owner)
+            .or_default()
+            .insert(key.into(), layer);
         layer
     }
 
     /// The properties of `layer`; the neutral ones for none or a dropped one.
     pub(crate) fn props(&self, layer: Option<Layer>) -> Props {
-        layer
-            .and_then(|l| self.live.get(&l))
-            .map_or_else(Props::default, |o| o.props)
-    }
-
-    fn entry(&mut self, layer: Layer) -> Option<&mut Props> {
-        self.live.get_mut(&layer).map(|o| &mut o.props)
+        layer.and_then(|l| self.lookup(l)).unwrap_or_default()
     }
 
     fn lookup(&self, layer: Layer) -> Option<Props> {
-        self.live.get(&layer).map(|o| o.props)
+        self.live.get(&layer).copied()
     }
 
     /// Drop every layer of `owner`.
     pub(crate) fn release(&mut self, owner: EntityId) {
-        let by_key = &mut self.by_key;
-        let reframed = &mut self.reframed;
-        self.live.retain(|layer, o| {
-            let keep = o.owner != owner;
-            if !keep {
-                by_key.remove(&(owner, o.key.clone()));
-                reframed.remove(layer);
-            }
-            keep
-        });
+        for layer in self.by_key.remove(&owner).unwrap_or_default().into_values() {
+            self.live.remove(&layer);
+            self.reframed.remove(&layer);
+        }
     }
 }
 
@@ -189,8 +167,8 @@ impl fmt::Debug for Task {
 impl App {
     /// The layer `key` of the entity `owner`, created on first use. Views
     /// use [`ViewContext::layer`](crate::ViewContext::layer).
-    pub fn layer(&mut self, owner: EntityId, key: impl Into<SharedString>) -> Layer {
-        self.layers.get(owner, key.into())
+    pub fn layer(&mut self, owner: EntityId, key: &str) -> Layer {
+        self.layers.get(owner, key)
     }
 
     pub(crate) fn layer_props(&self, layer: Layer) -> Option<Props> {
@@ -198,7 +176,7 @@ impl App {
     }
 
     pub(crate) fn change_layer(&mut self, layer: Layer, change: impl FnOnce(&mut Props)) -> bool {
-        let Some(props) = self.layers.entry(layer) else {
+        let Some(props) = self.layers.live.get_mut(&layer) else {
             return false;
         };
         let before = *props;
@@ -213,8 +191,9 @@ impl App {
         self.positions_changed = true;
         // Not attached (not shown, or the tree is being reconciled, which
         // draws a frame anyway): nothing to schedule.
-        let elements: Vec<ElementId> = self.tree.layered(layer).to_vec();
-        for id in elements {
+        // By index: nothing is allocated for a property change.
+        for i in 0..self.tree.layered(layer).len() {
+            let id = self.tree.layered(layer)[i];
             if before.frame != after.frame {
                 self.tree.update_bounds_from(&self.layers, id);
             }
@@ -262,7 +241,8 @@ impl App {
         running.retain_mut(|t| self.exists(t.owner) && (t.step)(self, dt));
         // A task registered while running wins over the one that ran.
         running.retain(|t| self.exists(t.owner) && !self.is_animating(t.owner, t.key));
-        self.tasks.append(&mut running);
+        running.append(&mut self.tasks);
+        self.tasks = running;
         self.flush_effects();
     }
 }
