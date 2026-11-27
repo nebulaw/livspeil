@@ -346,7 +346,9 @@ views and 2,607).
   transform, so painting walks 4,000 more commands and the property table has
   one entry per card (+160 KB uploaded fit to all). With retained fragments
   (P3) an unchanged card is not painted or encoded again.
-- Not measured on screen yet.
+- On screen (500 nodes, `docs/benchmarks.md`): `drag-stress` holds 144 fps
+  at 1.35 ms of CPU (was 118 fps, 6.34 ms); pan and zoom stay at 144 fps and
+  cost 0.06 to 0.33 ms more.
 
 ## 8. Alternatives not taken
 

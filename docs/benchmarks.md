@@ -538,4 +538,22 @@ includes the pan or the move.
 | zoom 0.4, pan | 320 -> 376 | 162 -> 157 | 374 -> 395 | 856 -> 927 | 483 -> 504 KB |
 | fit-all, pan | 388 -> 583 | 95 -> 122 | 575 -> 801 | 1058 -> 1505 | 605 -> 765 KB |
 
-Not measured: on screen, GPU time, an integrated GPU.
+Not measured by this benchmark: GPU time, an integrated GPU.
+
+### On screen
+
+2026-11-28, release build, RTX 5070 Ti, driver 620.73.04, Hyprland, 144 Hz,
+Vulkan, FIFO, 1600x1000 at scale 1, gallery scenarios, 7 s each, medians
+without the first 30 frames, one run per scenario. "Before" is the run of
+"Frame pipeline P1 and P2 on screen" above, made earlier the same day and
+before the review fixes of that stage.
+
+| Scenario | fps | CPU ms | CPU p95 ms | late frames | uploaded |
+|---|---:|---:|---:|---:|---:|
+| `drag-stress` | 118 -> 144 | 6.34 -> 1.35 | 6.83 -> 1.70 | 86 of 648 -> 2 of 941 | 349 -> 368 KB |
+| `pan-sample` | 144 -> 144 | 0.35 -> 0.41 | 0.43 -> 0.43 | 5 -> 3 | 33 -> 34 KB |
+| `pan-stress` | 144 -> 144 | 1.30 -> 1.51 | 1.54 -> 1.70 | 0 -> 3 | 331 -> 349 KB |
+| `pan-stress-fit` | 143 -> 144 | 1.31 -> 1.64 | 1.71 -> 1.99 | 7 -> 10 | 172 -> 211 KB |
+| `zoom-stress` | 144 -> 144 | 1.43 -> 1.55 | 2.25 -> 1.90 | 8 -> 2 | 235 -> 247 KB |
+| `scroll-list` | 144 -> 144 | 0.94 -> 0.99 | 1.11 -> 1.09 | 7 -> 6 | 77 -> 78 KB |
+| `hover-buttons` | 144 -> 144 | 0.31 -> 0.34 | 0.37 -> 0.36 | 1 -> 2 | 26 -> 26 KB |
