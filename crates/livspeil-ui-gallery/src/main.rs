@@ -6,25 +6,48 @@
 //! `--gpu-info` prints the GPU stack and the chosen blur path instead (see
 //! `docs/ui-host.md`).
 //!
-//! `--scenario=pan-sample|pan-stress|pan-stress-fit [--seconds=N]` pans the
-//! node canvas by itself, writes the frame log and exits (measurements).
+//! `--scenario=NAME [--seconds=N]` drives a scripted interaction by itself,
+//! writes the frame log and exits (measurements; see [`Scenario`]).
 //!
 //! The frame HUD (F3 shows or hides it, F4 dumps the frame log) is always
 //! available; `--hud` or `LIVSPEIL_HUD=1` starts with it visible.
 
 use livspeil_ui_core::{App, KEYMAP_FILE};
-use livspeil_ui_gallery::{Chrome, Mounted, Page, WINDOW_SIZE, mount_with};
+use livspeil_ui_gallery::{Chrome, Page, Scenario, WINDOW_SIZE, mount_with};
 use livspeil_ui_host_winit::frame_stats::default_log_path;
 use livspeil_ui_host_winit::{
     FrameDriver, HostOptions, HudOptions, PRESENT_MODE_ENV, PaintRenderer, SurfaceOptions,
     Titlebar, WidgetClipboard, parse_present_mode, run,
 };
-use livspeil_ui_layout::Vec2;
 use livspeil_ui_paint::{FontSystem, PaintBridge};
 use livspeil_ui_theme::{ConfigKind, ConfigWatcher, config_dir};
-use livspeil_ui_widgets::NodeCanvas;
+
+/// Warnings and errors from the host and renderer, on stderr (they would
+/// otherwise vanish: nothing else installs a logger).
+struct StderrLog;
+
+impl log::Log for StderrLog {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::Level::Warn
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if self.enabled(record.metadata()) {
+            eprintln!("{} {}: {}", record.level(), record.target(), record.args());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+/// Window size of `--scenario` runs, in logical pixels.
+const SCENARIO_SIZE: (f64, f64) = (1600.0, 1000.0);
 
 fn main() {
+    // Fails only if a logger is already installed, which is fine too.
+    if log::set_logger(&StderrLog).is_ok() {
+        log::set_max_level(log::LevelFilter::Warn);
+    }
     if std::env::args().any(|a| a == "--gpu-info") {
         match livspeil_ui_host_winit::gpu_info() {
             Ok(report) => print!("{}", report.to_text()),
@@ -36,10 +59,24 @@ fn main() {
         return;
     }
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let page = args
+    let scenario = args
         .iter()
-        .find_map(|a| Page::ALL.into_iter().find(|p| p.slug() == *a))
-        .unwrap_or(Page::Buttons);
+        .find_map(|a| a.strip_prefix("--scenario="))
+        .map(|name| {
+            Scenario::from_slug(name).unwrap_or_else(|| {
+                let known: Vec<&str> = Scenario::ALL.iter().map(|s| s.slug()).collect();
+                eprintln!(
+                    "livspeil-ui-gallery: unknown scenario {name}; known: {}",
+                    known.join(", ")
+                );
+                std::process::exit(2);
+            })
+        });
+    let page = scenario.map(Scenario::page).unwrap_or_else(|| {
+        args.iter()
+            .find_map(|a| Page::ALL.into_iter().find(|p| p.slug() == *a))
+            .unwrap_or(Page::Buttons)
+    });
     let hud_visible = args.iter().any(|a| a == "--hud")
         || std::env::var("LIVSPEIL_HUD").is_ok_and(|v| !matches!(v.as_str(), "" | "0" | "false"));
     // `--present-mode=` beats `LIVSPEIL_PRESENT_MODE`.
@@ -101,19 +138,23 @@ fn main() {
         // Accessibility actions can move focus: let text fields know.
         .after_accessibility_action(move |app| env.sync_focus(app));
     options.surface = surface;
-    if let Some(name) = args.iter().find_map(|a| a.strip_prefix("--scenario=")) {
+    if let Some(scenario) = scenario {
+        // A fixed size, so runs compare: a window that cannot be resized is
+        // also left floating by tiling compositors.
+        options.window.size = SCENARIO_SIZE;
+        options.window.min_size = Some(SCENARIO_SIZE);
+        options.window.resizable = false;
         let seconds = args
             .iter()
             .find_map(|a| a.strip_prefix("--seconds="))
             .and_then(|v| v.parse().ok())
             .unwrap_or(6.0);
-        match scenario(name, &mounted, seconds) {
-            Some(driver) => options.driver = Some(driver),
-            None => {
-                eprintln!("livspeil-ui-gallery: unknown scenario {name}");
-                std::process::exit(2);
-            }
-        }
+        let mut frame = 0;
+        options.driver = Some(FrameDriver::new(move |app, elapsed| {
+            scenario.step(app, &mounted, frame);
+            frame += 1;
+            elapsed.as_secs_f64() < seconds
+        }));
     }
     // Hot reload `~/.config/livspeil/ui/{theme,motion,keymap}.toml` when the
     // directory exists; otherwise no timer runs.
@@ -127,37 +168,4 @@ fn main() {
         eprintln!("livspeil-ui-gallery: {e}");
         std::process::exit(1);
     }
-}
-
-/// A driver that pans a node canvas back and forth for `seconds`.
-fn scenario(name: &str, mounted: &Mounted, seconds: f64) -> Option<FrameDriver> {
-    let (which, fit) = match name {
-        "pan-sample" => (0, false),
-        "pan-stress" => (1, false),
-        "pan-stress-fit" => (1, true),
-        _ => return None,
-    };
-    let canvas = mounted.canvases[which];
-    let choice = mounted.canvas_choice;
-    let mut frame = 0_u32;
-    Some(FrameDriver::new(move |app, elapsed| {
-        match frame {
-            0 => choice.update(app, |c, cx| {
-                *c = which;
-                cx.notify();
-            }),
-            // The canvas knows its size after a layout.
-            5 if fit => NodeCanvas::fit(canvas, app),
-            _ => {
-                let step = if (frame / 60).is_multiple_of(2) {
-                    3.0
-                } else {
-                    -3.0
-                };
-                NodeCanvas::pan_by(canvas, app, Vec2::new(step, 0.0));
-            }
-        }
-        frame += 1;
-        elapsed.as_secs_f64() < seconds
-    }))
 }

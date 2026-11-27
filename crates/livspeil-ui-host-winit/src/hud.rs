@@ -100,9 +100,48 @@ pub fn hud_commands(lines: &[String], viewport: Size, theme: &Theme) -> Vec<Pain
     out
 }
 
+/// A warning strip across the top of the `viewport`, shown whether or not
+/// the HUD is: for states the user must not miss.
+#[must_use]
+pub fn banner_commands(message: &str, viewport: Size, theme: &Theme) -> Vec<PaintCmd> {
+    let colors = theme.colors();
+    let height = LINE_HEIGHT + 2.0 * PAD;
+    vec![
+        PaintCmd::Quad(Quad {
+            element: ElementId::ROOT,
+            rect: Rect::new(0.0, 0.0, viewport.width, height),
+            radii: Corners::all(0.0),
+            fill: Some(Fill::Solid(colors.danger)),
+            border: None,
+            shadow: None,
+            material: None,
+        }),
+        PaintCmd::Text(TextRun {
+            element: ElementId::ROOT,
+            rect: Rect::new(PAD, PAD, 0.0, LINE_HEIGHT),
+            text: message.into(),
+            font: FontSpec::sized(FONT_SIZE),
+            color: livspeil_ui_theme::Color::WHITE,
+        }),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_banner_spans_the_top() {
+        let cmds = banner_commands("careful", Size::new(800.0, 600.0), &Theme::default());
+        let PaintCmd::Quad(q) = &cmds[0] else {
+            panic!("the strip comes first");
+        };
+        assert!(q.rect.y.abs() < 1e-3 && (q.rect.width - 800.0).abs() < 1e-3);
+        let PaintCmd::Text(t) = &cmds[1] else {
+            panic!("then the message");
+        };
+        assert_eq!(&*t.text, "careful");
+    }
 
     #[test]
     fn long_lines_are_clipped() {

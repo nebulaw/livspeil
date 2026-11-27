@@ -5,8 +5,9 @@ SPDX-License-Identifier: CC-BY-4.0
 
 # Livspeil UI frame pipeline (retained rendering)
 
-Status: **proposed** (2026-11-27). Extends `livspeil-ui-spec-v0.md`
-sections 3, 5, 12 and 13. Nothing here is built unless marked so.
+Status: **accepted** (D65, 2026-11-27); P0 built. Extends
+`livspeil-ui-spec-v0.md` sections 3, 5, 12 and 13. Nothing beyond stage P0 is
+built unless marked so.
 
 ## 1. Rule
 
@@ -14,41 +15,51 @@ sections 3, 5, 12 and 13. Nothing here is built unless marked so.
 screen.** Panning, zooming, scrolling and dragging change a few numbers; they
 must not rebuild, re-lay-out, repaint or re-upload what did not change.
 
-## 2. Evidence
+## 2. Evidence (baseline, stage P0)
 
 Release build, RTX 5070 Ti, driver 620.73, Wayland (Hyprland), 144 Hz
-(6.94 ms per frame), the gallery's Node canvas panned by a script,
-1274x1428 window unless noted. CPU = build + paint + encode, medians.
+(6.94 ms per frame), gallery scenarios in a fixed 1600x1000 window, 7 s
+each, medians (2026-11-27). CPU = build + paint + encode; submit includes
+the instance upload; GPU is the draw and blur passes.
 
-| Scenario | fps | CPU ms | submit ms | instances | uploaded per frame |
-|---|---:|---:|---:|---:|---:|
-| Sample, 6 nodes | 144 | 1.2 | 1.2 | 579 | 0.19 MB |
-| Stress 500, zoom 1 | 111-122 | 5.2 | 2.0 | 16,200 | 5.2 MB |
-| Stress 500, fit all | 144 | 2.9 | 1.8 | 15,000 | 4.8 MB |
-| Stress 500, zoom 1, 2560x1440 | 59 | 11.2 | 3.8 | 36,100 | 11.6 MB |
+| Scenario | fps | CPU ms | submit ms | GPU ms | instances | uploaded |
+|---|---:|---:|---:|---:|---:|---:|
+| `pan-sample` (6 nodes) | 144 | 1.29 | 1.23 | 0.12 | 579 | 0.19 MB |
+| `pan-stress` (500 nodes) | 108 | 5.66 | 1.95 | 0.17 | 16,871 | 5.40 MB |
+| `pan-stress-fit` | 144 | 3.18 | 2.19 | 0.14 | 19,799 | 6.34 MB |
+| `zoom-stress` | 124 | 4.79 | 1.70 | 0.17 | 13,608 | 4.35 MB |
+| `drag-stress` (one node) | 99 | 6.66 | 2.07 | 0.17 | 18,449 | 5.90 MB |
+| `scroll-list` (100,000 rows) | 144 | 1.63 | 0.90 | 0.13 | 1,289 | 0.41 MB |
 
-Present mode (FIFO, mailbox, immediate) and frame latency (1, 2) made no
-meaningful difference. The last row is one run, at the size the compositor
-gave that window.
+The GPU is nearly idle. The cost is CPU work and moving data to the card.
+At 2560x1440 an uncontrolled run of the stress pan reached only 59 fps.
 
 Where the time goes, for one pan frame:
 
 1. **Everything visible is rebuilt.** A pan re-renders the canvas view,
-   builds 2,000-2,600 elements and diffs them: about 2.7-3.0 ms, most of
-   `build`.
-2. **Layout runs although no box changed**: 0.4-0.5 ms.
-3. **The whole scene is repainted, re-converted and re-encoded**: paint and
-   encode, 1.1-3.5 ms.
+   reconciles about 1,800 elements and is most of `build`.
+2. **Layout runs on every canvas frame** although no box changed size
+   (0.4-0.5 ms). Scrolling already avoids it.
+3. **The whole scene is repainted, re-converted and re-encoded.**
 4. **All instances are uploaded again.** Every instance is 80 floats
    (320 bytes), whether it is a card, one glyph or one piece of a wire.
 5. **Wires are many quads**: each is cut into pieces about 10 px long.
+6. **Dragging one node is the worst case**: the model revision changes, so
+   the geometry cache of all nodes is rebuilt (2,328 elements reconciled,
+   two views rendered).
 
-Not the cause: the present mode and the swapchain. Two earlier observations
-were artifacts of the setup: a debug build with Vulkan validation, and a
+Not the cause: present mode (FIFO, mailbox, immediate) and frame latency
+(1, 2) made no meaningful difference. Earlier observations of a stalling
+gallery came from the setup: a debug build with Vulkan validation, and a
 software adapter after a driver upgrade without a reboot.
 
-Dragging a node is not measured yet. From the code, every move bumps the
-model revision, which rebuilds the geometry cache of **all** nodes.
+Not baselined yet: hovering or pressing a control (no scenario injects
+pointer input; one is added with P2, which changes that path), and GPU upload
+time on its own.
+
+The same scenarios run headlessly in
+`crates/livspeil-ui-gallery/tests/frame_budget.rs`, which holds their work
+counts as budgets.
 
 ## 3. Targets
 
@@ -184,7 +195,7 @@ before and after numbers.
 
 | Stage | Content | Done when |
 |---|---|---|
-| P0 | Scenarios (pan, zoom, drag, scroll), work counters, GPU timing, section 6 | baseline of every target recorded |
+| P0 (built) | Scenarios (pan, zoom, drag, scroll), work counters, GPU timing, section 6 | baseline of every target recorded |
 | P1 | Instance families and the curve primitive | upload down at least 5x on the stress graph; goldens reviewed |
 | P2 | Property tree and layout boundaries | pan, zoom and scroll render no view and run no layout |
 | P3 | Paint fragments and retained buffers | upload targets of section 3 met |
@@ -210,5 +221,5 @@ established one in browser compositors and in Flutter's layer tree.
 ## 9. Open questions
 
 1. `Layer` handle (4.1) or properties bound to models: which API do views
-   use? Proposed: the handle.
-2. Does P5 wait until the Intel iGPU laptop is measured?
+   use? Decided: the handle.
+2. Resolved: P5 waits until the Intel iGPU laptop is measured.

@@ -29,6 +29,7 @@
 mod containers;
 mod overlays;
 mod pages;
+mod scenario;
 
 use std::sync::Mutex;
 
@@ -71,6 +72,7 @@ use livspeil_ui_widgets::{
 pub use containers::{Containers, LAYERS, MenuChecks, STRESS_NODES, VIRTUAL_ROWS, row_title};
 pub use overlays::Overlays;
 pub use pages::State;
+pub use scenario::Scenario;
 
 /// The window's logical size (also the screenshot size).
 pub const WINDOW_SIZE: (f32, f32) = (1000.0, 640.0);
@@ -321,6 +323,8 @@ pub struct Mounted {
     pub canvases: [View<NodeCanvas<DemoGraph>>; 2],
     /// Which of [`Mounted::canvases`] the page shows.
     pub canvas_choice: Model<usize>,
+    /// The Scrolling page's virtual list, for scenarios.
+    pub list: View<ScrollView>,
 }
 
 /// Build the gallery showing `page` with system window chrome
@@ -341,6 +345,7 @@ pub fn mount_with(app: &mut App, fonts: FontSystem, page: Page, chrome: Chrome) 
     let menubar = state.containers.menubar;
     let canvases = state.containers.canvases;
     let canvas_choice = state.containers.graph;
+    let list = state.containers.list;
     let page = app.new_model(page);
     let sidebar = app.new_view(
         ScrollView::new(&env, move |app, _| {
@@ -412,6 +417,7 @@ pub fn mount_with(app: &mut App, fonts: FontSystem, page: Page, chrome: Chrome) 
         shell,
         canvases,
         canvas_choice,
+        list,
     }
 }
 

@@ -69,6 +69,9 @@ pub struct FrameSample {
     pub draw_calls: u32,
     /// Bytes of instance data uploaded.
     pub upload_bytes: u32,
+    /// GPU time of a recent frame (it is read back a few frames late);
+    /// `None` without timestamp support.
+    pub gpu: Option<Duration>,
 }
 
 /// A stored frame: the sample plus its interval.
@@ -143,6 +146,8 @@ pub struct Summary {
     pub submit: Dist,
     /// Present phase.
     pub present: Dist,
+    /// GPU time, over the frames that have one.
+    pub gpu: Option<Dist>,
     /// The last frame's display list items, instances, draw calls, bytes.
     pub last_items: (u32, u32, u32, u32),
 }
@@ -185,6 +190,10 @@ impl Summary {
             encode: phase(|s| s.encode),
             submit: phase(|s| s.submit),
             present: phase(|s| s.present),
+            gpu: {
+                let times: Vec<Duration> = rs.iter().filter_map(|r| r.sample.gpu).collect();
+                (!times.is_empty()).then(|| Dist::of(&times))
+            },
             last_items: (
                 last.items,
                 last.instances,
@@ -234,6 +243,9 @@ impl Summary {
         out.push(row("submit", self.submit));
         out.push(row("acquire", self.acquire));
         out.push(row("present", self.present));
+        if let Some(gpu) = self.gpu {
+            out.push(row("gpu", gpu));
+        }
         let (items, instances, draws, bytes) = self.last_items;
         out.push(format!(
             "last frame: {items} items, {instances} instances, {draws} draws, {:.2} MB uploaded",
@@ -248,6 +260,7 @@ impl Summary {
     pub fn hud_lines(&self) -> Vec<String> {
         let d = |d: Dist| format!("{:.2}/{:.2}", ms(d.avg), ms(d.max));
         let (items, instances, draws, bytes) = self.last_items;
+        let gpu = self.gpu.map_or("n/a".to_owned(), d);
         vec![
             format!(
                 "{:.1} fps   interval ms avg {:.2}  p95 {:.2}  max {:.2}",
@@ -279,6 +292,7 @@ impl Summary {
                 "{items} items  {instances} instances  {draws} draws  {:.2} MB",
                 f64::from(bytes) / 1e6
             ),
+            format!("ms avg/max  gpu {gpu}"),
         ]
     }
 }
@@ -410,7 +424,7 @@ impl FrameStats {
             let us = |d: Duration| d.as_micros();
             let _ = writeln!(
                 out,
-                "{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{}",
+                "{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                 r.seq,
                 s.at.as_secs_f64(),
                 r.interval.map_or(String::new(), |i| us(i).to_string()),
@@ -424,7 +438,8 @@ impl FrameStats {
                 s.items,
                 s.instances,
                 s.draw_calls,
-                s.upload_bytes
+                s.upload_bytes,
+                s.gpu.map_or(String::new(), |g| us(g).to_string())
             );
         }
         out
@@ -432,7 +447,7 @@ impl FrameStats {
 }
 
 /// The header line of [`FrameStats::csv`] (times in microseconds).
-pub const CSV_HEADER: &str = "seq,t_s,interval_us,rebuilt,build_us,paint_us,encode_us,submit_us,acquire_us,present_us,items,instances,draws,upload_bytes";
+pub const CSV_HEADER: &str = "seq,t_s,interval_us,rebuilt,build_us,paint_us,encode_us,submit_us,acquire_us,present_us,items,instances,draws,upload_bytes,gpu_us";
 
 /// What the host knows about the graphics stack: shown by the HUD and
 /// written at the top of the frame log.
@@ -467,6 +482,9 @@ pub struct GpuReport {
     pub refresh_mhz: Option<u32>,
     /// Surface size in physical pixels.
     pub size_px: (u32, u32),
+    /// Whether the host was built with debug assertions (timings are then
+    /// not representative).
+    pub debug_build: bool,
 }
 
 impl GpuReport {
@@ -496,7 +514,18 @@ impl GpuReport {
                 "scale {}  monitor {}  surface {}x{} px",
                 self.scale_factor, refresh, self.size_px.0, self.size_px.1
             ),
+            format!("{} build", self.profile()),
         ]
+    }
+
+    /// Whether frames are drawn on the CPU (no usable GPU driver).
+    #[must_use]
+    pub fn is_software(&self) -> bool {
+        self.device_type == "Cpu"
+    }
+
+    fn profile(&self) -> &'static str {
+        if self.debug_build { "debug" } else { "release" }
     }
 
     /// Shorter lines for the HUD.
@@ -506,7 +535,12 @@ impl GpuReport {
             format!("{:.0} Hz", f64::from(m) / 1000.0)
         });
         vec![
-            format!("{} | {}", self.backend, self.adapter),
+            format!(
+                "{} | {} | {} build",
+                self.backend,
+                self.adapter,
+                self.profile()
+            ),
             format!("driver {} {}", self.driver, self.driver_info),
             format!(
                 "present {} (asked {})  latency {}",

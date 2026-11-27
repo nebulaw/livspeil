@@ -303,6 +303,7 @@ pub(crate) fn reconcile(
     el: Element,
     owner: EntityId,
 ) -> Option<LayoutNode> {
+    app.reconciled += 1;
     let Element {
         key,
         name,

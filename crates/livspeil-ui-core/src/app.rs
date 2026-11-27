@@ -99,6 +99,9 @@ pub struct FrameStats {
     pub layout: bool,
     /// Nodes in the tree.
     pub nodes: usize,
+    /// Elements built by renders and diffed into the tree this frame (not
+    /// the untouched subtrees of views that did not render).
+    pub reconciled: usize,
     /// Animating nodes after this frame.
     pub animating: usize,
     /// Paint counters.
@@ -135,6 +138,8 @@ pub struct App {
     layout_watch: HashMap<EntityId, Option<Rect>>,
     render_counts: HashMap<EntityId, usize>,
     renders_this_frame: usize,
+    /// Elements reconciled since the last frame.
+    pub(crate) reconciled: usize,
     root_view: Option<AnyView>,
     root_mounted: bool,
     pub(crate) tree: Tree,
@@ -192,6 +197,7 @@ impl App {
             layout_watch: HashMap::new(),
             render_counts: HashMap::new(),
             renders_this_frame: 0,
+            reconciled: 0,
             root_view: None,
             root_mounted: false,
             tree: Tree::default(),
@@ -559,6 +565,7 @@ impl App {
                 views_rendered: self.renders_this_frame,
                 layout,
                 nodes: self.tree.nodes.len(),
+                reconciled: std::mem::take(&mut self.reconciled),
                 animating: self.driver.active.len(),
                 paint: paint_stats,
             },

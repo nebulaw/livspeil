@@ -282,6 +282,12 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
         self.zoom = None;
     }
 
+    /// The graph this canvas shows.
+    #[must_use]
+    pub fn model(&self) -> Model<M> {
+        self.model
+    }
+
     /// The current pan/zoom.
     #[must_use]
     pub fn canvas(&self) -> Canvas {

@@ -54,6 +54,7 @@ mod cpu;
 mod encode;
 mod geom;
 mod gpu;
+mod gpu_timer;
 mod image;
 mod list;
 mod shade;
@@ -68,6 +69,7 @@ pub use encode::{
 };
 pub use geom::{Affine, Rect};
 pub use gpu::{GpuContext, Renderer, TARGET_FORMAT};
+pub use gpu_timer::{FEATURES as GPU_TIMER_FEATURES, GpuTimer};
 pub use image::RgbaImage;
 pub use list::{
     Backdrop, Border, BorderWidth, CornerStyle, DisplayList, Fill, GlyphSprite, Glyphs,

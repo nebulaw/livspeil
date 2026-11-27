@@ -14,6 +14,11 @@ repository = "https://github.com/nebulaw/livspeil"
 authors = ["Livspeil contributors"]
 publish = false
 
+# Debug builds stay usable: dependencies (shaping, rasterizing, layout, the
+# GPU layer) are optimized; only this workspace's code is unoptimized.
+[profile.dev.package."*"]
+opt-level = 2
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"
