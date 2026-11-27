@@ -5,6 +5,7 @@
 
 use std::time::Duration;
 
+use livspeil_ui_core::App;
 use livspeil_ui_theme::ConfigWatcher;
 
 use crate::HostError;
@@ -149,6 +150,32 @@ impl std::fmt::Debug for ActionHook {
     }
 }
 
+/// Drives the app from the host's frame loop, for scripted measurements:
+/// called before each frame with the time since the host started, it changes
+/// whatever it likes and returns `false` to close the app. While a driver is
+/// installed the host draws continuously.
+pub struct FrameDriver(Box<DriverFn>);
+
+type DriverFn = dyn FnMut(&mut App, Duration) -> bool;
+
+impl FrameDriver {
+    /// A driver running `f` before each frame.
+    pub fn new(f: impl FnMut(&mut App, Duration) -> bool + 'static) -> Self {
+        FrameDriver(Box::new(f))
+    }
+
+    /// Run one step; `false` asks the host to close.
+    pub fn step(&mut self, app: &mut App, elapsed: Duration) -> bool {
+        (self.0)(app, elapsed)
+    }
+}
+
+impl std::fmt::Debug for FrameDriver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FrameDriver")
+    }
+}
+
 /// Everything [`run`](crate::run) needs besides the app and renderer.
 #[derive(Debug)]
 pub struct HostOptions {
@@ -173,6 +200,8 @@ pub struct HostOptions {
     /// The frame HUD and frame log; `None` leaves them (and their F3 and
     /// F4 hotkeys) off.
     pub frame_hud: Option<HudOptions>,
+    /// See [`FrameDriver`].
+    pub driver: Option<FrameDriver>,
 }
 
 impl Default for HostOptions {
@@ -186,6 +215,7 @@ impl Default for HostOptions {
             caret_blink: true,
             after_accessibility_action: None,
             frame_hud: None,
+            driver: None,
         }
     }
 }
@@ -322,6 +352,18 @@ pub fn surface_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_frame_driver_sees_the_app_and_says_when_to_stop() {
+        let mut driver = FrameDriver::new(|app, elapsed| {
+            app.request_frame();
+            elapsed < Duration::from_secs(1)
+        });
+        let mut app = App::new();
+        assert!(driver.step(&mut app, Duration::ZERO));
+        assert!(app.needs_frame());
+        assert!(!driver.step(&mut app, Duration::from_secs(1)));
+    }
     use wgpu::{CompositeAlphaMode as A, PresentMode as P, TextureFormat as F};
 
     fn caps(formats: Vec<F>) -> wgpu::SurfaceCapabilities {

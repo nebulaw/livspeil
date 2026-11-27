@@ -13,6 +13,7 @@
 use std::collections::HashMap;
 use std::sync::mpsc;
 
+use crate::GpuTimer;
 use crate::RenderError;
 use crate::atlas::AtlasUpdate;
 use crate::cpu::{PassParams, blur_passes};
@@ -194,6 +195,8 @@ pub struct Renderer {
     blit_layout: wgpu::BindGroupLayout,
     blur_support: BlurSupport,
     offscreen: Option<wgpu::Texture>,
+    /// Set while frames are being timed.
+    timer: Option<GpuTimer>,
     sampler: wgpu::Sampler,
     globals: wgpu::Buffer,
     instances: Option<wgpu::Buffer>,
@@ -519,6 +522,7 @@ impl Renderer {
             blit_layout,
             blur_support,
             offscreen: None,
+            timer: None,
             format,
             quad_pipeline,
             backdrop_pipeline,
@@ -635,6 +639,22 @@ impl Renderer {
     /// format and the given `usage` (see [`choose_blur_path`]).
     pub fn blur_path(&self, usage: wgpu::TextureUsages) -> BlurPath {
         choose_blur_path(&self.blur_support, self.format, usage)
+    }
+
+    /// Time the GPU work of later frames, or stop. Does nothing on a device
+    /// without [`GPU_TIMER_FEATURES`](crate::GPU_TIMER_FEATURES).
+    pub fn set_timing(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, on: bool) {
+        match (on, self.timer.is_some()) {
+            (true, false) => self.timer = GpuTimer::new(device, queue),
+            (false, true) => self.timer = None,
+            _ => {}
+        }
+    }
+
+    /// The GPU time of a recent timed frame.
+    #[must_use]
+    pub fn gpu_time(&self) -> Option<std::time::Duration> {
+        self.timer.as_ref().and_then(GpuTimer::latest)
     }
 
     /// Records and submits a frame into `target` (which must have
@@ -854,6 +874,9 @@ impl Renderer {
         let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("frame"),
         });
+        if let Some(timer) = &mut self.timer {
+            timer.start(device, &mut enc);
+        }
         let c = frame.clear;
         let mut load = wgpu::LoadOp::Clear(wgpu::Color {
             r: f64::from(c[0]),
@@ -957,7 +980,13 @@ impl Renderer {
                 }
             }
         }
+        if let Some(timer) = &mut self.timer {
+            timer.stop(&mut enc);
+        }
         queue.submit([enc.finish()]);
+        if let Some(timer) = &mut self.timer {
+            timer.submitted();
+        }
         Ok(())
     }
 }

@@ -49,6 +49,8 @@ pub struct RenderTimings {
     pub draw_calls: usize,
     /// Bytes of instance data uploaded.
     pub upload_bytes: usize,
+    /// GPU time of a recent frame, when timing is on and supported.
+    pub gpu: Option<Duration>,
 }
 
 /// Draws a [`Scene`] into a surface texture.
@@ -69,6 +71,12 @@ pub trait SceneRenderer {
         target: &RenderTarget<'_>,
         scene: &Scene,
     ) -> Result<(), HostError>;
+
+    /// Turn GPU timing on or off (it costs a little, so the host asks only
+    /// while measuring). The default ignores it and reports no GPU time.
+    fn set_gpu_timing(&mut self, on: bool) {
+        let _ = on;
+    }
 
     /// The timings of the last [`SceneRenderer::render`], if the renderer
     /// measures them (the default reports zeros).

@@ -29,6 +29,7 @@
 mod containers;
 mod overlays;
 mod pages;
+mod scenario;
 
 use std::sync::Mutex;
 
@@ -64,12 +65,14 @@ use livspeil_ui_text::FontSystem;
 use livspeil_ui_theme::{Color, Density, Material, Scheme, Theme, Tier};
 use livspeil_ui_widgets::keymap::actions as widget_actions;
 use livspeil_ui_widgets::{
-    Env, Label, MenuBar, ScrollView, SegmentedControl, Titlebar, Toggle, Tone, WidgetRoot,
+    DemoGraph, Env, Label, MenuBar, NodeCanvas, ScrollView, SegmentedControl, Titlebar, Toggle,
+    Tone, WidgetRoot,
 };
 
 pub use containers::{Containers, LAYERS, MenuChecks, STRESS_NODES, VIRTUAL_ROWS, row_title};
 pub use overlays::Overlays;
 pub use pages::State;
+pub use scenario::Scenario;
 
 /// The window's logical size (also the screenshot size).
 pub const WINDOW_SIZE: (f32, f32) = (1000.0, 640.0);
@@ -316,6 +319,12 @@ pub struct Mounted {
     pub root: View<WidgetRoot>,
     /// The app root: handles the page shortcuts whatever has focus.
     pub shell: View<Shell>,
+    /// The Node canvas page's canvases (sample, stress), for scenarios.
+    pub canvases: [View<NodeCanvas<DemoGraph>>; 2],
+    /// Which of [`Mounted::canvases`] the page shows.
+    pub canvas_choice: Model<usize>,
+    /// The Scrolling page's virtual list, for scenarios.
+    pub list: View<ScrollView>,
 }
 
 /// Build the gallery showing `page` with system window chrome
@@ -334,6 +343,9 @@ pub fn mount_with(app: &mut App, fonts: FontSystem, page: Page, chrome: Chrome) 
     app.set_keymap(km);
     let state = State::new(app, &env);
     let menubar = state.containers.menubar;
+    let canvases = state.containers.canvases;
+    let canvas_choice = state.containers.graph;
+    let list = state.containers.list;
     let page = app.new_model(page);
     let sidebar = app.new_view(
         ScrollView::new(&env, move |app, _| {
@@ -403,6 +415,9 @@ pub fn mount_with(app: &mut App, fonts: FontSystem, page: Page, chrome: Chrome) 
         gallery,
         root,
         shell,
+        canvases,
+        canvas_choice,
+        list,
     }
 }
 

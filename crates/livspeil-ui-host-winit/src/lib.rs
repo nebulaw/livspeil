@@ -51,6 +51,7 @@ pub use gpu_info::{FormatReport, GpuReport, gpu_info};
 pub use host::{Host, HostEvent, run};
 pub use hud::HudOptions;
 pub use livspeil_ui_render::{BlurPath, BlurSupport};
+pub use options::FrameDriver;
 pub use options::{
     ActionHook, FRAME_LATENCY_ENV, HostOptions, PRESENT_MODE_ENV, SurfaceOptions, Titlebar,
     WindowOptions, parse_present_mode, pick_format, surface_config,

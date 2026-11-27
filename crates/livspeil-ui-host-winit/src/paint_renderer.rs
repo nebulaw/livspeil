@@ -43,6 +43,7 @@ pub struct PaintRenderer {
     list: render::DisplayList,
     frame: render::Frame,
     timings: RenderTimings,
+    gpu_timing: bool,
 }
 
 impl std::fmt::Debug for PaintRenderer {
@@ -78,6 +79,7 @@ impl PaintRenderer {
                 ops: Vec::new(),
             },
             timings: RenderTimings::default(),
+            gpu_timing: false,
         }
     }
 
@@ -219,6 +221,7 @@ impl SceneRenderer for PaintRenderer {
         if matches!(path, render::BlurPath::Fallback(_)) {
             self.list.without_backdrops();
         }
+        renderer.set_timing(&gpu.device, &gpu.queue, self.gpu_timing);
         renderer.update_atlases(&gpu.device, &gpu.queue, &updates)?;
         let t1 = Instant::now();
         render::encode_into(
@@ -241,8 +244,13 @@ impl SceneRenderer for PaintRenderer {
             instances: self.frame.instances.len(),
             draw_calls: self.frame.draw_calls(),
             upload_bytes: self.frame.instance_byte_len(),
+            gpu: renderer.gpu_time(),
         };
         Ok(())
+    }
+
+    fn set_gpu_timing(&mut self, on: bool) {
+        self.gpu_timing = on;
     }
 
     fn take_timings(&mut self) -> RenderTimings {

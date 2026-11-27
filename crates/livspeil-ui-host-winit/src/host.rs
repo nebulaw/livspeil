@@ -22,8 +22,9 @@ use winit::window::{Window, WindowAttributes, WindowId};
 
 use crate::accessibility::Accessibility;
 use crate::frame_stats::{FrameLog, FrameSample, FrameStats, GpuReport, HUD_WINDOW, dump_text};
-use crate::hud::{HudOptions, hud_commands};
+use crate::hud::{HudOptions, banner_commands, hud_commands};
 use crate::input::{InputTranslator, KeyInput};
+use crate::options::FrameDriver;
 use crate::options::{
     ActionHook, HostOptions, SurfaceOptions, Titlebar, WindowOptions, surface_config,
 };
@@ -148,6 +149,9 @@ pub struct Host<R> {
     role_cursors: bool,
     base_keymap: Keymap,
     hud: Option<Hud>,
+    driver: Option<FrameDriver>,
+    /// The driver finished: exit at the end of the event batch.
+    quit: bool,
     /// Length of the scene before the HUD overlay was appended to it.
     overlay_from: Option<usize>,
 }
@@ -184,6 +188,7 @@ fn frame_sample(
         instances: n(t.instances),
         draw_calls: n(t.draw_calls),
         upload_bytes: n(t.upload_bytes),
+        gpu: t.gpu,
     }
 }
 
@@ -259,6 +264,8 @@ impl<R: SceneRenderer> Host<R> {
             role_cursors: options.role_cursors,
             base_keymap,
             hud: options.frame_hud.map(Hud::new),
+            driver: options.driver,
+            quit: false,
             overlay_from: None,
         }
     }
@@ -334,10 +341,13 @@ impl<R: SceneRenderer> Host<R> {
             .ok_or(HostError::EventLoop("no event loop proxy".to_owned()))?;
         let accesskit = accesskit_winit::Adapter::with_event_loop_proxy(event_loop, &window, proxy);
         window.set_visible(true);
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle_from_env(
-                Box::new(event_loop.owned_display_handle()),
-            ));
+        let mut descriptor = wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(
+            event_loop.owned_display_handle(),
+        ));
+        // Validation costs milliseconds per frame, so even debug builds only
+        // turn it on when asked (`WGPU_VALIDATION=1`, `WGPU_DEBUG=1`).
+        descriptor.flags = wgpu::InstanceFlags::empty().with_env();
+        let instance = wgpu::Instance::new(descriptor);
         let surface = instance
             .create_surface(window.clone())
             .map_err(|e| HostError::Surface(e.to_string()))?;
@@ -351,7 +361,7 @@ impl<R: SceneRenderer> Host<R> {
         let adapter_info = adapter.get_info();
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("livspeil-ui-host-winit"),
-            required_features: wgpu::Features::empty(),
+            required_features: adapter.features() & livspeil_ui_render::GPU_TIMER_FEATURES,
             required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
             ..Default::default()
         }))
@@ -409,7 +419,14 @@ impl<R: SceneRenderer> Host<R> {
                 .current_monitor()
                 .and_then(|m| m.refresh_rate_millihertz()),
             size_px: (config.width, config.height),
+            debug_build: cfg!(debug_assertions),
         };
+        if report.is_software() {
+            log::warn!(
+                "software rendering on {}: no usable GPU driver; frames will be slow",
+                report.adapter
+            );
+        }
         log::info!("surface: {}", report.lines().join("; "));
         if size.width > 0 && size.height > 0 {
             surface.configure(&device, &config);
@@ -480,20 +497,38 @@ impl<R: SceneRenderer> Host<R> {
         }
     }
 
-    /// Append the HUD's commands to the scene about to be rendered
-    /// (`redraw` removes them again).
-    fn add_hud_overlay(&mut self) {
-        let Some(hud) = &self.hud else {
-            return;
-        };
-        if !hud.visible {
-            return;
+    /// Append what is drawn over the app's scene (the software rendering
+    /// warning, then the HUD) to the scene about to be rendered (`redraw`
+    /// removes it again).
+    fn add_overlays(&mut self) {
+        let mut cmds = Vec::new();
+        let (viewport, theme) = (self.app.viewport(), self.app.theme());
+        if let Some(gfx) = &self.gfx
+            && gfx.report.is_software()
+        {
+            let message = format!(
+                "Software rendering: no GPU driver in use ({})",
+                gfx.report.adapter
+            );
+            cmds.extend(banner_commands(&message, viewport, theme));
         }
-        let cmds = hud_commands(&hud.lines(), self.app.viewport(), self.app.theme());
-        if let Some(scene) = &mut self.last_scene {
+        if let Some(hud) = &self.hud
+            && hud.visible
+        {
+            cmds.extend(hud_commands(&hud.lines(), viewport, theme));
+        }
+        if !cmds.is_empty()
+            && let Some(scene) = &mut self.last_scene
+        {
             self.overlay_from = Some(scene.commands.len());
             scene.commands.extend(cmds);
         }
+    }
+
+    /// GPU timing costs two extra submits, so it runs only while someone is
+    /// measuring: the HUD is up or a driver is installed.
+    fn measuring(&self) -> bool {
+        self.driver.is_some() || self.hud.as_ref().is_some_and(|h| h.visible)
     }
 
     fn skip_frame(&mut self) {
@@ -508,6 +543,12 @@ impl<R: SceneRenderer> Host<R> {
         if !self.pacer.redraw_started() || self.gfx.is_none() {
             self.skip_frame();
             return;
+        }
+        if let Some(driver) = &mut self.driver
+            && !driver.step(&mut self.app, self.start.elapsed())
+        {
+            self.driver = None;
+            self.quit = true;
         }
         let mut needs_next = false;
         let mut build = Duration::ZERO;
@@ -527,7 +568,8 @@ impl<R: SceneRenderer> Host<R> {
             self.skip_frame();
             return;
         }
-        self.add_hud_overlay();
+        self.add_overlays();
+        let measuring = self.measuring();
         let Some(scene) = &self.last_scene else {
             return;
         };
@@ -572,6 +614,7 @@ impl<R: SceneRenderer> Host<R> {
             size_px: (gfx.config.width, gfx.config.height),
             scale: self.translator.scale() as f32,
         };
+        self.renderer.set_gpu_timing(measuring);
         if let Err(e) = self.renderer.render(&gfx.gpu, &target, scene) {
             log::error!("{e}");
         }
@@ -943,6 +986,13 @@ impl<R: SceneRenderer> ApplicationHandler<HostEvent> for Host<R> {
             self.app.dispatch(InputEvent::Text(text));
         }
         self.sync_ime();
+        if self.quit {
+            event_loop.exit();
+            return;
+        }
+        if self.driver.is_some() {
+            self.app.request_frame();
+        }
         if self
             .pacer
             .want_redraw(self.scheduler.should_draw(&self.app))

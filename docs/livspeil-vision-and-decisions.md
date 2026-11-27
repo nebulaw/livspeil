@@ -100,6 +100,9 @@ Answers given in a local session (2026-11-26), numbers not yet assigned:
 - The hub doc, kernel spec and repository conventions are published in the
   repository (`docs/`, `specs/`).
 
+Frame pipeline (2026-11-27)
+- D65 Retained frame pipeline (`specs/livspeil-ui-frame-pipeline.md`): frame cost is proportional to what changed. Stages P0–P5, one PR each; damage tracking and blur caching (P5) wait for the Intel iGPU laptop.
+
 ## Architecture overview
 - **Floor**: Smithay compositor (windows, input, outputs, XWayland, layer-shell, titlebars, shadows, rounded masks, blur, window tokens).
 - **Shell**: menubar, launcher, settings, Dream panels (Livspeil UI, layer-shell clients).

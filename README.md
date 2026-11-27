@@ -410,6 +410,9 @@ cargo xtask check   # fmt, clippy -D warnings, tests, then cargo-deny and reuse 
 
 Optional tools: `cargo install cargo-deny`, `pip install reuse`.
 
+Debug builds optimize third-party dependencies (see `Cargo.toml`); judge
+smoothness and measure only with `--release`.
+
 ## License
 
 Core: GPL-3.0-or-later. Node API, SDK and Livspeil UI: MPL-2.0. Docs and specs: CC BY 4.0. See [docs/licensing.md](docs/licensing.md) and [CONTRIBUTING.md](CONTRIBUTING.md).

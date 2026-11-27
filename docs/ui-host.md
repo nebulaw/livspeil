@@ -380,6 +380,38 @@ interval.
   `--hud` (or `LIVSPEIL_HUD=1`) starts with the overlay on,
   `--present-mode=MODE` beats the environment variable.
 
+## Scripted scenarios
+
+`HostOptions::driver` takes a `FrameDriver`: a closure called before each
+frame with the time since the host started. While one is installed the host
+draws continuously; returning `false` closes the app. The gallery uses it for
+measurements that need a real window but no hands:
+
+```sh
+cargo run --release -p livspeil-ui-gallery -- --scenario=pan-stress --seconds=7
+# pan-sample | pan-stress | pan-stress-fit | zoom-stress | drag-stress | scroll-list
+```
+
+A scenario window is a fixed 1600x1000 (tiling compositors then leave it
+floating) and must stay visible: hidden windows draw nothing. The frame log
+(above) is written on exit. Measure release builds only, and check the
+adapter and build lines of the log.
+
+## Measuring and diagnostics
+
+- **GPU time** (`gpu` in the HUD and log, `gpu_us` in the CSV): timestamps at
+  the start and end of the renderer's frame command buffer, read back a few
+  frames late without waiting. It runs only while the HUD is shown or a
+  driver is installed, and needs timestamp query support; otherwise it is
+  absent. Buffer uploads are not included.
+- **Validation** is off even in debug builds because it costs milliseconds a
+  frame; `WGPU_VALIDATION=1` and `WGPU_DEBUG=1` turn it on. The renderer's
+  tests keep their own settings.
+- **Software rendering** (no usable GPU driver, for example after a driver
+  upgrade without a reboot) is logged and shown in a strip across the top of
+  the window, with or without the HUD.
+- **Debug builds** optimize dependencies; the HUD and log say which build ran.
+
 ## Surface details
 
 - Scale factor changes: positions are tracked in logical pixels. The
