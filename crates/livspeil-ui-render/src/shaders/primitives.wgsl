@@ -23,6 +23,8 @@ const FILL_SOLID: u32 = 1u;
 const FILL_LINEAR: u32 = 2u;
 
 const MAX_CURVE_SEGMENTS: u32 = 64u;
+// Physical pixels past a stroke's edge within which a segment's box draws.
+const CLAIM_MARGIN_PX: f32 = 0.75;
 const INV_TEXT_GAMMA: f32 = 1.0 / 1.8;
 
 struct SpriteRecord {
@@ -529,7 +531,7 @@ fn shade_curve(c: CurveRecord, segment: u32, px: vec2<f32>) -> vec4<f32> {
     // draw: either nothing is covered here or a nearer segment's box draws
     // it. Saves the search for the corners of the boxes.
     let own = segment_distance(p, curve_point(c, f32(segment) / n), curve_point(c, f32(segment + 1u) / n));
-    if own >= c.half_width + 0.75 / prop.ppu {
+    if own >= c.half_width + CLAIM_MARGIN_PX / prop.ppu {
         discard;
     }
     // Only segments within the window can be as near as that
