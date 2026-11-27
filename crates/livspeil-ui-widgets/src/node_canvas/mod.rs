@@ -7,36 +7,40 @@
 //! [`NodeGraphModel`]: node cards with typed ports and parameter rows,
 //! links as Bézier wires, a minimap. See [`NodeCanvas`] for interactions.
 
+mod card;
 mod geom;
+mod minimap;
 mod model;
+mod wires;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 
 use livspeil_ui_core::{
     Animated, App, CursorShape, DragEvent, DragPhase, Element, EventCx, Key, Model, MouseButton,
     NamedKey, Phase, PointerEvent, PointerFilter, PointerKind, Render, Role as CoreRole,
-    ScrollDelta, SharedString, View, ViewContext, Wire, actions as core, div, text,
+    ScrollDelta, SharedString, View, ViewContext, Wire, actions as core, div,
 };
 use livspeil_ui_layout::style::{Dimension, LengthPercentageAuto, Position};
 use livspeil_ui_layout::{Canvas, Point, Rect, Size, Vec2};
-use livspeil_ui_theme::{Color, Elevation, Material, MotionClass, PropertyKind, Theme};
+use livspeil_ui_theme::{Color, Material, MotionClass, PropertyKind};
 
 pub use geom::{
-    CardMetrics, GraphCache, NODE_WIDTH, NodeGeom, PORT_DOT, SNAP_RADIUS, WIRE_WIDTH, find_snap,
-    graph_bounds, oriented, rect_from, rubber_select,
+    Applied, CardMetrics, GraphCache, NODE_WIDTH, NodeGeom, PORT_DOT, SNAP_RADIUS, WIRE_WIDTH,
+    find_snap, graph_bounds, oriented, rect_from, rubber_select,
 };
+pub use minimap::{MINIMAP, minimap_mapping};
 pub use model::{
-    DemoGraph, DemoNode, Link, NodeGraphModel, NodeId, ParamInfo, ParamValue, PortInfo, PortRef,
-    PortSide, palette_color,
+    ChangeLog, DemoGraph, DemoNode, GraphChange, Link, NodeGraphModel, NodeId, ParamInfo,
+    ParamValue, PortInfo, PortRef, PortSide, palette_color,
 };
 
 use crate::env::Env;
-use crate::number_field::NumberField;
 use crate::semantics::{Role, Semantics};
-use crate::style::{self, metrics};
-use crate::toggle::Toggle;
+use card::{CardState, NodeCard, Pending};
+use minimap::{MinimapNodes, Shown};
+use wires::WireLayer;
 
 /// Motion scope of canvas zoom (`[overrides.canvas]`).
 pub const CANVAS_SCOPE: &str = "canvas";
@@ -44,11 +48,6 @@ pub const CANVAS_SCOPE: &str = "canvas";
 pub const LOD_FULL: f32 = 0.6;
 /// Zoom from which cards show their header and ports (below: blocks).
 pub const LOD_COMPACT: f32 = 0.3;
-/// Minimap size.
-pub const MINIMAP: Size = Size {
-    width: 200.0,
-    height: 130.0,
-};
 /// The built region reaches past the view on each side by this fraction of
 /// the view, and at least by [`MIN_MARGIN`] view pixels.
 const MARGIN: f32 = 0.25;
@@ -58,6 +57,8 @@ const MIN_MARGIN: f32 = 96.0;
 const SHRINK: f32 = 2.0;
 /// Key of the zoom spring's frame task.
 const ZOOM_TASK: &str = "zoom";
+/// Key of the frame task that applies model changes.
+const SYNC_TASK: &str = "sync";
 /// Zoom factor per wheel line.
 const WHEEL_ZOOM: f32 = 1.15;
 /// Zoom exponent per pixel of a ctrl/pinch scroll.
@@ -97,7 +98,7 @@ pub struct CanvasStats {
     /// Links in the model.
     pub links: usize,
     /// Nodes built: those intersecting the built region (the view and a
-    /// margin around it).
+    /// margin around it) when it was last built or a node entered or left it.
     pub built_nodes: usize,
     /// Wires built.
     pub built_wires: usize,
@@ -178,55 +179,6 @@ impl Built {
     }
 }
 
-/// Minimap content: one rect per node, rebuilt per model revision only.
-struct MinimapNodes {
-    rects: Rc<Vec<(Rect, bool)>>,
-    color: Color,
-    selected: Color,
-}
-
-impl Render for MinimapNodes {
-    fn render(&mut self, _cx: &mut ViewContext<'_, Self>) -> Element {
-        let mut el = div().name("minimap-nodes").hit_test(false).style(|s| {
-            s.position = Position::Absolute;
-            s.size.width = Dimension::percent(1.0);
-            s.size.height = Dimension::percent(1.0);
-        });
-        for (i, (r, sel)) in self.rects.iter().enumerate() {
-            el = el.child(
-                div()
-                    .key(format!("{i}"))
-                    .absolute(*r)
-                    .rounded(1.0)
-                    .bg(if *sel { self.selected } else { self.color })
-                    .hit_test(false),
-            );
-        }
-        el
-    }
-}
-
-/// What the minimap shows: the graph with a margin of half its size (so
-/// the viewport frame stays readable around it).
-fn minimap_bounds(cache: &GraphCache) -> Rect {
-    let b = graph_bounds(cache);
-    b.inflate(b.width.max(b.height) * 0.15)
-}
-
-/// Maps graph bounds into the minimap: `(scale, offset)` with
-/// `minimap = canvas × scale + offset`.
-#[must_use]
-pub fn minimap_mapping(bounds: Rect, size: Size, pad: f32) -> (f32, Vec2) {
-    let w = (size.width - 2.0 * pad).max(1.0);
-    let h = (size.height - 2.0 * pad).max(1.0);
-    let s = (w / bounds.width.max(1.0)).min(h / bounds.height.max(1.0));
-    let off = Vec2::new(
-        pad + (w - bounds.width * s) / 2.0 - bounds.x * s,
-        pad + (h - bounds.height * s) / 2.0 - bounds.y * s,
-    );
-    (s, off)
-}
-
 /// A node editor canvas over a [`NodeGraphModel`] (UI spec §9 NodeCanvas).
 ///
 /// - **Pan**: Space+drag, middle drag, two-finger trackpad scroll.
@@ -245,14 +197,18 @@ pub fn minimap_mapping(bounds: Rect, size: Size, pad: f32) -> (f32, Vec2) {
 /// - **Parameters**: numbers are `NumberField`s (scrub or type), flags
 ///   `Toggle`s; edits go to [`NodeGraphModel::set_param`].
 /// - **Virtualization**: only nodes and wires intersecting the built
-///   region (the viewport and a margin) are built, through a spatial index
-///   cached per model revision; cards lose detail when zoomed out
-///   ([`Lod`]). The minimap (bottom right, Glass) is a separate view
-///   rebuilt per revision.
+///   region (the viewport and a margin) are built, through a spatial index;
+///   cards lose detail when zoomed out ([`Lod`]).
 /// - **Layers**: pan and zoom set the transform of one layer holding the
-///   wires and cards, and move the minimap's viewport frame. The canvas
-///   renders again only when the view leaves the built region, the level of
-///   detail changes, or the content changes.
+///   wires and cards, and move the minimap's viewport frame. Each card is a
+///   view on a layer of its own, the wires and the minimap content are views
+///   too.
+/// - **Changes**: the canvas keeps a copy of the graph and applies what the
+///   model reports ([`NodeGraphModel::changes_since`]) at the start of the
+///   next frame. A moved node sets its card's layer and redraws its wires;
+///   no card and not the canvas renders. The canvas renders again only when
+///   the view leaves the built region, a node enters or leaves it, the level
+///   of detail or the selection changes, or the graph's structure does.
 pub struct NodeCanvas<M: NodeGraphModel> {
     env: Env,
     model: Model<M>,
@@ -270,9 +226,16 @@ pub struct NodeCanvas<M: NodeGraphModel> {
     size: Size,
     built: Option<Built>,
     cache: Option<Rc<GraphCache>>,
-    fields: HashMap<(NodeId, usize), View<NumberField>>,
-    /// The minimap's view and the revision and selection it shows.
-    minimap: Option<(View<MinimapNodes>, u64, BTreeSet<NodeId>)>,
+    /// Whether the model is being watched.
+    watching: bool,
+    /// The built cards.
+    cards: HashMap<NodeId, View<NodeCard<M>>>,
+    wires: Option<View<WireLayer>>,
+    /// The minimap's content and what it shows of the canvas.
+    minimap: Option<View<MinimapNodes>>,
+    shown: Shown,
+    /// The minimap's rects must all be placed again.
+    minimap_stale: bool,
     show_minimap: bool,
     stats: CanvasStats,
     name: SharedString,
@@ -309,8 +272,12 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
             size: Size::new(0.0, 0.0),
             built: None,
             cache: None,
-            fields: HashMap::new(),
+            watching: false,
+            cards: HashMap::new(),
+            wires: None,
             minimap: None,
+            shown: Shown::default(),
+            minimap_stale: true,
             show_minimap: true,
             stats: CanvasStats::default(),
             name: "node-canvas".into(),
@@ -403,7 +370,7 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
         self.stats
     }
 
-    /// The geometry cache of the last render.
+    /// The canvas's copy of the graph, as of the last frame or interaction.
     #[must_use]
     pub fn cache(&self) -> Option<&GraphCache> {
         self.cache.as_deref()
@@ -537,8 +504,8 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
     fn place(&mut self, cx: &mut ViewContext<'_, Self>) {
         let world = cx.layer("world");
         world.set_transform(cx, self.canvas.transform());
-        let frame = self.cache.as_ref().map(|cache| {
-            let (k, off) = minimap_mapping(minimap_bounds(cache), MINIMAP, 8.0);
+        let frame = self.cache.as_ref().map(|_| {
+            let (k, off) = self.shown.mapping();
             let seen = self.canvas.visible_rect(self.view_size(cx));
             Rect::new(
                 seen.x * k + off.x,
@@ -553,6 +520,184 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
 
     fn model_ok(&self, app: &App, from: PortRef, to: PortRef) -> bool {
         self.model.read(app).can_connect(from, to)
+    }
+
+    /// Bring the copy of the graph, and what shows it, up to the model.
+    /// Returns whether the canvas must render.
+    fn sync(&mut self, cx: &mut ViewContext<'_, Self>) -> bool {
+        let metrics = CardMetrics::from_theme(cx.theme());
+        let model = self.model;
+        if let Some(cache) = &mut self.cache
+            && cache.metrics == metrics
+        {
+            if cx.untracked(|app| model.read(app).revision()) == cache.revision {
+                return false;
+            }
+            let applied = cx.untracked(|app| {
+                let graph = model.read(app);
+                let changes = graph.changes_since(cache.revision)?;
+                Rc::make_mut(cache).apply(graph, &changes)
+            });
+            if let Some(applied) = applied {
+                return self.follow(&applied, cx);
+            }
+        }
+        let cache = cx.untracked(|app| GraphCache::build(model.read(app), metrics));
+        self.shown = Shown::all(&cache);
+        self.minimap_stale = true;
+        self.cache = Some(Rc::new(cache));
+        true
+    }
+
+    /// [`NodeCanvas::sync`] before using the copy outside a render.
+    fn catch_up(&mut self, cx: &mut ViewContext<'_, Self>) {
+        if self.sync(cx) {
+            cx.notify();
+        }
+    }
+
+    /// Show the changes the copy of the graph just took in. Returns whether
+    /// the canvas must render for them.
+    fn follow(&mut self, applied: &Applied, cx: &mut ViewContext<'_, Self>) -> bool {
+        let Some(cache) = self.cache.clone() else {
+            return true;
+        };
+        let area = self.built.map(|b| b.area);
+        let mut render = !applied.edited.is_empty() || matches!(self.gesture, Gesture::Wire { .. });
+        for &(i, _) in &applied.moved {
+            let node = &cache.nodes[i];
+            let inside = area.is_some_and(|a| node.rect.intersects(&a));
+            match self.cards.get(&node.id) {
+                Some(card) => {
+                    NodeCard::place(*card, cx, node.rect.origin());
+                    render |= !inside;
+                }
+                None => render |= inside,
+            }
+        }
+        let wires_changed = area.is_some_and(|a| {
+            applied
+                .links
+                .iter()
+                .any(|&(i, old)| old.intersects(&a) || cache.links[i].1.intersects(&a))
+        });
+        if !render && wires_changed {
+            self.update_wires(cx, &cache);
+        }
+        if self.shown.follow(&cache) {
+            self.minimap_stale = true;
+            self.place(cx);
+        }
+        if self.minimap_stale {
+            self.place_minimap(cx, &cache);
+        } else if let Some(mini) = self.minimap {
+            for &(i, _) in &applied.moved {
+                MinimapNodes::place(mini, cx, i, self.shown.map(cache.nodes[i].rect));
+            }
+        }
+        render
+    }
+
+    /// Place every minimap rect (once there is a minimap).
+    fn place_minimap(&mut self, cx: &mut ViewContext<'_, Self>, cache: &GraphCache) {
+        let Some(mini) = self.minimap else {
+            return;
+        };
+        for (i, n) in cache.nodes.iter().enumerate() {
+            MinimapNodes::place(mini, cx, i, self.shown.map(n.rect));
+        }
+        self.minimap_stale = false;
+    }
+
+    /// Give the wire layer the links that reach into the built region.
+    fn update_wires(&mut self, cx: &mut ViewContext<'_, Self>, cache: &GraphCache) {
+        let (Some(layer), Some(built)) = (self.wires, self.built) else {
+            return;
+        };
+        let wires: Vec<Wire> = cache
+            .links
+            .iter()
+            .filter(|(_, bounds)| bounds.intersects(&built.area))
+            .filter_map(|(l, _)| {
+                let mut w = cache.wire(*l, cache.port_color(l.from))?;
+                if self.selection.contains(&l.from.node) || self.selection.contains(&l.to.node) {
+                    w.width = WIRE_WIDTH * 1.5;
+                }
+                Some(w)
+            })
+            .collect();
+        self.stats.built_wires = wires.len();
+        WireLayer::set(layer, cx, built.area, wires);
+    }
+
+    /// Create, update, place and release cards so that exactly the nodes at
+    /// `shown` have one. Returns their elements in paint order.
+    fn update_cards(
+        &mut self,
+        cx: &mut ViewContext<'_, Self>,
+        cache: &GraphCache,
+        shown: &[usize],
+        lod: Lod,
+    ) -> Vec<Element> {
+        let pending = match self.gesture {
+            Gesture::Wire { from, snap, .. } => Some((from, snap)),
+            _ => None,
+        };
+        let view = cx.view();
+        let mut elements = Vec::with_capacity(shown.len());
+        let mut kept = HashSet::with_capacity(shown.len());
+        for &i in shown {
+            let node = &cache.nodes[i];
+            let state = CardState {
+                metrics: cache.metrics,
+                lod,
+                selected: self.selection.contains(&node.id),
+                pending: pending.map(|(from, snap)| Pending::on(node.id, from, snap)),
+            };
+            let card = match self.cards.get(&node.id) {
+                Some(card) => {
+                    NodeCard::set(*card, cx, cache, node, state);
+                    *card
+                }
+                None => {
+                    let props = card::CardProps::new(cache, node, state);
+                    let card = cx.new_view(NodeCard::new(&self.env, view, self.model, props));
+                    self.cards.insert(node.id, card);
+                    card
+                }
+            };
+            NodeCard::place(card, cx, node.rect.origin());
+            kept.insert(node.id);
+            elements.push(Element::view(&card).key(format!("node-{}", node.id)));
+        }
+        let gone: Vec<NodeId> = self
+            .cards
+            .keys()
+            .copied()
+            .filter(|id| !kept.contains(id))
+            .collect();
+        for id in gone {
+            if let Some(card) = self.cards.remove(&id) {
+                NodeCard::release(card, cx);
+            }
+        }
+        elements
+    }
+
+    /// Watch the model: apply its changes at the start of the next frame, so
+    /// several edits cost one update.
+    fn watch(&mut self, cx: &mut ViewContext<'_, Self>) {
+        if self.watching {
+            return;
+        }
+        self.watching = true;
+        let view = cx.view();
+        cx.watch(self.model.id(), move |app| {
+            app.animate(view.id(), SYNC_TASK, move |app, _| {
+                view.update(app, |s, vcx| s.catch_up(vcx));
+                false
+            });
+        });
     }
 }
 
@@ -596,6 +741,7 @@ fn background_drag<M: NodeGraphModel>(view: View<NodeCanvas<M>>, ev: &DragEvent,
     let now_at = view_point(view, cx, ev.position);
     view.update(cx, |s, vcx| {
         if ev.phase == DragPhase::Start {
+            s.catch_up(vcx);
             s.gesture = if panning(s) {
                 Gesture::Pan
             } else {
@@ -678,6 +824,7 @@ fn node_drag<M: NodeGraphModel>(view: View<NodeCanvas<M>>, ev: &DragEvent, cx: &
     let model = view.read(cx).model;
     let moves = view.update(cx, |s, vcx| {
         if ev.phase == DragPhase::Start {
+            s.catch_up(vcx);
             if panning(s) {
                 s.gesture = Gesture::Pan;
             } else {
@@ -738,6 +885,7 @@ fn port_drag<M: NodeGraphModel>(
         });
         return;
     }
+    view.update(cx, |s, vcx| s.catch_up(vcx));
     let at = view_point(view, cx, ev.position);
     let (pointer, snap) = {
         let s = view.read(cx);
@@ -778,9 +926,11 @@ fn port_drag<M: NodeGraphModel>(
 fn minimap_jump<M: NodeGraphModel>(view: View<NodeCanvas<M>>, cx: &mut EventCx<'_>, window: Point) {
     let local = cx.layout_position(window) - cx.bounds().origin();
     view.update(cx, |s, vcx| {
-        let Some(cache) = &s.cache else { return };
-        let (k, off) = minimap_mapping(minimap_bounds(cache), MINIMAP, 8.0);
-        let c = (local - off) * (1.0 / k);
+        s.catch_up(vcx);
+        if s.cache.is_none() {
+            return;
+        }
+        let c = s.shown.to_canvas(local);
         let size = s.view_size(vcx);
         let mut canvas = s.canvas;
         canvas.pan = Vec2::new(size.width / 2.0, size.height / 2.0) - c * canvas.zoom;
@@ -799,289 +949,14 @@ fn fill(s: &mut livspeil_ui_layout::Style) {
     s.size.height = Dimension::percent(1.0);
 }
 
-struct CardCx<'a> {
-    theme: &'a Theme,
-    cache: &'a GraphCache,
-    lod: Lod,
-    selected: bool,
-    pending: Option<(PortRef, Option<PortRef>)>,
-}
-
-impl<M: NodeGraphModel> NodeCanvas<M> {
-    fn param_field(
-        &mut self,
-        cx: &mut ViewContext<'_, Self>,
-        node: NodeId,
-        index: usize,
-        name: &SharedString,
-        value: ParamValue,
-    ) -> Option<Element> {
-        let ParamValue::Number {
-            value: v,
-            min,
-            max,
-            step,
-        } = value
-        else {
-            return None;
-        };
-        let view = match self.fields.get(&(node, index)) {
-            Some(f) => *f,
-            None => {
-                let m = cx.new_model(v);
-                let f = cx.new_view(
-                    NumberField::new(&self.env, m, min, max, step)
-                        .width(84.0)
-                        .accessible_label(name.clone())
-                        .name(format!("param:{node}:{index}")),
-                );
-                let graph = self.model;
-                cx.observe(m.id(), move |app| {
-                    let v = *m.read(app);
-                    graph.update(app, |g, mcx| {
-                        g.set_param(
-                            node,
-                            index,
-                            ParamValue::Number {
-                                value: v,
-                                min,
-                                max,
-                                step,
-                            },
-                        );
-                        mcx.notify();
-                    });
-                });
-                self.fields.insert((node, index), f);
-                f
-            }
-        };
-        Some(Element::view(&view))
-    }
-
-    fn port_dot(&self, view: View<Self>, c: &CardCx<'_>, port: PortRef, local: Point) -> Element {
-        let color = c.cache.port_color(port);
-        let surface = c.theme.colors().surface[1];
-        let (dim, hot) = match c.pending {
-            Some((from, snap)) => {
-                let same_side = from.side == port.side || from.node == port.node;
-                (same_side, snap == Some(port))
-            }
-            None => (false, false),
-        };
-        let r = PORT_DOT / 2.0;
-        let mut dot = div()
-            .key(format!(
-                "port-{}-{}",
-                if port.side == PortSide::Input {
-                    "in"
-                } else {
-                    "out"
-                },
-                port.index
-            ))
-            .name(format!(
-                "port:{}:{}:{}",
-                port.node,
-                if port.side == PortSide::Input {
-                    "in"
-                } else {
-                    "out"
-                },
-                port.index
-            ))
-            .absolute(Rect::new(local.x - r, local.y - r, PORT_DOT, PORT_DOT))
-            .rounded(r)
-            .bg(color)
-            .border(2.0, surface)
-            .opacity(if dim { 0.3 } else { 1.0 })
-            .scale(if hot { 1.6 } else { 1.0 })
-            .hover(|x| x.scale(1.4))
-            .transition(MotionClass::Micro)
-            .cursor(CursorShape::Crosshair);
-        if c.lod != Lod::Block {
-            dot = dot
-                .on_pointer_down(|_, cx| cx.stop_propagation())
-                .on_drag(move |ev, cx| port_drag(view, port, ev, cx));
-        }
-        dot
-    }
-
-    fn card(
-        &mut self,
-        cx: &mut ViewContext<'_, Self>,
-        view: View<Self>,
-        n: &NodeGeom,
-        c: &CardCx<'_>,
-    ) -> Element {
-        let theme = c.theme;
-        let col = theme.colors();
-        let m = metrics(theme);
-        let cm = c.cache.metrics;
-        let id = n.id;
-        let radius = theme.tokens.radii.sm + 2.0;
-        let mut card = div()
-            .key(format!("node-{id}"))
-            .name(format!("node:{}", n.title))
-            .absolute(n.rect)
-            .flex_col()
-            .rounded(radius)
-            .bg(col.surface[1].with_alpha(0.97))
-            .on_pointer_down(move |ev, cx| {
-                if matches!(ev.kind, PointerKind::Down(MouseButton::Left)) {
-                    node_down(view, id, cx);
-                }
-            })
-            .on_click(move |_, cx| node_click(view, id, cx))
-            .on_drag(move |ev, cx| node_drag(view, ev, cx));
-        let sem = Semantics::new(Role::Node)
-            .label(&*n.title)
-            .selected(c.selected);
-        if c.lod == Lod::Block {
-            let tint = n
-                .outputs
-                .first()
-                .or(n.inputs.first())
-                .and_then(|p| c.cache.colors.get(&p.ty))
-                .copied()
-                .unwrap_or(col.surface[3]);
-            return sem.apply(card.bg(tint.with_alpha(0.55)).border(
-                if c.selected { 4.0 } else { 1.0 },
-                if c.selected { theme.accent() } else { tint },
-            ));
-        }
-        card = card
-            .border(1.0, style::hairline(theme).with_alpha(0.12))
-            .elevation(if c.selected {
-                Elevation::E2
-            } else {
-                Elevation::E1
-            });
-        let header = div()
-            .key("header")
-            .h(cm.header)
-            .px(10.0)
-            .flex_row()
-            .items_center()
-            .radii(livspeil_ui_layout::Corners {
-                top_left: theme.tokens.radii.sm + 2.0,
-                top_right: theme.tokens.radii.sm + 2.0,
-                bottom_right: 0.0,
-                bottom_left: 0.0,
-            })
-            .bg(col.surface[2])
-            .hit_test(false)
-            .child(
-                text(n.title.clone())
-                    .font_size(m.font)
-                    .font_weight(600.0)
-                    .text_color(col.text_primary)
-                    .hit_test(false),
-            );
-        card = card.child(header);
-        if c.lod == Lod::Full {
-            let rows = n.inputs.len().max(n.outputs.len());
-            let label = |s: &SharedString| {
-                text(s.clone())
-                    .font_size(m.font - 1.0)
-                    .text_color(col.text_secondary)
-                    .hit_test(false)
-            };
-            for r in 0..rows {
-                let mut row = div()
-                    .key(format!("ports-{r}"))
-                    .h(cm.row)
-                    .px(12.0)
-                    .flex_row()
-                    .items_center()
-                    .hit_test(false);
-                row = match n.inputs.get(r) {
-                    Some(p) => row.child(label(&p.name)),
-                    None => row,
-                };
-                row = row.child(div().grow());
-                row = match n.outputs.get(r) {
-                    Some(p) => row.child(label(&p.name)),
-                    None => row,
-                };
-                card = card.child(row);
-            }
-            for (i, p) in n.params.iter().enumerate() {
-                let control = match p.value {
-                    ParamValue::Number { .. } => self.param_field(cx, id, i, &p.name, p.value),
-                    ParamValue::Toggle(on) => {
-                        let graph = self.model;
-                        Some(
-                            Toggle::new(on)
-                                .label(p.name.clone())
-                                .on_change(move |v, cx| {
-                                    graph.update(cx, |g, mcx| {
-                                        g.set_param(id, i, ParamValue::Toggle(v));
-                                        mcx.notify();
-                                    });
-                                })
-                                .render(theme)
-                                .key("toggle"),
-                        )
-                    }
-                };
-                let mut row = div()
-                    .key(format!("param-{i}"))
-                    .h(cm.row)
-                    .px(12.0)
-                    .flex_row()
-                    .items_center()
-                    .gap(8.0);
-                if matches!(p.value, ParamValue::Number { .. }) {
-                    row = row.child(label(&p.name).grow());
-                }
-                card = card.child(row.children(control));
-            }
-        }
-        if c.selected {
-            // The selection ring paints above the header and rows (which
-            // would cover a border drawn with the card's own quad), below
-            // the port dots.
-            card = card.child(
-                div()
-                    .key("selection-ring")
-                    .style(fill)
-                    .rounded(radius)
-                    .border(2.0, theme.accent())
-                    .hit_test(false),
-            );
-        }
-        for side in [PortSide::Input, PortSide::Output] {
-            for index in 0..n.ports(side).len() {
-                let port = PortRef {
-                    node: id,
-                    side,
-                    index,
-                };
-                let at = cm.port_position(Point::ZERO, side, index);
-                card = card.child(self.port_dot(view, c, port, at));
-            }
-        }
-        sem.apply(card)
-    }
-}
-
 impl<M: NodeGraphModel> Render for NodeCanvas<M> {
     fn render(&mut self, cx: &mut ViewContext<'_, Self>) -> Element {
         let view = cx.view();
         let theme = cx.theme().clone();
         let col = theme.colors();
 
-        // Model cache.
-        let metrics = CardMetrics::from_theme(&theme);
-        let revision = self.model.read(cx).revision();
-        let stale = self
-            .cache
-            .as_ref()
-            .is_none_or(|c| c.revision != revision || c.metrics != metrics);
-        if stale {
-            self.cache = Some(Rc::new(GraphCache::build(self.model.read(cx), metrics)));
-        }
+        let _ = self.sync(cx);
+        self.watch(cx);
         let Some(cache) = self.cache.clone() else {
             return div();
         };
@@ -1101,26 +976,19 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
         };
         self.built = Some(built);
         let (lod, area) = (built.lod, built.area);
-        let pending = self.pending_wire();
         self.place(cx);
 
         // Wires below the cards, in canvas coordinates.
         let shown = cache.nodes_in(&area);
-        let mut wires = Vec::with_capacity(shown.len() * 2);
-        for (l, b) in &cache.links {
-            if !b.intersects(&area) {
-                continue;
+        let wires = match self.wires {
+            Some(w) => w,
+            None => {
+                let w = cx.new_view(WireLayer::default());
+                self.wires = Some(w);
+                w
             }
-            let hot = self.selection.contains(&l.from.node) || self.selection.contains(&l.to.node);
-            let color = cache.port_color(l.from);
-            if let Some(mut w) = cache.wire(*l, color) {
-                if hot {
-                    w.width = WIRE_WIDTH * 1.5;
-                }
-                wires.push(w);
-            }
-        }
-        let n_wires = wires.len();
+        };
+        self.update_wires(cx, &cache);
         // The world: one layer panned and zoomed over the canvas.
         let mut canvas = div()
             .key("canvas")
@@ -1128,20 +996,8 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
             .style(fill)
             .layer(cx.layer("world"))
             .cull_offscreen()
-            .wires(wires);
-        // The cards are read straight from the cache (no copies).
-        for i in &shown {
-            let n = &cache.nodes[*i];
-            let c = CardCx {
-                theme: &theme,
-                cache: &cache,
-                lod,
-                selected: self.selection.contains(&n.id),
-                pending,
-            };
-            let card = self.card(cx, view, n, &c);
-            canvas = canvas.child(card);
-        }
+            .child(Element::view(&wires).key("wires"))
+            .children(self.update_cards(cx, &cache, &shown, lod));
         // The pending wire above the cards.
         if let Gesture::Wire {
             from,
@@ -1177,7 +1033,7 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
             nodes: cache.nodes.len(),
             links: cache.links.len(),
             built_nodes: shown.len(),
-            built_wires: n_wires,
+            built_wires: self.stats.built_wires,
             lod,
         };
 
@@ -1207,47 +1063,27 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
 
         // Minimap.
         if self.show_minimap && !cache.nodes.is_empty() {
-            let bounds = minimap_bounds(&cache);
-            let (k, off) = minimap_mapping(bounds, MINIMAP, 8.0);
-            // One rect per node: rebuilt only when the model or the
-            // selection changed, not on every pan or zoom frame.
-            let content = || {
-                Rc::new(
-                    cache
-                        .nodes
-                        .iter()
-                        .map(|n| {
-                            let r = n.rect;
-                            (
-                                Rect::new(
-                                    r.x * k + off.x,
-                                    r.y * k + off.y,
-                                    (r.width * k).max(1.0),
-                                    (r.height * k).max(1.0),
-                                ),
-                                self.selection.contains(&n.id),
-                            )
-                        })
-                        .collect::<Vec<(Rect, bool)>>(),
-                )
-            };
-            let mini_view = match &self.minimap {
-                Some((v, rev, sel)) if *rev == revision && *sel == self.selection => *v,
-                Some((v, _, _)) => {
-                    let (v, rects) = (*v, content());
-                    v.update(cx, |mm, mcx| {
-                        mm.rects = rects;
-                        mcx.notify();
-                    });
-                    v
+            let mini = match self.minimap {
+                Some(m) => m,
+                None => {
+                    let m = cx.new_view(MinimapNodes::new(Color::WHITE, Color::WHITE));
+                    self.minimap = Some(m);
+                    self.minimap_stale = true;
+                    m
                 }
-                None => cx.new_view(MinimapNodes {
-                    rects: content(),
-                    color: col.text_secondary.with_alpha(0.55),
-                    selected: theme.accent(),
-                }),
             };
-            self.minimap = Some((mini_view, revision, self.selection.clone()));
+            // One rect per node: rendered only when nodes are added or
+            // removed or the selection changes.
+            let selected = cache
+                .nodes
+                .iter()
+                .map(|n| self.selection.contains(&n.id))
+                .collect();
+            let (color, accent) = (col.text_secondary.with_alpha(0.55), theme.accent());
+            MinimapNodes::set(mini, cx, selected, color, accent);
+            if self.minimap_stale {
+                self.place_minimap(cx, &cache);
+            }
             let minimap = div()
                 .key("minimap")
                 .name("minimap")
@@ -1261,7 +1097,7 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
                     s.size.width = Dimension::length(MINIMAP.width);
                     s.size.height = Dimension::length(MINIMAP.height);
                 })
-                .child(Element::view(&mini_view))
+                .child(Element::view(&mini).key("nodes"))
                 .child(
                     // Placed by its layer's frame (`NodeCanvas::place`).
                     div()
@@ -1323,6 +1159,7 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
         })
         .on_action(crate::keymap::actions::SELECT_ALL, move |cx| {
             view.update(cx, |s, vcx| {
+                s.catch_up(vcx);
                 if let Some(c) = &s.cache {
                     s.selection = c.nodes.iter().map(|n| n.id).collect();
                     vcx.notify();

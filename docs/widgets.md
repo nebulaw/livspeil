@@ -425,9 +425,15 @@ them (`docs/ui-host.md`, "Window chrome and window requests").
 dependency): node ids in paint order, titles, positions, typed input and
 output ports, parameter rows, links, `can_connect` (the type check; default
 equal type names on different nodes), `type_color`, and edit requests
-(`set_position`, `connect`, `disconnect`, `set_param`). Reads are cached per
-`revision()`. `DemoGraph` is an in-memory model (`sample()`, and
-`grid(nodes, links)` for benchmarks).
+(`set_position`, `connect`, `disconnect`, `set_param`). `DemoGraph` is an
+in-memory model (`sample()`, and `grid(nodes, links)` for benchmarks).
+
+The canvas keeps a copy of what it reads and updates it when `revision()`
+changes and the model notifies. A model should also implement
+`changes_since(revision)`, which says what changed: nodes `Moved` or
+`Edited`, or `None` when it cannot tell (always `None` after nodes or links
+were added, removed or reordered). `ChangeLog` keeps the revision and answers
+it. Without it every change reads the whole graph again.
 
 - Pan: Space+drag, middle drag, two-finger scroll. Zoom about the pointer:
   Ctrl/Cmd+scroll (pinch arrives as Ctrl+pixel scroll) and the wheel, on
@@ -454,16 +460,24 @@ equal type names on different nodes), `type_color`, and edit requests
   built, from a uniform-grid `CanvasIndex`. The region is the view plus a
   quarter of it on each side (at least 96 px). It is built again when the
   view leaves it, the level of detail or the view size changes, zooming in
-  leaves it more than twice as wide as needed, or the content changes.
-  Cards outside the view are not painted.
+  leaves it more than twice as wide as needed, a node enters or leaves it,
+  or the graph's structure changes. Cards outside the view are not painted.
 - The Glass minimap (bottom right, click or drag to move the view) draws its
-  nodes in a child view rebuilt only when the model revision or selection
-  changes.
+  nodes in a child view with one layer frame per node: it renders only when
+  nodes are added or removed or the selection changes.
+- Changes: each card is a view on a layer of its own, and the wires are a
+  view too. Model changes are applied at the start of the next frame, so
+  several moves cost one update. A moved node sets its card's layer and
+  renders the wires; neither the canvas nor any card renders. An edited
+  parameter renders that card. A card outside the built region is released
+  with its fields.
+- A card's layout box is at the origin: where it is on screen is
+  `App::visual_bounds`, not `App::bounds`.
 
 Benchmark (`cargo bench -p livspeil-ui-gallery --bench frame_phases`, 2000
-nodes, 3000 links, 1600×1000, `build` of one frame after a small pan,
-release, i5-12500T): zoom 1 0.75 ms (2.3 ms before layers); zoom 0.4 1.2 ms
-(6.5 ms); fit all 1.2 ms (8.0 ms).
+nodes, 3000 links, 1600×1000, release, i5-12500T): CPU of one frame (build,
+scene conversion and encoding) after moving one node is 0.59 ms at zoom 1,
+0.86 ms at zoom 0.4 and 1.5 ms fit to all (`docs/benchmarks.md`).
 
 ### Wires (core paint primitive)
 

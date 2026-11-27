@@ -566,10 +566,10 @@ fn layers_are_per_view_and_key() {
     assert_ne!(app.layer(b.id(), "x"), first);
 }
 
-/// An untracked read does not subscribe the view, and an owned observer ends
+/// An untracked read does not subscribe the view, and an owned watcher ends
 /// with its view.
 #[test]
-fn untracked_reads_and_owned_observers() {
+fn untracked_reads_and_watches() {
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -584,7 +584,7 @@ fn untracked_reads_and_owned_observers() {
             if !self.watching {
                 self.watching = true;
                 let (model, seen) = (self.model, self.seen.clone());
-                cx.observe(model.id(), move |app| seen.set(*model.read(app)));
+                cx.watch(model.id(), move |app| seen.set(*model.read(app)));
             }
             div().name(format!("value-{value}"))
         }

@@ -521,3 +521,21 @@ did not exist.
   met: the 500-node scenarios already take 1.3 to 1.4 ms. Paint, encode and
   upload still cover the whole scene (P3).
 
+
+## Incremental node canvas (frame pipeline P4)
+
+`cargo bench -p livspeil-ui-gallery --bench frame_phases`, 2000 nodes, 3000
+links, 1600x1000, release, i5-12500T, medians of 200 frames, microseconds,
+one run. "Before" is the P2 branch running the same benchmark file. Build
+includes the pan or the move.
+
+| | build | paint | encode | total | uploaded |
+|---|---:|---:|---:|---:|---:|
+| zoom 1, drag | 3504 -> 249 | 140 -> 119 | 222 -> 222 | 3866 -> 590 | 295 -> 298 KB |
+| zoom 0.4, drag | 9528 -> 350 | 366 -> 145 | 434 -> 361 | 10329 -> 856 | 483 -> 504 KB |
+| fit-all, drag | 6561 -> 605 | 135 -> 123 | 596 -> 801 | 7292 -> 1528 | 605 -> 765 KB |
+| zoom 1, pan | 187 -> 244 | 120 -> 122 | 217 -> 229 | 524 -> 596 | 295 -> 298 KB |
+| zoom 0.4, pan | 320 -> 376 | 162 -> 157 | 374 -> 395 | 856 -> 927 | 483 -> 504 KB |
+| fit-all, pan | 388 -> 583 | 95 -> 122 | 575 -> 801 | 1058 -> 1505 | 605 -> 765 KB |
+
+Not measured: on screen, GPU time, an integrated GPU.

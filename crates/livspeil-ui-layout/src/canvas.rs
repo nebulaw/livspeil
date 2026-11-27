@@ -118,16 +118,44 @@ impl CanvasIndex {
         (f(r.x), f(r.y), f(r.right()), f(r.bottom()))
     }
 
+    /// Replace the bounds of item `index`. Returns `false` if there is none.
+    pub fn update(&mut self, index: u32, bounds: Rect) -> bool {
+        let Some(old) = self.items.get(index as usize).copied() else {
+            return false;
+        };
+        let (was, now) = (self.cell_range(&old), self.cell_range(&bounds));
+        self.items[index as usize] = bounds;
+        if was == now {
+            return true;
+        }
+        let (x0, y0, x1, y1) = was;
+        for cy in y0..=y1 {
+            for cx in x0..=x1 {
+                if let Some(ids) = self.cells.get_mut(&(cx, cy)) {
+                    ids.retain(|&i| i != index);
+                    if ids.is_empty() {
+                        self.cells.remove(&(cx, cy));
+                    }
+                }
+            }
+        }
+        self.add_to_cells(index, now);
+        true
+    }
+
+    fn add_to_cells(&mut self, index: u32, (x0, y0, x1, y1): (i32, i32, i32, i32)) {
+        for cy in y0..=y1 {
+            for cx in x0..=x1 {
+                self.cells.entry((cx, cy)).or_default().push(index);
+            }
+        }
+    }
+
     /// Add an item; returns its index.
     pub fn insert(&mut self, bounds: Rect) -> u32 {
         let id = u32::try_from(self.items.len()).unwrap_or(u32::MAX);
         self.items.push(bounds);
-        let (x0, y0, x1, y1) = self.cell_range(&bounds);
-        for cy in y0..=y1 {
-            for cx in x0..=x1 {
-                self.cells.entry((cx, cy)).or_default().push(id);
-            }
-        }
+        self.add_to_cells(id, self.cell_range(&bounds));
         id
     }
 

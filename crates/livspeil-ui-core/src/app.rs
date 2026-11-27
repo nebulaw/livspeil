@@ -300,7 +300,7 @@ impl App {
     /// Run `f` without recording its reads: a view that reads a model this
     /// way in `render` is not rendered again when the model changes. For
     /// views that keep their own copy and apply changes themselves (see
-    /// [`ViewContext::observe`](crate::ViewContext::observe)).
+    /// [`ViewContext::watch`](crate::ViewContext::watch)).
     pub fn untracked<R>(&self, f: impl FnOnce(&App) -> R) -> R {
         let reads = self.tracking.replace(None);
         let out = f(self);

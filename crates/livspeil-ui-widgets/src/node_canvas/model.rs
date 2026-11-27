@@ -7,6 +7,8 @@
 //! The canvas is data-agnostic: Dream Mode adapts its kernel graph to this
 //! trait in the app (the UI crates do not depend on kernel crates).
 
+use std::collections::VecDeque;
+
 use livspeil_ui_core::SharedString;
 use livspeil_ui_layout::Point;
 use livspeil_ui_theme::Color;
@@ -112,14 +114,95 @@ pub struct Link {
     pub to: PortRef,
 }
 
+/// One change a model reports through [`NodeGraphModel::changes_since`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum GraphChange {
+    /// Only the node's position changed.
+    Moved(NodeId),
+    /// The node's title, ports or parameters changed. The set of nodes, their
+    /// paint order and the links did not.
+    Edited(NodeId),
+}
+
+/// How many changes a [`ChangeLog`] remembers.
+const LOG_CAPACITY: usize = 4096;
+
+/// A revision counter that remembers recent changes, for models to
+/// implement [`NodeGraphModel::revision`] and
+/// [`NodeGraphModel::changes_since`] with.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ChangeLog {
+    revision: u64,
+    /// Changes after revisions older than this are not all known.
+    known_from: u64,
+    entries: VecDeque<(u64, GraphChange)>,
+}
+
+impl ChangeLog {
+    /// An empty log at revision 0.
+    #[must_use]
+    pub fn new() -> Self {
+        ChangeLog::default()
+    }
+
+    /// The current revision.
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Record one change as a new revision.
+    pub fn record(&mut self, change: GraphChange) {
+        self.revision += 1;
+        if self.entries.len() == LOG_CAPACITY
+            && let Some((dropped, _)) = self.entries.pop_front()
+        {
+            self.known_from = dropped;
+        }
+        self.entries.push_back((self.revision, change));
+    }
+
+    /// Record a change that [`GraphChange`] cannot describe (nodes or links
+    /// added, removed or reordered) as a new revision.
+    pub fn restructure(&mut self) {
+        self.revision += 1;
+        self.known_from = self.revision;
+        self.entries.clear();
+    }
+
+    /// What changed after revision `since`, each change once, or `None` if
+    /// the log cannot tell.
+    #[must_use]
+    pub fn since(&self, since: u64) -> Option<Vec<GraphChange>> {
+        if since < self.known_from || since > self.revision {
+            return None;
+        }
+        let first = self.entries.partition_point(|(r, _)| *r <= since);
+        let mut changes: Vec<GraphChange> = self.entries.range(first..).map(|(_, c)| *c).collect();
+        changes.sort_unstable();
+        changes.dedup();
+        Some(changes)
+    }
+}
+
 /// A graph the [`NodeCanvas`](crate::NodeCanvas) shows and edits.
 ///
-/// Reads are called when [`NodeGraphModel::revision`] changes (the canvas
-/// caches geometry per revision), so implementations bump the revision on
-/// every change. Edits are requests: the model may refuse them.
+/// The canvas keeps a copy of what it reads and brings it up to date when
+/// [`NodeGraphModel::revision`] changes, so implementations bump the
+/// revision on every change and notify. A model that also reports *what*
+/// changed ([`NodeGraphModel::changes_since`], see [`ChangeLog`]) makes the
+/// cost of a change proportional to it instead of to the graph. Edits are
+/// requests: the model may refuse them.
 pub trait NodeGraphModel: 'static {
     /// Changes whenever anything the canvas reads changes.
     fn revision(&self) -> u64;
+    /// Everything that changed after revision `since`, or `None` if the
+    /// model cannot tell (the canvas then reads the whole graph). The
+    /// default is `None`. Must be `None` if nodes or links were added,
+    /// removed or reordered.
+    fn changes_since(&self, _since: u64) -> Option<Vec<GraphChange>> {
+        None
+    }
     /// Node ids in paint order (later nodes are drawn on top).
     fn node_ids(&self) -> Vec<NodeId>;
     /// A node's title.
@@ -202,7 +285,7 @@ pub struct DemoGraph {
     pub nodes: Vec<DemoNode>,
     /// Links.
     pub links: Vec<Link>,
-    revision: u64,
+    log: ChangeLog,
 }
 
 fn num(value: f64, min: f64, max: f64, step: f64) -> ParamValue {
@@ -240,7 +323,7 @@ impl DemoGraph {
             outputs: ports(outputs),
             params,
         });
-        self.revision += 1;
+        self.log.restructure();
         id
     }
 
@@ -334,7 +417,7 @@ impl DemoGraph {
                 to: PortRef::input(out, 1),
             },
         ];
-        g.revision += 1;
+        g.log.restructure();
         g
     }
 
@@ -381,14 +464,17 @@ impl DemoGraph {
                 to: PortRef::input(b + 1, (next() % 2) as usize),
             });
         }
-        g.revision += 1;
+        g.log.restructure();
         g
     }
 }
 
 impl NodeGraphModel for DemoGraph {
     fn revision(&self) -> u64 {
-        self.revision
+        self.log.revision()
+    }
+    fn changes_since(&self, since: u64) -> Option<Vec<GraphChange>> {
+        self.log.since(since)
     }
     fn node_ids(&self) -> Vec<NodeId> {
         self.nodes.iter().map(|n| n.id).collect()
@@ -432,19 +518,19 @@ impl NodeGraphModel for DemoGraph {
             && n.position != position
         {
             n.position = position;
-            self.revision += 1;
+            self.log.record(GraphChange::Moved(node));
         }
     }
     fn connect(&mut self, link: Link) {
         self.links.retain(|l| l.to != link.to);
         self.links.push(link);
-        self.revision += 1;
+        self.log.restructure();
     }
     fn disconnect(&mut self, link: Link) {
         let before = self.links.len();
         self.links.retain(|l| *l != link);
         if self.links.len() != before {
-            self.revision += 1;
+            self.log.restructure();
         }
     }
     fn set_param(&mut self, node: NodeId, index: usize, value: ParamValue) {
@@ -452,7 +538,40 @@ impl NodeGraphModel for DemoGraph {
             && p.value != value
         {
             p.value = value;
-            self.revision += 1;
+            self.log.record(GraphChange::Edited(node));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_log_reports_each_change_once_and_admits_what_it_forgot() {
+        let mut log = ChangeLog::new();
+        assert_eq!(log.since(0), Some(vec![]));
+        log.record(GraphChange::Edited(2));
+        log.record(GraphChange::Moved(1));
+        log.record(GraphChange::Moved(1));
+        assert_eq!(log.revision(), 3);
+        assert_eq!(
+            log.since(0),
+            Some(vec![GraphChange::Moved(1), GraphChange::Edited(2)])
+        );
+        assert_eq!(log.since(1), Some(vec![GraphChange::Moved(1)]));
+        assert_eq!(log.since(3), Some(vec![]));
+        // A revision from the future belongs to another log.
+        assert_eq!(log.since(4), None);
+
+        log.restructure();
+        assert_eq!(log.since(3), None);
+        assert_eq!(log.since(4), Some(vec![]));
+
+        for i in 0..=LOG_CAPACITY as u64 {
+            log.record(GraphChange::Moved(i));
+        }
+        assert_eq!(log.since(4), None, "the oldest change was dropped");
+        assert_eq!(log.since(5).map(|c| c.len()), Some(LOG_CAPACITY));
     }
 }

@@ -278,7 +278,7 @@ impl<V: Render> ViewContext<'_, V> {
     /// `entity`, so it must not update the view directly in that case;
     /// scheduling work with [`App::animate`](crate::App::animate) is
     /// always safe.
-    pub fn observe(&mut self, entity: EntityId, f: impl Fn(&mut App) + 'static) {
+    pub fn watch(&mut self, entity: EntityId, f: impl Fn(&mut App) + 'static) {
         self.app.observe_for(self.id, entity, f);
     }
 

@@ -10,7 +10,9 @@ use livspeil_ui_core::{SharedString, Wire};
 use livspeil_ui_layout::{CanvasIndex, Point, Rect, Size};
 use livspeil_ui_theme::{Color, Theme};
 
-use super::model::{Link, NodeGraphModel, NodeId, ParamInfo, PortInfo, PortRef, PortSide};
+use super::model::{
+    GraphChange, Link, NodeGraphModel, NodeId, ParamInfo, PortInfo, PortRef, PortSide,
+};
 use crate::style::metrics;
 
 /// Card width in canvas units.
@@ -93,6 +95,17 @@ impl NodeGeom {
     }
 }
 
+/// What [`GraphCache::apply`] changed. The rects are those from before.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Applied {
+    /// Nodes whose card rect changed, by index into [`GraphCache::nodes`].
+    pub moved: Vec<(usize, Rect)>,
+    /// Nodes whose content was read again, by index.
+    pub edited: Vec<usize>,
+    /// Links of those nodes, by index into [`GraphCache::links`].
+    pub links: Vec<(usize, Rect)>,
+}
+
 /// Everything the canvas needs from the model at one revision.
 #[derive(Clone, Debug)]
 pub struct GraphCache {
@@ -110,6 +123,8 @@ pub struct GraphCache {
     pub links: Vec<(Link, Rect)>,
     /// Port type colors.
     pub colors: HashMap<SharedString, Color>,
+    /// The links of each node, by node index.
+    attached: Vec<Vec<usize>>,
 }
 
 impl GraphCache {
@@ -151,13 +166,81 @@ impl GraphCache {
             index,
             links: Vec::new(),
             colors,
+            attached: Vec::new(),
         };
         cache.links = model
             .links()
             .into_iter()
             .filter_map(|l| Some((l, cache.wire(l, Color::WHITE)?.bounds())))
             .collect();
+        cache.attached = vec![Vec::new(); cache.nodes.len()];
+        for (i, (l, _)) in cache.links.iter().enumerate() {
+            for node in [l.from.node, l.to.node] {
+                if let Some(&n) = cache.by_id.get(&node) {
+                    cache.attached[n].push(i);
+                }
+            }
+        }
         cache
+    }
+
+    /// Bring the cache to the model's revision from `changes`, the model's
+    /// report since [`GraphCache::revision`]. `None` if they cannot be
+    /// applied one by one (an unknown node, or ports added or removed); the
+    /// cache is then partly updated and must be built again.
+    pub fn apply<M: NodeGraphModel + ?Sized>(
+        &mut self,
+        model: &M,
+        changes: &[GraphChange],
+    ) -> Option<Applied> {
+        let mut applied = Applied::default();
+        let mut touched = Vec::new();
+        for change in changes {
+            let (id, edited) = match *change {
+                GraphChange::Moved(id) => (id, false),
+                GraphChange::Edited(id) => (id, true),
+            };
+            let i = *self.by_id.get(&id)?;
+            let metrics = self.metrics;
+            let node = &mut self.nodes[i];
+            let old = node.rect;
+            let pos = model.position(id);
+            (node.rect.x, node.rect.y) = (pos.x, pos.y);
+            if edited {
+                let (inputs, outputs) = (model.inputs(id), model.outputs(id));
+                if inputs.len() != node.inputs.len() || outputs.len() != node.outputs.len() {
+                    return None;
+                }
+                for p in inputs.iter().chain(&outputs) {
+                    if !self.colors.contains_key(&p.ty) {
+                        self.colors.insert(p.ty.clone(), model.type_color(&p.ty));
+                    }
+                }
+                node.title = model.title(id);
+                node.params = model.params(id);
+                let size = metrics.card_size(inputs.len(), outputs.len(), node.params.len());
+                (node.rect.width, node.rect.height) = (size.width, size.height);
+                (node.inputs, node.outputs) = (inputs, outputs);
+                applied.edited.push(i);
+            }
+            let rect = node.rect;
+            if rect != old {
+                self.index.update(u32::try_from(i).ok()?, rect);
+                applied.moved.push((i, old));
+            }
+            if rect != old || edited {
+                touched.extend_from_slice(&self.attached[i]);
+            }
+        }
+        touched.sort_unstable();
+        touched.dedup();
+        for i in touched {
+            let (link, old) = self.links[i];
+            self.links[i].1 = self.wire(link, Color::WHITE)?.bounds();
+            applied.links.push((i, old));
+        }
+        self.revision = model.revision();
+        Some(applied)
     }
 
     /// A node by id.

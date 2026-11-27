@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: MPL-2.0
 
 //! Where a NodeCanvas frame spends its CPU time: 2000 nodes and 3000
-//! links in a 1600x1000 window, one frame after a pan at zoom 1 (Full),
-//! 0.4 (Compact) and fit-all (Block), split into the phases the gallery's
+//! links in a 1600x1000 window, one frame after a pan or after moving one
+//! visible node, at zoom 1 (Full), 0.4 (Compact) and fit-all (Block), split into the phases the gallery's
 //! frame HUD shows: build (`App::draw_frame`: render, diff, layout, core
 //! paint list), paint (`PaintBridge::paint_scene`: scene to display list,
 //! one curve per wire) and encode (`render::encode`: display list to
 //! instance data). GPU work is not measured here.
 //!
 //! Prints the median and the minimum of `ITERATIONS` frames per phase, in
-//! microseconds, plus the size of the scene, the display list and the
+//! microseconds (build includes the pan or move itself), plus the size of the scene, the display list and the
 //! encoded frame. Run with
 //! `cargo bench -p livspeil-ui-gallery --bench frame_phases`.
 
@@ -20,8 +20,10 @@ use livspeil_ui_core::{App, Element, Render, View, ViewContext, div};
 use livspeil_ui_layout::{Canvas, Size, Vec2};
 use livspeil_ui_paint::{FontSystem, PaintBridge};
 use livspeil_ui_render::{Color, DisplayList, Frame, FrameOptions, encode_into};
-use livspeil_ui_widgets::{DemoGraph, Env, NodeCanvas};
+use livspeil_ui_widgets::{DemoGraph, Env, NodeCanvas, NodeGraphModel};
 
+/// The node moved: inside the view at every zoom.
+const DRAGGED: u64 = 22;
 /// Frames measured per configuration (override with `LIVSPEIL_BENCH_ITERS`).
 const ITERATIONS: usize = 200;
 
@@ -91,11 +93,15 @@ fn main() {
     };
     let mut list = DisplayList::new();
     let mut gpu_frame = Frame::new(options);
-    for (name, zoom) in [
+    for (name, zoom, drag) in [
         ("zoom 1 (Full)", Some(1.0)),
         ("zoom 0.4 (Compact)", Some(0.4)),
         ("fit-all (Block)", None),
-    ] {
+    ]
+    .into_iter()
+    .flat_map(|(name, zoom)| [(name, zoom, false), (name, zoom, true)])
+    {
+        let name = format!("{name}, {}", if drag { "drag" } else { "pan" });
         let (mut app, canvas) = setup(zoom);
         let st = canvas.read(&app).stats();
         let (mut build, mut paint, mut enc) = (Vec::new(), Vec::new(), Vec::new());
@@ -105,7 +111,16 @@ fn main() {
         for i in 0..iters + 20 {
             sign = -sign;
             let t0 = Instant::now();
-            NodeCanvas::pan_by(canvas, &mut app, Vec2::new(sign * 3.0, 0.0));
+            let by = Vec2::new(sign * 3.0, 0.0);
+            if drag {
+                let graph = canvas.read(&app).model();
+                graph.update(&mut app, |g, cx| {
+                    g.set_position(DRAGGED, g.position(DRAGGED) + by);
+                    cx.notify();
+                });
+            } else {
+                NodeCanvas::pan_by(canvas, &mut app, by);
+            }
             let frame = app.draw_frame(1.0 / 60.0);
             let t1 = Instant::now();
             list.items.clear();
