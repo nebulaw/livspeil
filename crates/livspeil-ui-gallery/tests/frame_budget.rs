@@ -98,6 +98,7 @@ fn budget(scenario: Scenario) -> (u32, u32, usize, usize, usize, usize) {
         Scenario::DragStress => (88, 0, 2, 2607, 18_089, 5_788_480),
         // One frame leaves the built rows.
         Scenario::ScrollList => (1, 1, 1, 466, 1808, 578_560),
+        Scenario::HoverButtons => (0, 0, 0, 0, 458, 146_560),
     }
 }
 
