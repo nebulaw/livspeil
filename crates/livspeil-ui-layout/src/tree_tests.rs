@@ -282,6 +282,8 @@ fn random_edits_with_boundaries_match_a_plain_layout() {
             children: Vec::new(),
             parent: None,
         })];
+        // Roots of subtrees taken out of the tree, to be put back.
+        let mut detached: Vec<usize> = Vec::new();
         for step in 0..80 {
             let mut attached = Vec::new();
             subtree(&model, 0, &mut attached);
@@ -294,7 +296,7 @@ fn random_edits_with_boundaries_match_a_plain_layout() {
                     .map(|&c| ids[c].unwrap())
                     .collect::<Vec<_>>()
             };
-            match rng.below(12) {
+            match rng.below(14) {
                 0..=3 => {
                     let parent = attached[rng.below(attached.len())];
                     let style = random_style(&mut rng);
@@ -361,6 +363,37 @@ fn random_edits_with_boundaries_match_a_plain_layout() {
                     m.style.inset.top = LengthPercentageAuto::length(rng.quarter(80));
                     t.set_style(ids[node].unwrap(), &m.style).unwrap();
                 }
+                // Take a subtree out, change something in it later, put
+                // it back.
+                12 if attached.len() > 1 => {
+                    let node = attached[1 + rng.below(attached.len() - 1)];
+                    let parent = model[node].as_ref().unwrap().parent.unwrap();
+                    model[parent]
+                        .as_mut()
+                        .unwrap()
+                        .children
+                        .retain(|&c| c != node);
+                    model[node].as_mut().unwrap().parent = None;
+                    t.set_children(ids[parent].unwrap(), &kids(&model, &ids, parent))
+                        .unwrap();
+                    detached.push(node);
+                }
+                13 if !detached.is_empty() => {
+                    let node = detached.swap_remove(rng.below(detached.len()));
+                    let mut under = Vec::new();
+                    subtree(&model, node, &mut under);
+                    let inside = under[rng.below(under.len())];
+                    let style = random_style(&mut rng);
+                    t.set_style(ids[inside].unwrap(), &style).unwrap();
+                    model[inside].as_mut().unwrap().style = style;
+                    // A layout while it is still out of the tree.
+                    t.compute(ids[0].unwrap(), VIEWPORT).unwrap();
+                    let target = attached[rng.below(attached.len())];
+                    model[target].as_mut().unwrap().children.push(node);
+                    model[node].as_mut().unwrap().parent = Some(target);
+                    t.set_children(ids[target].unwrap(), &kids(&model, &ids, target))
+                        .unwrap();
+                }
                 9 | 10 if attached.len() > 1 => {
                     let node = attached[1 + rng.below(attached.len() - 1)];
                     let style = random_style(&mut rng);
@@ -395,4 +428,34 @@ fn random_edits_with_boundaries_match_a_plain_layout() {
     // The walk really exercised both paths.
     assert!(boundary_computes > 1000, "{boundary_computes}");
     assert!(moves > 500, "{moves}");
+}
+
+/// A change inside a subtree that is not attached at the time of a layout
+/// is not forgotten: it is laid out once the subtree comes back, also when
+/// only a clean boundary above it is attached.
+#[test]
+fn changes_in_a_detached_subtree_are_laid_out_after_reattaching() {
+    let mut t = LayoutTree::new();
+    let root = t.create(leaf(400.0, 300.0), Measure::None).unwrap();
+    let outer = t
+        .create(absolute(10.0, 10.0, 200.0, 200.0), Measure::None)
+        .unwrap();
+    let inner = t
+        .create(absolute(5.0, 5.0, 100.0, 100.0), Measure::None)
+        .unwrap();
+    let child = t.create(leaf(10.0, 10.0), Measure::None).unwrap();
+    t.set_children(root, &[outer]).unwrap();
+    t.set_children(outer, &[inner]).unwrap();
+    t.set_children(inner, &[child]).unwrap();
+    t.compute(root, VIEWPORT).unwrap();
+
+    t.set_children(root, &[]).unwrap();
+    t.compute(root, VIEWPORT).unwrap();
+    t.set_style(child, &leaf(30.0, 10.0)).unwrap();
+    assert!(!t.needs_compute(root), "nothing attached changed");
+    t.compute(root, VIEWPORT).unwrap();
+    t.set_children(root, &[outer]).unwrap();
+    t.compute(root, VIEWPORT).unwrap();
+    assert_eq!(t.rect(child).unwrap(), Rect::new(0.0, 0.0, 30.0, 10.0));
+    assert!(!t.needs_compute(root));
 }

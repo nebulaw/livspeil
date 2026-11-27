@@ -610,11 +610,15 @@ impl LayoutTree {
     /// Whether [`LayoutTree::compute`] of `root` has anything to do.
     #[must_use]
     pub fn needs_compute(&self, root: LayoutNode) -> bool {
-        !self.pending.is_empty()
-            || !self.moved.is_empty()
+        let Ok(root) = self.id(root) else {
+            return false;
+        };
+        !self.moved.is_empty()
+            || self.taffy.dirty(root).unwrap_or(false)
             || self
-                .id(root)
-                .is_ok_and(|id| self.taffy.dirty(id).unwrap_or(false))
+                .pending
+                .iter()
+                .any(|&n| self.depth_under(n, root).is_some())
     }
 
     /// The node's parent, if attached.
@@ -715,13 +719,12 @@ impl LayoutTree {
             out.changed.push(LayoutNode(root));
             self.round(vec![(root, None, false)], Vec::new(), &mut out)?;
         }
-        // Boundaries the pass above did not reach, outermost first.
+        // Boundaries the pass above did not reach, outermost first. Those of
+        // detached subtrees stay pending until they are attached again.
         let mut pending: Vec<(usize, NodeId)> = self
             .pending
-            .drain()
-            .collect::<Vec<_>>()
-            .into_iter()
-            .filter_map(|n| Some((self.depth_under(n, root)?, n)))
+            .iter()
+            .filter_map(|&n| Some((self.depth_under(n, root)?, n)))
             .collect();
         pending.sort_unstable_by_key(|(depth, n)| (*depth, u64::from(*n)));
         for (_, owner) in pending {
