@@ -565,3 +565,54 @@ fn layers_are_per_view_and_key() {
     let b = app.new_model(());
     assert_ne!(app.layer(b.id(), "x"), first);
 }
+
+/// An untracked read does not subscribe the view, and an owned observer ends
+/// with its view.
+#[test]
+fn untracked_reads_and_owned_observers() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    struct Reader {
+        model: Model<u32>,
+        seen: Rc<Cell<u32>>,
+        watching: bool,
+    }
+    impl Render for Reader {
+        fn render(&mut self, cx: &mut ViewContext<'_, Self>) -> Element {
+            let value = cx.untracked(|app| *self.model.read(app));
+            if !self.watching {
+                self.watching = true;
+                let (model, seen) = (self.model, self.seen.clone());
+                cx.observe(model.id(), move |app| seen.set(*model.read(app)));
+            }
+            div().name(format!("value-{value}"))
+        }
+    }
+
+    let mut app = App::new();
+    let model = app.new_model(1_u32);
+    let seen = Rc::new(Cell::new(0));
+    let view = app.new_view(Reader {
+        model,
+        seen: seen.clone(),
+        watching: false,
+    });
+    app.set_root(view);
+    let mut h = TestHost::new(app, SIZE);
+    h.run_until_idle(20);
+    model.update(&mut h.app, |v, cx| {
+        *v = 2;
+        cx.notify();
+    });
+    assert_eq!(seen.get(), 2);
+    assert!(!h.app.needs_frame(), "the read did not subscribe the view");
+    assert!(h.app.find("value-1").is_some());
+
+    h.app.release(view.id());
+    model.update(&mut h.app, |v, cx| {
+        *v = 3;
+        cx.notify();
+    });
+    assert_eq!(seen.get(), 2);
+}

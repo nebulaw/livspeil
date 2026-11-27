@@ -272,6 +272,16 @@ impl<V: Render> ViewContext<'_, V> {
         View::from_id(self.id)
     }
 
+    /// Run `f` whenever `entity` is notified, until this view is released.
+    ///
+    /// `f` may run while this view renders, if the render itself notified
+    /// `entity`, so it must not update the view directly in that case;
+    /// scheduling work with [`App::animate`](crate::App::animate) is
+    /// always safe.
+    pub fn observe(&mut self, entity: EntityId, f: impl Fn(&mut App) + 'static) {
+        self.app.observe_for(self.id, entity, f);
+    }
+
     /// This view's layer `key`: the same handle in every render, until the
     /// view is released. Attach it with
     /// [`Element::layer`](crate::Element::layer) and set its properties at
