@@ -109,7 +109,9 @@ handle_action(&mut app, request)?;
   parent id and the key (or the index among unkeyed siblings). A node keeps
   its id across renders, and keyed children keep theirs when they are
   reordered.
-- **Bounds.** Absolute layout bounds (before animated transforms) are
+- **Bounds.** Where the element is on screen (`App::visual_bounds`:
+  through layers such as scrolling and canvas pan and zoom, and ancestors'
+  transforms; not the element's own press scale or translation),
   multiplied by the scale factor, so they are in physical pixels relative
   to the window.
 - **Focus.** The focused element, or its nearest exposed ancestor. When
@@ -145,9 +147,16 @@ works like this:
 
 A text change sends one node. A keyed reorder sends the parent (new child
 order) and the children whose bounds moved, with the same ids. A focus
-change sends no nodes. The walk is O(exposed nodes) per update. If
-profiling shows a need, the core can later add a semantics generation
-counter so that clean subtrees are skipped.
+change sends no nodes.
+
+That walk happens only after something rendered
+(`App::content_revision`) or the scale factor changed. While only
+positions change (panning, scrolling, zooming, translation and scale
+animations, moved boxes), the tree is not rebuilt: the update recomputes the
+bounds of the elements that moved (`App::moved_since`) and sends the exposed
+nodes whose bounds differ. `UpdateStats::rebuilt` says which path ran. Both
+are still O(moved elements) per update; if profiling shows a need, the core
+can track changed subtrees so that clean ones are skipped after a render too.
 
 ## Testing approach
 
@@ -176,6 +185,9 @@ with `TestHost`:
   parents, no id appears twice in an update, and the focus is in the tree.
   Finally, it checks that the incrementally maintained mirror equals a
   fresh full tree.
+- **Positions.** `tests/positions.rs` scrolls a virtual list: the update
+  does not rebuild the tree, and over random scrolls and renders the
+  incrementally maintained mirror equals a fresh one.
 
 ## Plan for VoiceOver and AT-SPI
 
