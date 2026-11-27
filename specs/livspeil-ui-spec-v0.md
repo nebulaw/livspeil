@@ -129,13 +129,13 @@ Published scenes can carry their own widgets. A Charm UI is either (a) a node gr
 - Typical Dream Mode layout: UI CPU time per dirty frame < 1 ms on a modern desktop CPU (originally stated for an M-series Mac); GPU time of the whole UI < 1.5 ms at 1080p on an Intel Xe-class iGPU with T1 settings.
 - Idle: zero frames, zero GPU wakeups.
 - 120 fps scroll and drag on capable displays.
-- First measurement: NodeCanvas with 2000 nodes / 3000 links takes 4.7–9.5 ms per frame on a shared 2-core VM (bench `crates/livspeil-ui-widgets/benches/node_canvas.rs`); above target, to be optimized and re-measured on real hardware.
+- NodeCanvas with 2000 nodes / 3000 links (headless, release, i5-12500T): 0.6–0.9 ms of CPU for a frame that pans or moves a node, 1.5 ms with the whole graph in view (`docs/benchmarks.md`). The frame pipeline that gets there is `livspeil-ui-frame-pipeline.md` (D65).
 
 ## 14. Screenshot harness (`livspeil-ui-shot`)
 - `cargo xtask shot` renders every registered scene (widgets, gallery pages, containers) at 1x and 2x and diffs against goldens in `crates/livspeil-ui-shot/goldens/`.
 - Agents read the PNGs to iterate on visuals; golden changes are reviewed by hand.
 
-## 15. Status as built (2026-11-26)
+## 15. Status as built (2026-11-28)
 The original M1.1–M1.6 plan was re-cut into smaller PRs:
 
 | Milestone | PR | What |
@@ -152,14 +152,17 @@ The original M1.1–M1.6 plan was re-cut into smaller PRs:
 | M1.11 | #38 | gallery pages for containers and NodeCanvas; host applies window requests; Linux run docs |
 | Round 14 | #39–#43, #45 | optional Linux AT-SPI feature; neutral colours and softer shadows (D59, D60, D62); popups fade without scaling (D61); bounded trackpad overscroll; macOS blur path and fallback (D63); IconButton styles, Tabs, Popover, Dialog/Sheet, Toast |
 | M1.12–M1.14 | round 14 polish | Boxicons icon atlas (`livspeil-ui-icons`); tab overflow affordance, wrapped-text height, narrow gallery layouts; text moves with its box |
+| M1.15 (frame pipeline) | #49–#51, #53 | measurement and budgets; compact instances and a curve primitive; layers and layout boundaries; NodeCanvas changes per node (`livspeil-ui-frame-pipeline.md`) |
 
 Not built yet: Tree, Table, ColorPicker, CurveEditor, Viewport, auto-generated inspector; `Image` drawing (icons do not use it); the `Surface` primitive; layout animations; adaptive accent from the scene (the accent is only contrast-clamped); drag and drop between elements; Bevy and layer-shell hosts; damage tracking and blur caching; high contrast and text scale; NodeCanvas node delete, unlink-by-drag and keyboard navigation.
 
 Icons (M1.12): the 49 Boxicons free icons of `assets/icons/boxicons/` are embedded in `livspeil-ui-icons`, parsed by a strict SVG-subset parser and rasterized with zeno. `PaintCmd::Icon` becomes one sprite in the glyph atlas, so the CPU and wgpu renderers draw it with the glyph pipeline (including its coverage gamma), snapped to physical pixels under translation and uniform scale (sizes in quarter-pixel steps). `IconButton` and `MenuItem` use them.
 
-Checked in a real window by the owner on 2026-11-26 (Hyprland, Wayland, NVIDIA RTX 5070 Ti): the gallery works. The visual design is not yet at the target; P1 polish continues.
+Checked in a real window by the owner on 2026-11-26 (Hyprland, Wayland, NVIDIA RTX 5070 Ti): the gallery works. The visual design is not yet at the target; polish comes late (D66).
 
-Acceptance still open: measured 120 fps, Intel iGPU budget under T1, screen-reader pass (Orca and VoiceOver), macOS real-window check.
+Measured on that machine at 144 Hz (2026-11-28): the gallery scenarios hold the refresh rate.
+
+Acceptance still open: Intel iGPU budget under T1, screen-reader pass (Orca and VoiceOver), macOS real-window check.
 
 ## 16. Decisions (resolved)
 1. Models + views (GPUI-style) kept; built.

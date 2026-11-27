@@ -55,7 +55,7 @@ in half; delete a worktree's `target/` as soon as its PR is open.
 ## 2. The roles
 
 **You** decide: product direction, open questions, licences, and merging.
-Decisions are numbered (D1…D64 so far) and recorded in the hub doc
+Decisions are numbered (D1…D68 so far) and recorded in the hub doc
 (`docs/livspeil-vision-and-decisions.md`). A session never merges to `main`, never pushes to `main`, and never
 merges from the GitHub web editor (that corrupted `Cargo.lock` once; ask
 the lead session to resolve conflicts instead).
@@ -75,6 +75,11 @@ branch cold against its spec, so the work is not grading itself.
 
 ## 3. A round, step by step
 
+0. **Clean up first.** Before a round starts, remove what earlier rounds
+   no longer need: worktrees and local branches that are fully in `main`,
+   their `target/` directories, stray logs. Check each for uncommitted
+   changes and commits missing from `main`, and keep whatever is still
+   needed. Bring the main checkout up to `main`.
 1. **Decide.** Settle open questions before code. Ask the lead to
    "run a decision round" when several are pending: options, trade-offs,
    a recommendation each, and you answer. Answers become numbered
@@ -95,8 +100,8 @@ branch cold against its spec, so the work is not grading itself.
 5. **CI.** If a check fails, say "PR 37 is failing" or run `/fix-ci 37`.
    The lead reads the failing job's log, reproduces locally, fixes the
    cause (not the symptom), pushes and waits for green.
-6. **Merge.** You merge on GitHub. Tell the lead "merged"; it cleans up
-   worktrees and starts the next step.
+6. **Merge.** You merge on GitHub. Tell the lead "merged"; it starts the
+   next step.
 7. **Close out.** After a round: "close out the round". The lead syncs
    the as-built specs with `main`, bumps the hub doc revision, updates
    roadmap and risks, and lists the next open questions.
@@ -148,7 +153,7 @@ Short messages work. These are the ones used most:
 |---|---|
 | "Let's go" / "resume" | Continues the current plan, or resumes interrupted agents |
 | "PR 32 is failing" | Reads the job log, fixes, pushes, waits for green |
-| "All merged" | Cleans up, starts the next track or round |
+| "All merged" | Cleans up (step 0), starts the next track or round |
 | "Run a decision round on X" | Options with trade-offs and a recommendation |
 | "Close out the round" | As-built specs, hub doc, roadmap, next questions |
 | "Show me" | Sends the latest screenshots |

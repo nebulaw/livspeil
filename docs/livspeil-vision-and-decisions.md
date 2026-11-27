@@ -5,8 +5,9 @@ SPDX-License-Identifier: CC-BY-4.0
 
 # Livspeil: Vision, Decisions, Roadmap (hub)
 
-Status: living doc. Rev 14 (2026-11-26). This repository copy is the source of truth. Details live in the specs:
+Status: living doc. Rev 15 (2026-11-28). This repository copy is the source of truth. Details live in the specs:
 - `livspeil-kernel-spec-v0.md` (kernel as built, v0.3)
+- `livspeil-dream-spec-v0.md` (Dream Mode app, first slice)
 - `livspeil-ui-spec-v0.md` (UI toolkit and design system; formerly `livkit-spec-v0.md`; section 12 option (b), scripted Charm views, is deferred by D38)
 - `repo-conventions-and-licensing.md` (repo layout, CI, agent workflow)
 - `licensing-and-contributions.md` (complete license and CLA summary, Rev 2; DCO dropped by D42; not in this repository, see `docs/licensing.md`)
@@ -102,6 +103,10 @@ Answers given in a local session (2026-11-26), numbers not yet assigned:
 
 Frame pipeline (2026-11-27)
 - D65 Retained frame pipeline (`specs/livspeil-ui-frame-pipeline.md`): frame cost is proportional to what changed. Stages P0–P5, one PR each; damage tracking and blur caching (P5) wait for the Intel iGPU laptop.
+Round 15 (2026-11-28)
+- D66 Experience and features come first. Visual design polish is one of the last stages, after what is needed for the OS's features exists. The colours (D59) stay as they are. This replaces "finish P1 polish before starting P2" from 2026-11-26.
+- D67 Frame pipeline P3 is recorded and postponed; it is looked at again with P5, once the Intel iGPU laptop is measured. Next is the Dream Mode app (`specs/livspeil-dream-spec-v0.md`).
+- D68 When the Floor is built, it has to be good enough to replace Hyprland: the owner will run it instead and keep working from it.
 
 ## Architecture overview
 - **Floor**: Smithay compositor (windows, input, outputs, XWayland, layer-shell, titlebars, shadows, rounded masks, blur, window tokens).
@@ -141,12 +146,19 @@ All `crates/livspeil-ui-*` are MPL-2.0 and testable headlessly (CPU reference ra
 - M1.13: tab overflow affordance, wrapped text measured at its real height, narrow and short gallery windows; ranked critique in `docs/design-critique.md`.
 - M1.14: text no longer trails the box it moves with (layout rounds each out-of-flow box in its own frame; text runs snap once).
 - First real-window check by the owner (2026-11-26, Hyprland on Wayland, NVIDIA RTX 5070 Ti): everything works; the design needs more work.
+- The stutter seen in that round came from the setup (a software adapter after a driver upgrade without a reboot; a debug build with Vulkan validation), and the real cost was rebuilding and re-uploading everything visible. Retained frame pipeline (D65):
+  - P0 (#49): scripted scenarios, work budgets in CI, GPU timing, a warning for software rendering.
+  - P1 (#50): compact instance records per primitive family; a wire is one curve primitive.
+  - P2 (#51): property tree (layers) and layout boundaries; pan, zoom and scroll render no view and run no layout.
+  - P4 (#53), before P3: the node canvas applies model changes per node; cards are views on layers; views can own what they create.
+  - On the owner's machine (500 nodes, release, 144 Hz): pan went from 108 to 144 fps and dragging a node from 99 to 144 fps (`docs/benchmarks.md`).
+  - Postponed (D67): P3 (paint fragments, retained GPU buffers) and P5 (damage, blur caching).
 
 ## Roadmap
 - P0 Foundations: done.
-- P1 Livspeil UI + gallery (Linux and macOS), current focus: visual design polish, NodeCanvas performance to the 1 ms/frame target at 2000 nodes (now 4.7–9.5 ms on the VM), damage tracking and blur caching, node delete/unlink/keyboard navigation, screen-reader verification on Linux (Orca) and macOS (VoiceOver), real-window check on macOS.
-- P2 Dream Mode app: Bevy viewport host for Livspeil UI, inspector, node editor on the real kernel graph (incl. dashed `ch()`/`out()` wires), timeline, glTF import, lighting; Black Room.
-- P3 Linux OS pieces: Floor spike and build, layer-shell host for Livspeil UI, world protocol, tokens, blur, titlebars, menubar.
+- P1 Livspeil UI + gallery (Linux and macOS): frame pipeline P3 and P5 postponed (D67). At 2000 nodes a frame costs 0.6–0.9 ms of CPU except with the whole graph in view (1.5 ms). Then: damage tracking and blur caching (after the iGPU measurement), node delete/unlink/keyboard navigation, screen-reader verification on Linux (Orca) and macOS (VoiceOver), real-window check on macOS. Visual design polish comes late (D66).
+- P2 Dream Mode app, **current focus** (first slice in `specs/livspeil-dream-spec-v0.md`): Bevy viewport host for Livspeil UI, inspector, node editor on the real kernel graph (incl. dashed `ch()`/`out()` wires), timeline, glTF import, lighting; Black Room.
+- P3 Linux OS pieces: Floor spike and build (a daily replacement for Hyprland, D68), layer-shell host for Livspeil UI, world protocol, tokens, blur, titlebars, menubar.
 - P4 Integration, tiers, calm governor, Safe scene; Room publishing and license checks.
 - P5 The Room in Dream Mode; ISO, installer, updates; Charm/Room store (free licenses only).
 - Later: audio, AI Charm, scripted Charm views, video, simulation, NVIDIA polish, system-wide settings UI.
@@ -164,7 +176,7 @@ All `crates/livspeil-ui-*` are MPL-2.0 and testable headlessly (CPU reference ra
 10. Golden-image nondeterminism across GPUs (CI uses lavapipe; GPU tests are serialized after a parallel-device crash).
 11. Name checks pending for "Livspeil UI", `@livspeil/ui`, "Charms".
 12. Third-party Charm trust: sandboxing and capability tokens before a store exists.
-13. Benchmarks ran on a shared 2-vCPU VM; re-measure on the owner's Linux machine and the Intel iGPU laptop.
+13. UI frame times are measured on the owner's desktop (RTX 5070 Ti) and headless only; the Intel iGPU laptop is not measured. Kernel benchmarks still come from a shared 2-vCPU VM.
 14. Accept outside PRs only after the CLA is enabled.
 15. Some nodes use platform libm; cook goldens rely on 6-decimal rounding with guard tests.
 16. Hidden data flow through expressions; mitigated by drawing references in the editor.
@@ -172,9 +184,10 @@ All `crates/livspeil-ui-*` are MPL-2.0 and testable headlessly (CPU reference ra
 18. Upstream Taffy 0.16 bugs worked around locally; re-check on each Taffy upgrade and report upstream.
 19. Usage limits interrupt parallel agents; mitigated by small tracks, resuming agents, and committing early.
 
-## Open questions, round 14
-1. What exactly is off in the design (spacing, type, colour, materials, motion, controls), and what is the reference to match?
-2. Which parts of P1 polish gate P2: only the visual design, or also NodeCanvas performance, damage tracking and the screen-reader pass?
-3. The development machine has an NVIDIA RTX 5070 Ti, while the baseline is Intel iGPU laptops (D16, "NVIDIA later"). When is the iGPU laptop measured?
-4. Which items of `docs/design-critique.md` come first? The top one (the dark surface ramp reads as near black) would change D59.
-5. The icon set has no cross, trash, plus or lock icon, so close buttons stay a text sign. Which icons are added next?
+## Open questions, round 15
+1. The questions of the Dream Mode spec (section 5): undo of node moves, values on cards, the name.
+2. What must the Floor do before it can replace Hyprland (D68)? To be specified when it starts. A first list: native and XWayland apps (terminal, browser, editor), keyboard layouts and shortcuts, multiple monitors at their refresh rate, NVIDIA, clipboard, screen lock, screenshots and screen sharing, notifications, and always a way back to Hyprland. Its TTY build has never set a display mode.
+3. When is the Intel iGPU laptop measured? P3, P5 and the iGPU budget wait for it.
+4. When is the screen-reader pass (Orca, VoiceOver)? Accessibility is built and has never been heard.
+
+Deferred by D66: the design critique (`docs/design-critique.md`), the dark surface ramp, and the missing cross, trash, plus and lock icons.

@@ -283,7 +283,7 @@ before and after numbers.
 | P0 (built) | Scenarios (pan, zoom, drag, scroll), work counters, GPU timing, section 6 | baseline of every target recorded |
 | P1 (built) | Instance families and the curve primitive | upload down at least 5x on the stress graph (16.6x on `pan-stress`, `docs/benchmarks.md`); goldens reviewed |
 | P2 (built) | Property tree and layout boundaries | pan, zoom and scroll render no view and run no layout |
-| P3 | Paint fragments and retained buffers | upload targets of section 3 met |
+| P3 (postponed, D67) | Paint fragments and retained buffers | upload targets of section 3 met |
 | P4 (built, see below) | NodeCanvas change sets and virtualization margin | CPU targets of section 3 met at 2000 nodes |
 | P5 | Damage and blur caching | idle GPU work gone; measured on the iGPU |
 
@@ -349,6 +349,29 @@ views and 2,607).
 - On screen (500 nodes, `docs/benchmarks.md`): `drag-stress` holds 144 fps
   at 1.35 ms of CPU (was 118 fps, 6.34 ms); pan and zoom stay at 144 fps and
   cost 0.06 to 0.33 ms more.
+
+### P3: postponed
+
+Postponed on 2026-11-28 (D67). The gallery scenarios hold 144 fps on the
+owner's machine with 1.0 to 1.6 ms of CPU for the node canvas, so what P3
+would save does not yet justify the largest and riskiest stage. Look again
+with the iGPU measurement and with graphs the Dream Mode app produces.
+
+Notes from reading the code, for when it is taken up:
+
+- Where a pan of 2000 nodes spends its time (headless): build 0.58 ms, scene
+  conversion 0.12 ms, encoding 0.80 ms. All three redo unchanged content.
+- A fragment's content is stale on any of: a reconcile of its subtree, a
+  visual animation, hover or press, focus, a layout of its subtree, a theme
+  change, and a layer frame. Missing one shows stale pixels, so the
+  retained-equals-fresh differential test comes first.
+- Culling is done by the parent against the visible area, which changes with
+  the parent's transform: apply it when fragments are assembled, not when a
+  fragment is painted.
+- Encoded records are position independent except for slot offsets and
+  property indices. Some values depend on the on-screen scale (section 4.5).
+- Split: P3a keeps painted and converted fragments (CPU), P3b keeps them in
+  GPU buffers.
 
 ## 8. Alternatives not taken
 
