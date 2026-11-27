@@ -94,11 +94,15 @@ pub(crate) fn curve_reach(curve: &CurveRecord, prop: &Property) -> f32 {
     curve.half_width + 1.0 / prop.ppu
 }
 
+/// Physical pixels past a stroke's edge within which a segment's box still
+/// draws: the AA ramp (half a pixel) and room for rounding. Must match
+/// `primitives.wgsl`.
+pub(crate) const CLAIM_MARGIN_PX: f32 = 0.75;
+
 /// How far from its own segment a pixel can be and still be drawn by that
-/// segment's box: the stroke and its AA ramp, with room for rounding.
-/// Mirrored in the shader's `shade_curve`.
+/// segment's box.
 pub(crate) fn curve_claim(half_width: f32, ppu: f32) -> f32 {
-    half_width + 0.75 / ppu
+    half_width + CLAIM_MARGIN_PX / ppu
 }
 
 /// What a curve covers: its control hull grown by [`curve_reach`].

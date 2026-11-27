@@ -472,4 +472,42 @@ mod tests {
         );
         check("Property", Property::LAYOUT, Property::SLOTS);
     }
+
+    /// The constants the shader repeats have the values used here.
+    #[test]
+    fn wgsl_constants_agree() {
+        let module = naga::front::wgsl::parse_str(include_str!("shaders/primitives.wgsl"))
+            .expect("the shader parses");
+        let value = |name: &str| -> f64 {
+            let constant = module
+                .constants
+                .iter()
+                .find(|(_, c)| c.name.as_deref() == Some(name))
+                .unwrap_or_else(|| panic!("no constant {name}"))
+                .1;
+            match module.global_expressions[constant.init] {
+                naga::Expression::Literal(naga::Literal::U32(v)) => v.into(),
+                naga::Expression::Literal(naga::Literal::F32(v)) => v.into(),
+                ref other => panic!("{name} is {other:?}"),
+            }
+        };
+        let check = |name: &str, expected: f64| assert_eq!(value(name), expected, "{name}");
+        check("OFFSET_BITS", OFFSET_BITS.into());
+        check("OFFSET_MASK", OFFSET_MASK.into());
+        for (name, family) in [
+            ("FAMILY_SPRITE", Family::Sprite),
+            ("FAMILY_QUAD", Family::Quad),
+            ("FAMILY_SHADOW", Family::Shadow),
+            ("FAMILY_CURVE", Family::Curve),
+            ("FAMILY_BACKDROP", Family::Backdrop),
+        ] {
+            let tag = InstanceRef { family, slot: 0 }.pack() >> OFFSET_BITS;
+            check(name, tag.into());
+        }
+        check("FILL_SOLID", fill_kind::SOLID.into());
+        check("FILL_LINEAR", fill_kind::LINEAR.into());
+        check("MAX_CURVE_SEGMENTS", crate::MAX_CURVE_SEGMENTS.into());
+        check("CLAIM_MARGIN_PX", crate::shade::CLAIM_MARGIN_PX.into());
+        check("INV_TEXT_GAMMA", (1.0 / crate::TEXT_GAMMA).into());
+    }
 }
