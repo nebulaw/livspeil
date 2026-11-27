@@ -5,16 +5,28 @@
 //! real window (`--scenario=NAME`, timed on hardware) and the tests run the
 //! same steps headlessly (counted, so CI can hold budgets).
 //!
-//! Each step is a pure function of the frame number: no clocks, no input.
+//! Each step is a pure function of the frame number: no clocks. Pointer
+//! scenarios inject their events through [`App::dispatch`], as a host does.
 
-use livspeil_ui_core::App;
+use std::time::Duration;
+
+use livspeil_ui_core::{App, InputEvent, Modifiers, PointerEvent, PointerKind};
 use livspeil_ui_layout::{Point, Vec2};
-use livspeil_ui_widgets::{NodeCanvas, NodeGraphModel};
+use livspeil_ui_widgets::{NodeCanvas, NodeGraphModel, ScrollView};
 
 use crate::{Mounted, Page};
 
 /// Frames a direction is kept before turning back.
 const LEG: u32 = 60;
+/// Frames the pointer stays on one button.
+const DWELL: u32 = 8;
+/// The buttons the pointer visits.
+const HOVERED: [&str; 4] = [
+    "button:Save",
+    "button:Cancel",
+    "button:More",
+    "button:Delete",
+];
 
 /// A scripted interaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,17 +43,20 @@ pub enum Scenario {
     DragStress,
     /// Scroll the 100,000 row list.
     ScrollList,
+    /// Move the pointer from button to button.
+    HoverButtons,
 }
 
 impl Scenario {
     /// Every scenario.
-    pub const ALL: [Scenario; 6] = [
+    pub const ALL: [Scenario; 7] = [
         Scenario::PanSample,
         Scenario::PanStress,
         Scenario::PanStressFit,
         Scenario::ZoomStress,
         Scenario::DragStress,
         Scenario::ScrollList,
+        Scenario::HoverButtons,
     ];
 
     /// The first frame that interacts; earlier ones set the scene up.
@@ -57,6 +72,7 @@ impl Scenario {
             Scenario::ZoomStress => "zoom-stress",
             Scenario::DragStress => "drag-stress",
             Scenario::ScrollList => "scroll-list",
+            Scenario::HoverButtons => "hover-buttons",
         }
     }
 
@@ -66,11 +82,19 @@ impl Scenario {
         Scenario::ALL.into_iter().find(|s| s.slug() == slug)
     }
 
+    /// How many of 88 consecutive interacting frames at least draw
+    /// something new (so a scenario that stops working is noticed).
+    #[must_use]
+    pub fn changing_frames(self) -> u32 {
+        80
+    }
+
     /// The gallery page to mount.
     #[must_use]
     pub fn page(self) -> Page {
         match self {
             Scenario::ScrollList => Page::Scroll,
+            Scenario::HoverButtons => Page::Buttons,
             _ => Page::NodeCanvas,
         }
     }
@@ -99,13 +123,12 @@ impl Scenario {
             Scenario::PanSample | Scenario::PanStress | Scenario::PanStressFit => {
                 NodeCanvas::pan_by(canvas, app, Vec2::new(3.0 * sign, 0.0));
             }
-            Scenario::ZoomStress => canvas.update(app, |s, cx| {
-                let mut c = s.canvas();
+            Scenario::ZoomStress => {
+                let mut c = canvas.read(app).canvas();
                 let factor = if forward { 1.01 } else { 1.0 / 1.01 };
                 c.zoom_at(Point::new(400.0, 400.0), factor);
-                s.set_canvas(c);
-                cx.notify();
-            }),
+                NodeCanvas::set_canvas(canvas, app, c);
+            }
             Scenario::DragStress => {
                 let graph = canvas.read(app).model();
                 graph.update(app, |g, cx| {
@@ -116,14 +139,27 @@ impl Scenario {
                     }
                 });
             }
-            Scenario::ScrollList => mounted.list.update(app, |s, cx| {
+            Scenario::ScrollList => {
                 // Down for a leg, then back: never past the start.
                 let leg = t % (2 * LEG);
                 let steps = leg.min(2 * LEG - leg);
                 let offset = f32::from(u16::try_from(steps).unwrap_or(u16::MAX)) * 7.0;
-                s.scroller_mut().jump_to(Vec2::new(0.0, offset));
-                cx.notify();
-            }),
+                ScrollView::jump_to(mounted.list, app, Vec2::new(0.0, offset));
+            }
+            Scenario::HoverButtons => {
+                let button = HOVERED[(t / DWELL) as usize % HOVERED.len()];
+                let Some(at) = app.find(button).and_then(|b| app.visual_bounds(b)) else {
+                    return;
+                };
+                // The pointer keeps moving, by a pixel, while it dwells.
+                let jitter = if t.is_multiple_of(2) { 0.0 } else { 1.0 };
+                app.dispatch(InputEvent::Pointer(PointerEvent {
+                    kind: PointerKind::Move,
+                    position: at.center() + Vec2::new(jitter, 0.0),
+                    modifiers: Modifiers::NONE,
+                    time: Duration::from_micros(u64::from(frame) * 6944),
+                }));
+            }
         }
     }
 }

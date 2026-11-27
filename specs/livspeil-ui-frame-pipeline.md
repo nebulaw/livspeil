@@ -5,9 +5,9 @@ SPDX-License-Identifier: CC-BY-4.0
 
 # Livspeil UI frame pipeline (retained rendering)
 
-Status: **accepted** (D65, 2026-11-27); P0 built. Extends
-`livspeil-ui-spec-v0.md` sections 3, 5, 12 and 13. Stages P0 and P1 are
-built; nothing else is unless marked so.
+Status: **accepted** (D65, 2026-11-27); P0, P1 and P2 built. Extends
+`livspeil-ui-spec-v0.md` sections 3, 5, 12 and 13. Nothing else is built
+unless marked so.
 
 ## 1. Rule
 
@@ -101,12 +101,46 @@ layout, no repaint. Animations of these properties use the same path. Hit
 testing, accessibility bounds, tooltips, popups and IME placement read the
 same tree, so they cannot disagree with what is drawn.
 
+**As built (P2).**
+
+- `Layer` is a `Copy` handle from `cx.layer("key")`, owned by the view and
+  dropped with it; `Element::layer(layer)` takes it by value. A dropped
+  layer is inert.
+- Properties are transform (a scroll offset is a translation), opacity, and
+  a frame that replaces the box of a childless element (scrollbar thumbs,
+  the minimap viewport frame: they resize every frame, and scaling them
+  would distort borders and radii). Clip stays an element attribute
+  (`clip()`): nothing animates it yet.
+- The values live beside the element tree (`App`), so views can use layers
+  while the tree is reconciled; painting, hit testing, culling, bounds
+  queries and accessibility read them through one transform function.
+- `App::animate` runs per-frame tasks before views render; springs and
+  momentum step there. There is no layer-owned spring: the owners' motion
+  (anchored zoom, scroll physics) is not an interpolation of the transform.
+- `Element::cull_offscreen` replaces `Element::canvas`: paint and hit
+  testing skip children outside the visible area. This is what keeps a
+  built region larger than the view from costing paint time or instances.
+- Translations are not yet snapped to physical pixels per layer (4.6); the
+  paint bridge snaps text and icons as before.
+- A layer element is the repaint boundary P3 will cut at; the scene format
+  is unchanged.
+
 ### 4.2 Layout boundaries
 
 An absolutely positioned box with a definite size is a layout boundary: a
 change inside it lays out only its subtree, and moving it changes its layer
 transform without running layout. Node cards, popups, tooltips and toasts
 are such boxes.
+
+**As built (P2).** In `livspeil-ui-layout` the boundary's contents are a
+Taffy tree of their own, rooted at a copy of the box's style with the size
+its parent gave it. "Definite" is a length or percentage in both directions
+(and no percentage padding). Moving is not a layer transform: for a box
+placed by `left` and `top` alone, Taffy is given zero insets and the real
+ones are added when rounding, so a style change moves it with no layout
+(`FrameStats::layout` stays false). Boxes with an `auto` size are not
+boundaries. A 600-seed differential test compares the incrementally edited
+tree with plain Taffy.
 
 ### 4.3 Paint fragments
 
@@ -178,7 +212,12 @@ layer, so content never moves relative to its box.
 - Each card is a layer; dragging sets that card's transform and rebuilds
   only the wires attached to it.
 - Virtualization builds a region larger than the viewport and rebuilds only
-  when the view leaves it, or the level of detail changes.
+  when the view leaves it, or the level of detail changes. (Built in P2,
+  with a margin of a quarter of the view per side; it also rebuilds when the
+  view size changes or zooming in leaves the region over twice as wide as
+  needed. Lists and `ScrollView` content do the same through
+  `ScrollInfo::region`. The first bullet above is built; cards as layers and
+  change sets are P4.)
 - `NodeGraphModel` reports **what** changed (moved, edited, topology) in
   addition to a revision, so the geometry cache and spatial index update
   incrementally. A full rebuild stays the correct fallback.
@@ -203,6 +242,14 @@ surface supports it.
 - CPU reference and GPU renderers keep matching.
 - `unsafe` stays forbidden.
 
+Built with P2, comparing scenes (not pixels): random property changes and
+edits against a new app (`livspeil-ui-core/tests/layers.rs`), random pans,
+zooms, moves and selections against a new `NodeCanvas`
+(`livspeil-ui-widgets/tests/node_canvas.rs`), random scrolls and renders
+against a fresh accessibility tree (`livspeil-ui-a11y/tests/positions.rs`),
+and random layout edits against plain Taffy
+(`livspeil-ui-layout/src/tree_tests.rs`).
+
 ## 6. Developer setup (part of the work)
 
 - Optimize dependencies in the dev profile, so debug builds stay usable.
@@ -220,12 +267,49 @@ before and after numbers.
 |---|---|---|
 | P0 (built) | Scenarios (pan, zoom, drag, scroll), work counters, GPU timing, section 6 | baseline of every target recorded |
 | P1 (built) | Instance families and the curve primitive | upload down at least 5x on the stress graph (16.6x on `pan-stress`, `docs/benchmarks.md`); goldens reviewed |
-| P2 | Property tree and layout boundaries | pan, zoom and scroll render no view and run no layout |
+| P2 (built) | Property tree and layout boundaries | pan, zoom and scroll render no view and run no layout |
 | P3 | Paint fragments and retained buffers | upload targets of section 3 met |
 | P4 | NodeCanvas change sets and virtualization margin | CPU targets of section 3 met at 2000 nodes |
 | P5 | Damage and blur caching | idle GPU work gone; measured on the iGPU |
 
 P1 is independent of P2. P3 needs P2.
+
+### P2 results
+
+Work per measured frame in the headless budgets
+(`tests/frame_budget.rs`, 88 frames at 1274x1428; "rendered" and "layout"
+count frames). Instance counts are in the budgets; P1 changed them:
+
+| Scenario | rendered | layout | most reconciled |
+|---|---|---|---|
+| `pan-sample` | 88 → 0 | 88 → 0 | 80 → 0 |
+| `pan-stress` | 88 → 0 | 88 → 0 | 1,827 → 0 |
+| `pan-stress-fit` | 88 → 0 | 88 → 0 | 507 → 0 |
+| `zoom-stress` | 88 → 0 | 88 → 0 | 1,827 → 0 |
+| `drag-stress` | 88 → 88 | 88 → 0 | 2,328 → 2,607 |
+| `scroll-list` | 88 → 1 | 0 → 1 | 388 → 466 |
+| `hover-buttons` (new) | 0 | 0 | 0 |
+
+`drag-stress` reconciles more because the canvas now builds the margin
+around the view; P4 removes that render. The P0 `scroll-list` never
+scrolled (an unmeasured list clamped every offset to zero), so its P0
+timings in section 2 are of a list re-rendering in place.
+
+CPU time of P2 without P1, headless, release, i5-12500T, same steps (median
+of 900 frames; build is the scenario step plus `App::draw_frame`, CPU adds
+scene conversion and encoding):
+
+| Scenario | build ms | CPU ms |
+|---|---|---|
+| `pan-sample` | 0.27 → 0.02 | 0.35 → 0.10 |
+| `pan-stress` | 7.18 → 0.72 | 9.93 → 3.25 |
+| `pan-stress-fit` | 3.05 → 0.41 | 5.12 → 2.41 |
+| `zoom-stress` | 6.51 → 0.30 | 9.90 → 1.97 |
+| `drag-stress` | 8.88 → 5.49 | 11.85 → 7.35 |
+| `scroll-list` | 0.78 → 0.10 | 1.17 → 0.41 |
+
+Times on screen, for P1 and P2 together, are in `docs/benchmarks.md`
+("Frame pipeline P1 and P2 on screen").
 
 ## 8. Alternatives not taken
 

@@ -1135,7 +1135,7 @@ impl MenuBar {
 
     fn title_rect(&self, app: &App, i: usize) -> Option<Rect> {
         let bar = app.find(self.element_name())?;
-        app.bounds(bar.child(&format!("title-{i}")))
+        app.visual_bounds(bar.child(&format!("title-{i}")))
     }
 
     fn title_at(&self, app: &App, p: Point) -> Option<usize> {
@@ -1365,7 +1365,8 @@ impl ContextMenu {
             }
         })
         .on_action(actions::CONTEXT_MENU, move |cx| {
-            let at = cx.bounds().center();
+            let id = cx.element_id();
+            let at = cx.visual_bounds(id).unwrap_or_else(|| cx.bounds()).center();
             open_with(
                 &env2,
                 cx,

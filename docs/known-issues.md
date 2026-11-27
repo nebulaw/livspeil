@@ -141,7 +141,8 @@ child.
 ## Taffy 0.16.0: changes under a `display: none` box are not laid out
 
 **Status:** same as above; worked around by `LayoutTree` clearing the cache
-of every ancestor itself after each mutation.
+of every ancestor itself after each mutation. The walk ends at the root of a
+layout boundary's content tree and records the boundary as pending.
 
 `compute_hidden_layout` clears the cache of the hidden box's descendants
 (through `LayoutInput::HIDDEN`, which bypasses `compute_cached_layout`) and

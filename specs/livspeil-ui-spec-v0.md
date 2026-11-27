@@ -65,6 +65,7 @@ License: **MPL-2.0** (D33, "choose the loose option, relicense later if needed")
 - Why not immediate mode: complex panels (inspector, node canvas, timeline) need persistent state, virtualization, accessibility identity.
 - Stable `ElementId`s everywhere (needed for AccessKit, animations, focus).
 - Xilem-style diffing was considered; models + views is built and kept.
+- Positions that change every frame (pan, zoom, scroll) are layers: compositor properties that change without rendering a view or running layout (`livspeil-ui-frame-pipeline.md`, 4.1).
 
 ## 6. Animation and motion
 - One `Animatable<T>` abstraction (floats, vectors, colors in OKLab, transforms). Drivers: **Spring** (`response` seconds, `damping` ratio) and **Tween** (`duration`, easing).

@@ -53,14 +53,15 @@ fn setup(zoom: Option<f32>) -> (App, View<NodeCanvas<DemoGraph>>) {
     app.set_root(root);
     app.draw_frame(1.0 / 60.0);
     match zoom {
-        Some(z) => canvas.update(&mut app, |s, cx| {
-            s.set_canvas(Canvas {
+        Some(z) => NodeCanvas::set_canvas(
+            canvas,
+            &mut app,
+            Canvas {
                 zoom: z,
                 pan: Vec2::new(-200.0, -100.0),
                 ..Canvas::default()
-            });
-            cx.notify();
-        }),
+            },
+        ),
         None => NodeCanvas::fit(canvas, &mut app),
     }
     app.draw_frame(1.0 / 60.0);
@@ -126,7 +127,7 @@ fn main() {
         let (b, p, e) = (median(&mut build), median(&mut paint), median(&mut enc));
         println!(
             "{name}: {} nodes, {} wires built; {cmds} scene commands, {items} display items",
-            st.visible_nodes, st.visible_wires
+            st.built_nodes, st.built_wires
         );
         println!("  {instances} instances, {bytes} bytes uploaded, {draws} draw calls");
         println!(

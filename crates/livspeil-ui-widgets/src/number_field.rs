@@ -460,6 +460,7 @@ impl Render for NumberField {
                 env.sync_focus(cx);
                 let bounds = cx.bounds();
                 let (p, time, shift) = (ev.position, ev.time, ev.modifiers.shift);
+                let at = cx.layout_position(p);
                 with(view, cx, |nf, app| {
                     let raw = *nf.value.read(app);
                     nf.press = Some(Press {
@@ -468,7 +469,7 @@ impl Render for NumberField {
                         raw,
                         scrubbing: false,
                     });
-                    let l = local(nf, bounds, p, height, pad);
+                    let l = local(nf, bounds, at, height, pad);
                     if let Some(tb) = &mut nf.edit {
                         tb.press(l, p, time, shift);
                     }
@@ -482,8 +483,9 @@ impl Render for NumberField {
                 }
                 let bounds = cx.bounds();
                 let (p, mods) = (ev.position, ev.modifiers);
+                let at = cx.layout_position(p);
                 with(view, cx, |nf, _| {
-                    let l = local(nf, bounds, p, height, pad);
+                    let l = local(nf, bounds, at, height, pad);
                     let scrub = nf.scrub();
                     let mut press = nf.press?;
                     if let Some(tb) = &mut nf.edit {

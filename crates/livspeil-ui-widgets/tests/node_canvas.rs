@@ -6,10 +6,10 @@
 
 mod common;
 
-use common::{down, find, host_sized, moved, pointer, up};
+use common::{down, find, host_sized, moved, pointer, scene, up};
 use livspeil_ui_core::{
-    Element, Key, Model, Modifiers, MouseButton, NamedKey, PointerKind, ScrollDelta, TestHost,
-    View, div,
+    Element, InputEvent, Key, Model, Modifiers, MouseButton, NamedKey, PointerKind, ScrollDelta,
+    TestHost, View, div,
 };
 use livspeil_ui_layout::{Canvas, Point, Size, Vec2};
 use livspeil_ui_theme::MotionConfig;
@@ -255,13 +255,14 @@ fn dragging_moves_the_selection() {
     assert_eq!(g.nodes[1].position, Point::new(90.0, 170.0));
     assert_eq!(f.sel(), vec![1, 2], "dragging keeps the selection");
     // At zoom 2 a drag moves half as far in canvas space.
-    f.view.update(&mut f.h.app, |s, cx| {
-        s.set_canvas(Canvas {
+    DemoCanvas::set_canvas(
+        f.view,
+        &mut f.h.app,
+        Canvas {
             zoom: 2.0,
             ..Canvas::default()
-        });
-        cx.notify();
-    });
+        },
+    );
     f.h.run_until_idle(50);
     let mix = f.node("Mix");
     f.h.drag(mix, mix + Vec2::new(40.0, 0.0), 4);
@@ -365,8 +366,8 @@ fn culling_and_level_of_detail_with_2k_nodes() {
     let mut f = fixture_with(DemoGraph::grid(2000, 3000), Size::new(1200.0, 800.0));
     let st = f.s().stats();
     assert_eq!((st.nodes, st.links), (2000, 3000));
-    assert!(st.visible_nodes > 10 && st.visible_nodes < 60, "{st:?}");
-    assert!(st.visible_wires < 300, "{st:?}");
+    assert!(st.built_nodes > 10 && st.built_nodes < 60, "{st:?}");
+    assert!(st.built_wires < 300, "{st:?}");
     assert_eq!(st.lod, Lod::Full);
     let frame = f.h.last_frame().unwrap().stats;
     assert!(frame.nodes < 3000, "{} retained nodes", frame.nodes);
@@ -376,8 +377,8 @@ fn culling_and_level_of_detail_with_2k_nodes() {
     f.h.run_until_idle(50);
     let st = f.s().stats();
     assert_eq!(st.lod, Lod::Block);
-    assert_eq!(st.visible_nodes, 2000);
-    assert_eq!(st.visible_wires, 3000);
+    assert_eq!(st.built_nodes, 2000);
+    assert_eq!(st.built_wires, 3000);
     let frame = f.h.last_frame().unwrap().stats;
     assert!(
         frame.nodes < 2000 + 2000 + 200,
@@ -385,15 +386,16 @@ fn culling_and_level_of_detail_with_2k_nodes() {
         frame.nodes
     );
     // Panning far away culls everything.
-    f.view.update(&mut f.h.app, |s, cx| {
-        s.set_canvas(Canvas {
+    DemoCanvas::set_canvas(
+        f.view,
+        &mut f.h.app,
+        Canvas {
             pan: Vec2::new(-1e6, -1e6),
             ..Canvas::default()
-        });
-        cx.notify();
-    });
+        },
+    );
     f.h.run_until_idle(50);
-    assert_eq!(f.s().stats().visible_nodes, 0);
+    assert_eq!(f.s().stats().built_nodes, 0);
 }
 
 #[test]
@@ -462,4 +464,260 @@ fn selection_ring_paints_above_the_header_and_frame_comes_from_layout() {
             .and_then(|n| n.label().map(str::to_owned)),
         Some("Factor".to_owned())
     );
+}
+
+/// One frame after `change`: views rendered, and whether layout ran.
+fn frame_after(f: &mut Fx, change: impl FnOnce(&mut Fx)) -> (usize, bool) {
+    change(f);
+    let frame = f.h.step().expect("a frame").stats;
+    (frame.views_rendered, frame.layout)
+}
+
+#[test]
+fn panning_and_zooming_inside_the_built_region_render_nothing() {
+    let mut f = fixture_with(DemoGraph::grid(500, 700), Size::new(1200.0, 800.0));
+    let card = find(&f.h, "node:Node 1");
+    let (before, built) = (f.h.app.visual_bounds(card).unwrap(), f.s().stats());
+    let layouts = f.h.app.layout_stats();
+    let view = f.view;
+    for _ in 0..20 {
+        let stats = frame_after(&mut f, |f| {
+            DemoCanvas::pan_by(view, &mut f.h.app, Vec2::new(-5.0, -3.0));
+        });
+        assert_eq!(stats, (0, false));
+    }
+    assert_eq!(f.h.app.layout_stats(), layouts);
+    assert_eq!(f.s().stats(), built);
+    let after = f.h.app.visual_bounds(card).unwrap();
+    assert_eq!(after.origin(), before.origin() + Vec2::new(-100.0, -60.0));
+    // The minimap's viewport frame followed.
+    let mark = find(&f.h, "minimap-viewport");
+    let x = f.h.app.bounds(mark).unwrap().x;
+    DemoCanvas::pan_by(view, &mut f.h.app, Vec2::new(-150.0, 0.0));
+    f.h.run_until_idle(10);
+    assert!(f.h.app.bounds(mark).unwrap().x > x);
+    // A small zoom of the same level of detail.
+    let mut canvas = f.canvas();
+    canvas.zoom_at(Point::new(600.0, 400.0), 1.1);
+    let stats = frame_after(&mut f, |f| {
+        DemoCanvas::set_canvas(view, &mut f.h.app, canvas)
+    });
+    assert_eq!(stats, (0, false));
+}
+
+#[test]
+fn the_built_region_follows_with_hysteresis() {
+    let mut f = fixture_with(DemoGraph::grid(500, 700), Size::new(1200.0, 800.0));
+    let view = f.view;
+    let renders = |f: &Fx| f.h.app.render_count(view.id());
+    let start = renders(&f);
+    // 25% of 1200 px: the first rebuild comes after 300 px.
+    let mut frames = 0;
+    while renders(&f) == start {
+        DemoCanvas::pan_by(view, &mut f.h.app, Vec2::new(-10.0, 0.0));
+        f.h.run_until_idle(10);
+        frames += 1;
+        assert!(frames < 100);
+    }
+    assert_eq!(frames, 31);
+    // Going back and forth over that point does not rebuild again.
+    let rebuilt = renders(&f);
+    for _ in 0..10 {
+        for dx in [40.0, -40.0] {
+            DemoCanvas::pan_by(view, &mut f.h.app, Vec2::new(dx, 0.0));
+            f.h.run_until_idle(10);
+        }
+    }
+    assert_eq!(renders(&f), rebuilt);
+    // A long pan rebuilds now and then, not every frame.
+    for _ in 0..200 {
+        DemoCanvas::pan_by(view, &mut f.h.app, Vec2::new(-10.0, 0.0));
+        f.h.run_until_idle(10);
+    }
+    let long = renders(&f) - rebuilt;
+    assert!((5..=8).contains(&long), "{long} renders for 2000 px");
+
+    // A level of detail change renders at once.
+    let mut canvas = f.canvas();
+    canvas.zoom_at(Point::new(600.0, 400.0), 0.5);
+    let before = renders(&f);
+    DemoCanvas::set_canvas(view, &mut f.h.app, canvas);
+    f.h.run_until_idle(10);
+    assert_eq!(f.s().stats().lod, Lod::Compact);
+    assert_eq!(renders(&f), before + 1);
+    // So does zooming in far enough that most of what is built is unused.
+    canvas.zoom_at(Point::new(600.0, 400.0), 2.0);
+    DemoCanvas::set_canvas(view, &mut f.h.app, canvas);
+    f.h.run_until_idle(10);
+    let wide = f.s().stats().built_nodes;
+    canvas.zoom_at(Point::new(600.0, 400.0), 4.0);
+    DemoCanvas::set_canvas(view, &mut f.h.app, canvas);
+    f.h.run_until_idle(10);
+    assert!(f.s().stats().built_nodes < wide / 4);
+}
+
+#[test]
+fn an_animated_zoom_renders_only_when_the_detail_changes() {
+    let mut f = fixture_with(DemoGraph::grid(200, 300), Size::new(1200.0, 800.0));
+    let view = f.view;
+    DemoCanvas::zoom_about(view, &mut f.h.app, Point::new(600.0, 400.0), 1.3);
+    let mut renders = 0;
+    let mut frames = 0;
+    while let Some(frame) = f.h.step() {
+        renders += frame.stats.views_rendered;
+        assert!(!frame.stats.layout);
+        frames += 1;
+        assert!(frames < 200);
+    }
+    assert!(frames > 5, "{frames}");
+    assert_eq!(renders, 0);
+    assert!(!f.s().is_zooming());
+    assert_eq!(f.canvas().zoom, 1.3);
+}
+
+#[test]
+fn a_canvas_inside_scaled_and_moved_content_maps_the_pointer() {
+    let mut out = None;
+    let (mut h, _) = host_sized(Size::new(900.0, 600.0), |app, env| {
+        let graph = app.new_model(DemoGraph::sample());
+        let view = app.new_view(NodeCanvas::new(env, graph));
+        out = Some(view);
+        Box::new(move |_| {
+            div().w_full().h_full().child(
+                div()
+                    .w_full()
+                    .h_full()
+                    .translate(Vec2::new(50.0, 30.0))
+                    .child(Element::view(&view)),
+            )
+        })
+    });
+    let view = out.unwrap();
+    // The canvas point under the pointer stays: pointer positions are read
+    // through the canvas's own transforms.
+    let pointer = Point::new(350.0, 230.0);
+    let under = view
+        .read(&h.app)
+        .canvas()
+        .to_canvas(Point::new(300.0, 200.0));
+    pointer_scroll(&mut h, pointer);
+    h.run_until_idle(100);
+    let canvas = view.read(&h.app).canvas();
+    assert!(canvas.zoom > 1.0);
+    assert!((canvas.to_canvas(Point::new(300.0, 200.0)) - under).length() < 1e-2);
+}
+
+fn pointer_scroll(h: &mut TestHost, p: Point) {
+    pointer(
+        h,
+        PointerKind::Scroll(ScrollDelta::Lines(Vec2::new(0.0, 1.0))),
+        p,
+        Modifiers::NONE,
+    );
+}
+
+/// SplitMix64.
+struct Rng(u64);
+
+impl Rng {
+    fn below(&mut self, n: u64) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        (z ^ (z >> 31)) % n
+    }
+
+    fn between(&mut self, min: i32, max: i32) -> f32 {
+        let n = self.below(u64::try_from(max - min).unwrap());
+        f32::from(u16::try_from(n).unwrap()) + f32::from(i16::try_from(min).unwrap())
+    }
+}
+
+/// After random pans, zooms, node moves and selections, the canvas that was
+/// maintained incrementally (layers, virtualization) paints exactly what a
+/// new one paints.
+#[test]
+fn retained_equals_fresh() {
+    const SIZE: Size = Size::new(900.0, 600.0);
+    for seed in 0..4 {
+        let mut rng = Rng(seed);
+        let mut f = fixture_with(DemoGraph::grid(60, 80), SIZE);
+        // The fixture's pointer move must not leave a hover behind.
+        f.h.app.dispatch(InputEvent::PointerLeft);
+        f.h.run_until_idle(100);
+        let view = f.view;
+        let mut checked = 0;
+        for step in 0..120 {
+            match rng.below(8) {
+                0..=2 => {
+                    let by = Vec2::new(rng.between(-250, 250), rng.between(-200, 200));
+                    DemoCanvas::pan_by(view, &mut f.h.app, by);
+                }
+                3 | 4 => {
+                    let mut c = f.canvas();
+                    let at = Point::new(rng.between(0, 900), rng.between(0, 600));
+                    c.zoom_at(at, [0.6, 0.85, 0.97, 1.03, 1.2, 1.7][rng.below(6) as usize]);
+                    c.zoom = c.zoom.clamp(0.15, 2.5);
+                    DemoCanvas::set_canvas(view, &mut f.h.app, c);
+                }
+                5 => {
+                    let node = 1 + rng.below(60);
+                    let to = Point::new(rng.between(0, 1500), rng.between(0, 900));
+                    f.graph.update(&mut f.h.app, |g, cx| {
+                        g.set_position(node, to);
+                        cx.notify();
+                    });
+                }
+                6 => {
+                    let ids = [1 + rng.below(60), 1 + rng.below(60)];
+                    view.update(&mut f.h.app, |s, cx| {
+                        s.set_selection(ids[..rng.below(3) as usize].to_vec());
+                        cx.notify();
+                    });
+                }
+                _ => {
+                    DemoCanvas::fit(view, &mut f.h.app);
+                }
+            }
+            f.h.run_until_idle(200);
+            if step % 3 != 0 {
+                continue;
+            }
+            let graph = f.graph.read(&f.h.app).clone();
+            let (canvas, selection) = (f.canvas(), f.s().selection().clone());
+            let mut fresh = fixture_with(graph, SIZE);
+            fresh.h.app.dispatch(InputEvent::PointerLeft);
+            DemoCanvas::set_canvas(fresh.view, &mut fresh.h.app, canvas);
+            fresh.view.update(&mut fresh.h.app, |s, cx| {
+                s.set_selection(selection);
+                cx.notify();
+            });
+            fresh.h.run_until_idle(200);
+            f.h.app.request_frame();
+            fresh.h.app.request_frame();
+            f.h.step();
+            fresh.h.step();
+            let (a, b) = (scene(&f.h), scene(&fresh.h));
+            assert!(
+                a == b,
+                "seed {seed} step {step}: {}",
+                first_difference(&a, &b)
+            );
+            checked += 1;
+        }
+        assert!(checked >= 40);
+    }
+}
+
+fn first_difference(a: &str, b: &str) -> String {
+    let line = a.lines().zip(b.lines()).position(|(x, y)| x != y);
+    let at = line.unwrap_or_else(|| a.lines().count().min(b.lines().count()));
+    format!(
+        "line {at} of {}/{}:\n  retained {:?}\n  fresh    {:?}",
+        a.lines().count(),
+        b.lines().count(),
+        a.lines().nth(at),
+        b.lines().nth(at)
+    )
 }

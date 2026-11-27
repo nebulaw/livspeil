@@ -67,9 +67,45 @@ and hyphens.
 `Element::gradient_x(from, to, start, end)` fills an element with a
 left-to-right gradient (used by the tab fades).
 
-Popups (`Popover`, `Select`, `Tooltip`) anchor at `App::visual_bounds`, the
-element's position after its ancestors' transforms, so they open in the right
-place inside a scrolled view.
+## Layers: moving without rendering
+
+Positions that change every frame (pan, zoom, scroll) are compositor
+properties, not element attributes (`specs/livspeil-ui-frame-pipeline.md`,
+4.1). A view owns a `Layer` and attaches it to an element:
+
+```rust
+// In `render`:
+let layer = cx.layer("content");     // the same handle every render
+div().layer(layer).children(rows)    // content, in its own coordinates
+// At any time, without rendering the view:
+layer.set_transform(app, Transform2D::translate(-offset));
+```
+
+- `set_transform` (about the element's layout origin) and `set_opacity`
+  apply to the element and its subtree. `set_frame` replaces the box of a
+  childless element (a scrollbar thumb, the minimap's viewport frame).
+- Setting a property draws a frame; no view renders, nothing is diffed and
+  no layout runs. A handle whose view was released is inert.
+- `App::animate(owner, key, step)` runs `step(app, dt)` at the start of
+  each frame, before views render, until it returns `false`: springs,
+  momentum and zoom drive layers this way. Notify the view only when its
+  content must change.
+- `Element::cull_offscreen` skips children (and own wires) outside the
+  visible area, for large content under a clip. Children must not draw far
+  outside their own box.
+
+Positions are read from the same properties everywhere:
+
+| Need | Call |
+|---|---|
+| Where an element is on screen (popup anchors, IME, accessibility) | `App::visual_bounds` |
+| A pointer position in an element's own layout space | `EventCx::layout_position`, `App::to_layout` |
+| An element's box inside an ancestor (scroll into view) | `App::bounds_within` |
+| The untransformed layout box | `App::bounds` |
+
+**Layout boundaries.** An absolutely positioned box with a definite size
+lays out only its own subtree when something inside changes. One placed by
+`left` and `top` alone moves without any layout.
 
 ## Widgets
 
@@ -288,9 +324,16 @@ idle again.
 ### ScrollView and VirtualList
 
 `ScrollView::new(&env, |app, info| content)` is a view (vertical by
-default; `axis(Horizontal | Both)`); the content builder gets the offset and
-viewport size and is translated by the offset (no relayout while
-scrolling). Physics live in `Scroller` (pure, testable):
+default; `axis(Horizontal | Both)`). The content and the thumbs are layers:
+scrolling renders nothing and lays nothing out. A builder that mounts only
+part of its content asks for `info.region()` (the view and a margin of a
+quarter of it, at least `overscan` px, in content coordinates); only then
+does the view render again, and only when scrolling leaves that region (or
+the view's size changes). `info.viewport()` is the viewport size. The
+builder is not told the offset. The content element's layer belongs to the
+scroll view. `ScrollView::jump_to(view, app, offset)` and `scroll_to`
+(animated) scroll from code; both clamp to the measured content. Physics
+live in `Scroller` (pure, testable):
 
 - Trackpad pixel deltas move the content 1:1. Past an end they are resisted
   like UIKit's rubber band (`x → (1 − 1/(x·0.55/d + 1))·d`, `d` the viewport
@@ -312,9 +355,10 @@ scrolling). Physics live in `Scroller` (pure, testable):
   shows the element with an 8 px margin.
 
 `VirtualList::build(&env, count, row_height, |app, i| row)` is a
-`ScrollView` over a spacer of the full height that mounts only the rows in
-view plus 4 overscan rows each side (`visible_range`), keyed `row-<i>`: with
-100 000 rows a frame holds under 30 rows.
+`ScrollView` over a spacer of the full height that mounts only the rows of
+the built region (at least `OVERSCAN` = 4 rows past each end of the view),
+keyed `row-<i>`; rows outside the view are not painted. With 100 000 rows a
+400 px view holds about 30 rows.
 
 ### Panel, DockView
 
@@ -403,16 +447,23 @@ equal type names on different nodes), `type_color`, and edit requests
 - The canvas learns its size from layout (`ViewContext::layout_bounds`
   in the core: a view that reads it renders again when its bounds
   change), so culling and the minimap are right before any pointer event.
-- Virtualization: only nodes and wires intersecting the view plus 96 px
-  overscan are built, from a uniform-grid `CanvasIndex`; the Glass minimap
-  (bottom right, click or drag to move the view) is a child view rebuilt
-  only when the model revision or selection changes.
+- Pan and zoom: the wires and cards are one layer, and the minimap's
+  viewport frame another. `NodeCanvas::set_canvas`, `pan_by`, `zoom_about`
+  and `fit` render the canvas only if what is built no longer serves.
+- Virtualization: only nodes and wires intersecting the built region are
+  built, from a uniform-grid `CanvasIndex`. The region is the view plus a
+  quarter of it on each side (at least 96 px). It is built again when the
+  view leaves it, the level of detail or the view size changes, zooming in
+  leaves it more than twice as wide as needed, or the content changes.
+  Cards outside the view are not painted.
+- The Glass minimap (bottom right, click or drag to move the view) draws its
+  nodes in a child view rebuilt only when the model revision or selection
+  changes.
 
-Benchmark (`cargo bench -p livspeil-ui-widgets --bench node_canvas`, 2000
-nodes, 3000 links, 1600×1000, one frame after a pan: render, diff, layout,
-core paint list; 2-core Linux VM, release): zoom 1 (64 nodes, 108 wires
-built) 4.7 ms; zoom 0.4 (324 compact nodes, 533 wires) 9.1 ms; fit all
-(2000 blocks, 3000 wires) 9.5 ms; building the geometry cache 1.2 ms.
+Benchmark (`cargo bench -p livspeil-ui-gallery --bench frame_phases`, 2000
+nodes, 3000 links, 1600×1000, `build` of one frame after a small pan,
+release, i5-12500T): zoom 1 0.75 ms (2.3 ms before layers); zoom 0.4 1.2 ms
+(6.5 ms); fit all 1.2 ms (8.0 ms).
 
 ### Wires (core paint primitive)
 
@@ -438,12 +489,10 @@ The renderer draws a curve as one instance (64 bytes):
 
 ## Known gaps
 
-- `Menu`, `MenuBar` and `ContextMenu` still anchor at layout bounds, so a
-  menu bar inside a scrolled view opens its menus at the unscrolled position;
-  text field IME placement has the same limit.
 - Clips are rectangular: square children paint over rounded corners.
-- `ScrollView` clamps its offset again only at the next scroll after the
-  window grows.
+- `ScrollView` measures its content at scrolls: after content grows or
+  shrinks, thumbs and clamping follow at the next one.
+- Open popups and shown tooltips do not follow their anchor if it scrolls.
 - `DockView` does not shrink panels below their minimums in a narrow
   container.
 - Builders capture state when rendered; several key presses between two
@@ -461,7 +510,7 @@ The renderer draws a curve as one instance (64 bytes):
   phases from hosts yet); Alt alone does not focus the menu bar (no
   modifier-only key events), use F10.
 - NodeCanvas: no link removal by dragging off an input, no deleting nodes,
-  no keyboard navigation between nodes; a pan frame rebuilds the visible
-  cards (the benchmark above is the budget to beat).
+  no keyboard navigation between nodes; dragging a node still renders the
+  canvas and rebuilds its geometry cache (frame pipeline stage P4).
 - Overlapping wire segments double up under partial opacity (wires are
   drawn opaque).

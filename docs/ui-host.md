@@ -389,7 +389,8 @@ measurements that need a real window but no hands:
 
 ```sh
 cargo run --release -p livspeil-ui-gallery -- --scenario=pan-stress --seconds=7
-# pan-sample | pan-stress | pan-stress-fit | zoom-stress | drag-stress | scroll-list
+# pan-sample | pan-stress | pan-stress-fit | zoom-stress | drag-stress
+# | scroll-list | hover-buttons
 ```
 
 A scenario window is a fixed 1600x1000 (tiling compositors then leave it

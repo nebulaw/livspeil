@@ -32,14 +32,15 @@ fn setup(zoom: Option<f32>) -> (App, View<NodeCanvas<DemoGraph>>) {
     app.set_root(root);
     app.draw_frame(1.0 / 60.0);
     match zoom {
-        Some(z) => canvas.update(&mut app, |s, cx| {
-            s.set_canvas(Canvas {
+        Some(z) => NodeCanvas::set_canvas(
+            canvas,
+            &mut app,
+            Canvas {
                 zoom: z,
                 pan: Vec2::new(-200.0, -100.0),
                 ..Canvas::default()
-            });
-            cx.notify();
-        }),
+            },
+        ),
         None => NodeCanvas::fit(canvas, &mut app),
     }
     app.draw_frame(1.0 / 60.0);

@@ -83,7 +83,9 @@ pub fn text_focus(app: &App) -> Option<TextFocus> {
                 || find_where(app, field, |l| l.starts_with("selection-")).is_some() => {}
         _ => return None,
     }
-    let area = caret.and_then(|c| app.bounds(c)).unwrap_or(node.bounds);
+    let area = caret
+        .and_then(|c| app.visual_bounds(c))
+        .unwrap_or(node.bounds);
     Some(TextFocus { field, caret, area })
 }
 

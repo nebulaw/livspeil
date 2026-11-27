@@ -5,18 +5,19 @@
 //! momentum and rubber-band overscroll), its physics ([`Scroller`],
 //! [`ScrollPhysics`]) and [`VirtualList`] for long uniform lists.
 
+use std::cell::Cell;
 use std::fmt;
 use std::ops::Range;
 use std::rc::Rc;
 use std::time::Duration;
 
 use livspeil_ui_core::{
-    App, DragPhase, Element, ElementId, EventCx, PointerKind, Render, Role as CoreRole,
-    SCROLL_INTO_VIEW, ScrollDelta, SharedString, VelocityTracker, View, ViewContext, div,
-    spring_step,
+    Animated, App, DragPhase, Element, ElementId, EventCx, Layer, PointerKind, Render,
+    Role as CoreRole, SCROLL_INTO_VIEW, ScrollDelta, SharedString, VelocityTracker, View,
+    ViewContext, div, spring_step,
 };
 use livspeil_ui_layout::style::{Dimension, LengthPercentageAuto, Position};
-use livspeil_ui_layout::{Rect, Size, Vec2};
+use livspeil_ui_layout::{Rect, Size, Transform2D, Vec2};
 use livspeil_ui_theme::{MotionClass, MotionConfig, MotionSpec, PropertyKind, Theme};
 
 use crate::env::Env;
@@ -475,17 +476,51 @@ impl Scroller {
 }
 
 /// What a scroll view's content builder gets.
-#[derive(Clone, Copy, Debug, PartialEq)]
+///
+/// Scrolling moves the content without rendering the scroll view. A builder
+/// that mounts only part of its content asks for [`ScrollInfo::region`];
+/// the view then renders again when scrolling leaves that region.
+#[derive(Debug)]
 pub struct ScrollInfo {
-    /// Current offset.
-    pub offset: Vec2,
-    /// Viewport size (zero until measured after the first event; builders
-    /// fall back to the window size).
-    pub viewport: Size,
+    viewport: Size,
+    region: Rect,
+    virtualized: Cell<bool>,
+}
+
+impl ScrollInfo {
+    /// Viewport size (zero until the view was laid out).
+    #[must_use]
+    pub fn viewport(&self) -> Size {
+        self.viewport
+    }
+
+    /// The part of the content to build, in content coordinates: the view
+    /// and a margin around it. Asking for it makes the content depend on
+    /// the scroll position.
+    #[must_use]
+    pub fn region(&self) -> Rect {
+        self.virtualized.set(true);
+        self.region
+    }
 }
 
 /// Builds a scroll view's content.
-pub type ScrollContent = Rc<dyn Fn(&App, ScrollInfo) -> Element>;
+pub type ScrollContent = Rc<dyn Fn(&App, &ScrollInfo) -> Element>;
+
+/// The built region reaches past the view on each side by this fraction of
+/// the view, and at least by the view's [`ScrollView::overscan`].
+const MARGIN: f32 = 0.25;
+/// Default least margin of the built region.
+const MIN_MARGIN: f32 = 96.0;
+/// Key of the scroll view's frame task.
+const SCROLL_TASK: &str = "scroll";
+
+/// What virtualized content was built for.
+#[derive(Clone, Copy, Debug)]
+struct Built {
+    area: Rect,
+    viewport: Size,
+}
 
 /// Scrollbar thickness (thumb, at rest).
 const BAR: f32 = 6.0;
@@ -512,6 +547,9 @@ const REVEAL_MARGIN: f32 = 8.0;
 ///   Page Up/Down by a page, Home/End to the ends.
 /// - Handles [`SCROLL_INTO_VIEW`] from descendants (assistive technology,
 ///   and Tab focus moves via [`crate::WidgetRoot`]).
+/// - Layers: the content moves, and the thumbs move, resize and fade,
+///   without rendering the view; it renders only when virtualized content
+///   ([`ScrollInfo::region`]) must change.
 pub struct ScrollView {
     axis: ScrollAxis,
     scroller: Scroller,
@@ -524,6 +562,11 @@ pub struct ScrollView {
     focusable: bool,
     /// Seconds since the last scroll or hover.
     bar_idle: f32,
+    /// Fade of the scrollbars.
+    bar_alpha: Animated<f32>,
+    overscan: f32,
+    /// `Some` while the content depends on the scroll position.
+    built: Option<Built>,
     thumb_grab: Option<Vec2>,
 }
 
@@ -540,7 +583,7 @@ impl ScrollView {
     /// A vertical scroll view filling its parent, over `content`. (`env`
     /// keeps the constructor uniform with the other stateful widgets.)
     #[must_use]
-    pub fn new(_env: &Env, content: impl Fn(&App, ScrollInfo) -> Element + 'static) -> Self {
+    pub fn new(_env: &Env, content: impl Fn(&App, &ScrollInfo) -> Element + 'static) -> Self {
         ScrollView {
             axis: ScrollAxis::Vertical,
             scroller: Scroller::new(ScrollAxis::Vertical),
@@ -552,6 +595,9 @@ impl ScrollView {
             height: None,
             focusable: true,
             bar_idle: f32::INFINITY,
+            bar_alpha: Animated::new(0.0),
+            overscan: MIN_MARGIN,
+            built: None,
             thumb_grab: None,
         }
     }
@@ -594,6 +640,14 @@ impl ScrollView {
         self
     }
 
+    /// The least distance past each end of the view that virtualized
+    /// content is built for (default 96 px).
+    #[must_use]
+    pub fn overscan(mut self, px: f32) -> Self {
+        self.overscan = px.max(0.0);
+        self
+    }
+
     /// Whether the view itself takes focus for keyboard scrolling (default
     /// true).
     #[must_use]
@@ -603,7 +657,7 @@ impl ScrollView {
     }
 
     /// Replace the content builder.
-    pub fn set_content(&mut self, content: impl Fn(&App, ScrollInfo) -> Element + 'static) {
+    pub fn set_content(&mut self, content: impl Fn(&App, &ScrollInfo) -> Element + 'static) {
         self.content = Rc::new(content);
     }
 
@@ -613,9 +667,20 @@ impl ScrollView {
         &self.scroller
     }
 
-    /// The physics state, mutably (call `notify` on the view after).
-    pub fn scroller_mut(&mut self) -> &mut Scroller {
-        &mut self.scroller
+    /// Jump to `offset` (clamped), stopping any motion. Renders the view
+    /// only if virtualized content must change.
+    pub fn jump_to(view: View<Self>, app: &mut App, offset: Vec2) {
+        measure_view(view, app);
+        view.update(app, |s, cx| {
+            s.scroller.jump_to(offset);
+            s.sync(cx);
+        });
+    }
+
+    /// Spring to `offset` (clamped); instant under Reduce Motion.
+    pub fn scroll_to(view: View<Self>, app: &mut App, offset: Vec2) {
+        measure_view(view, app);
+        poke(view, app, |s, _| s.scroller.scroll_to(offset));
     }
 
     /// Current offset.
@@ -655,8 +720,7 @@ impl ScrollView {
     }
 }
 
-/// Measure viewport and content from the retained tree (event handlers
-/// on the scroll element).
+/// Measure viewport and content from the retained tree.
 fn measure(view: View<ScrollView>, cx: &mut App, sv: ElementId) {
     let Some(vp) = cx.bounds(sv) else { return };
     let content = cx.bounds(sv.child("content")).unwrap_or(vp);
@@ -668,14 +732,32 @@ fn measure(view: View<ScrollView>, cx: &mut App, sv: ElementId) {
     });
 }
 
+/// [`measure`] for callers that only have the view.
+fn measure_view(view: View<ScrollView>, app: &mut App) {
+    if let Some(sv) = app.view_element(view.id()) {
+        measure(view, app, sv);
+    }
+}
+
+/// Run the view's frame task until the content and bars are at rest.
+fn run(view: View<ScrollView>, app: &mut App) {
+    if !app.is_animating(view.id(), SCROLL_TASK) {
+        app.animate(view.id(), SCROLL_TASK, move |app, dt| {
+            view.update(app, |s, cx| s.step(dt, cx))
+        });
+    }
+}
+
+/// A scroll or hover: change the scroller, show the bars and keep going.
 fn poke(view: View<ScrollView>, cx: &mut App, f: impl FnOnce(&mut ScrollView, &ScrollPhysics)) {
     let motion = cx.motion().clone();
     view.update(cx, |s, vcx| {
         let p = s.physics_for(&motion);
         f(s, &p);
         s.bar_idle = 0.0;
-        vcx.notify();
+        s.sync(vcx);
     });
+    run(view, cx);
 }
 
 /// A scroll event on the scroll element.
@@ -711,27 +793,20 @@ fn reveal(view: View<ScrollView>, cx: &mut EventCx<'_>) {
         return;
     }
     measure(view, cx, sv);
-    let (Some(t), Some(content)) = (
-        App::bounds(cx, target),
-        App::bounds(cx, sv.child("content")),
-    ) else {
+    let content = sv.child("content");
+    let (Some(t), Some(origin)) = (cx.bounds_within(target, content), App::bounds(cx, content))
+    else {
         return;
     };
-    let rel = Rect::new(t.x - content.x, t.y - content.y, t.width, t.height);
+    let rel = Rect::new(t.x - origin.x, t.y - origin.y, t.width, t.height);
     poke(view, cx, |s, _| {
         let to = s.scroller.reveal(rel, REVEAL_MARGIN);
         s.scroller.scroll_to(to);
     });
 }
 
-fn thumb(
-    view: View<ScrollView>,
-    vertical: bool,
-    vp: Size,
-    content: Size,
-    offset: Vec2,
-    theme: &Theme,
-) -> Option<Element> {
+/// Where a thumb is, if the content is longer than the view.
+fn thumb_rect(vertical: bool, vp: Size, content: Size, offset: Vec2) -> Option<Rect> {
     let (len, total, off) = if vertical {
         (vp.height, content.height, offset.y)
     } else {
@@ -750,62 +825,144 @@ fn thumb(
     };
     let size = (track * len / total - over).max(MIN_THUMB).min(track);
     let pos = BAR_INSET + (off.clamp(0.0, max) / max) * (track - size);
-    let rect = if vertical {
+    Some(if vertical {
         Rect::new(vp.width - BAR - BAR_INSET, pos, BAR, size)
     } else {
         Rect::new(pos, vp.height - BAR - BAR_INSET, size, BAR)
-    };
-    let color = theme.colors().text_secondary.with_alpha(0.45);
-    let ratio = total / track.max(1.0);
-    Some(
-        div()
-            .key(if vertical { "vbar" } else { "hbar" })
-            .absolute(rect)
-            .rounded(BAR / 2.0)
-            .bg(color)
-            .hover(|r| r.bg(color.with_alpha(0.7)))
-            .transition(MotionClass::Micro)
-            .on_pointer_move(move |_, cx| {
-                view.update(cx, |s, _| s.bar_idle = 0.0);
-            })
-            .on_drag(move |ev, cx| {
-                view.update(cx, |s, vcx| {
-                    match ev.phase {
-                        DragPhase::Start => {
-                            s.thumb_grab = Some(s.scroller.clamp(s.scroller.offset))
-                        }
-                        DragPhase::Move | DragPhase::End => {}
-                    }
-                    if let Some(start) = s.thumb_grab {
-                        let d = ev.total() * ratio;
-                        let d = if vertical {
-                            Vec2::new(0.0, d.y)
-                        } else {
-                            Vec2::new(d.x, 0.0)
-                        };
-                        s.scroller.jump_to(start + d);
-                    }
-                    if ev.phase == DragPhase::End {
-                        s.thumb_grab = None;
-                    }
-                    s.bar_idle = 0.0;
-                    vcx.notify();
-                });
-            }),
-    )
+    })
 }
 
-impl Render for ScrollView {
-    fn render(&mut self, cx: &mut ViewContext<'_, Self>) -> Element {
-        let view = cx.view();
-        let theme = cx.theme().clone();
-        let p = self.physics_for(cx.motion());
-        let spring = cx.motion().resolve(
+/// Content pixels per pixel a thumb is dragged.
+fn drag_ratio(vertical: bool, vp: Size, content: Size) -> f32 {
+    let (len, total) = if vertical {
+        (vp.height, content.height)
+    } else {
+        (vp.width, content.width)
+    };
+    total / (len - 2.0 * BAR_INSET).max(1.0)
+}
+
+fn bar_layer_key(vertical: bool) -> &'static str {
+    if vertical { "vbar" } else { "hbar" }
+}
+
+/// A thumb element; its box and fade are its layer's.
+fn thumb(view: View<ScrollView>, vertical: bool, theme: &Theme, layer: Layer) -> Element {
+    let color = theme.colors().text_secondary.with_alpha(0.45);
+    div()
+        .key(bar_layer_key(vertical))
+        .absolute(Rect::ZERO)
+        .layer(layer)
+        .rounded(BAR / 2.0)
+        .bg(color)
+        .hover(|r| r.bg(color.with_alpha(0.7)))
+        .transition(MotionClass::Micro)
+        .on_pointer_move(move |_, cx| {
+            view.update(cx, |s, _| s.bar_idle = 0.0);
+            run(view, cx);
+        })
+        .on_drag(move |ev, cx| {
+            poke(view, cx, |s, _| {
+                if ev.phase == DragPhase::Start {
+                    s.thumb_grab = Some(s.scroller.clamp(s.scroller.offset));
+                }
+                if let Some(start) = s.thumb_grab {
+                    let (vp, content) = s.scroller.sizes();
+                    let d = ev.total() * drag_ratio(vertical, vp, content);
+                    let d = if vertical {
+                        Vec2::new(0.0, d.y)
+                    } else {
+                        Vec2::new(d.x, 0.0)
+                    };
+                    s.scroller.jump_to(start + d);
+                }
+                if ev.phase == DragPhase::End {
+                    s.thumb_grab = None;
+                }
+            });
+        })
+}
+
+impl ScrollView {
+    fn axes(&self) -> impl Iterator<Item = bool> {
+        let axis = self.axis;
+        [true, false]
+            .into_iter()
+            .filter(move |&vertical| match axis {
+                ScrollAxis::Vertical => vertical,
+                ScrollAxis::Horizontal => !vertical,
+                ScrollAxis::Both => true,
+            })
+    }
+
+    /// The region to build for a view of `viewport` at the current offset.
+    fn region_around(&self, viewport: Size) -> Rect {
+        let o = self.scroller.clamp(self.scroller.offset);
+        let m = self.axis.mask();
+        let margin = |len: f32, on: f32| (len * MARGIN).max(self.overscan) * on;
+        let (x, y) = (margin(viewport.width, m.x), margin(viewport.height, m.y));
+        Rect::new(
+            o.x - x,
+            o.y - y,
+            viewport.width + 2.0 * x,
+            viewport.height + 2.0 * y,
+        )
+    }
+
+    /// Whether what is built still covers the view.
+    fn covers(&self, built: Built, viewport: Size) -> bool {
+        // Past the ends there is nothing to build.
+        let o = self.scroller.clamp(self.scroller.offset);
+        let a = built.area;
+        built.viewport == viewport
+            && a.x <= o.x
+            && a.y <= o.y
+            && a.right() >= o.x + viewport.width
+            && a.bottom() >= o.y + viewport.height
+    }
+
+    /// The viewport size, or the window's before the first layout.
+    fn viewport_or_window(&self, app: &App) -> Size {
+        let vp = self.scroller.viewport;
+        if vp.height > 0.0 { vp } else { app.viewport() }
+    }
+
+    /// Set the layers from the scroller, and render only if virtualized
+    /// content no longer covers the view.
+    fn sync(&mut self, cx: &mut ViewContext<'_, Self>) {
+        let offset = self.scroller.offset;
+        let content_layer = cx.layer("content");
+        content_layer.set_transform(cx, Transform2D::translate(-offset));
+        let (vp, content) = self.scroller.sizes();
+        for vertical in self.axes() {
+            let rect = thumb_rect(vertical, vp, content, offset);
+            let layer = cx.layer(bar_layer_key(vertical));
+            layer.set_frame(cx, rect);
+            let alpha = if rect.is_some() {
+                self.bar_alpha.value()
+            } else {
+                0.0
+            };
+            layer.set_opacity(cx, alpha);
+        }
+        if let Some(built) = self.built
+            && !self.covers(built, self.viewport_or_window(cx))
+        {
+            cx.notify();
+        }
+    }
+
+    /// One frame of momentum, springs and the scrollbar fade. Returns
+    /// whether there is more to do.
+    fn step(&mut self, dt: f32, cx: &mut ViewContext<'_, Self>) -> bool {
+        let motion = cx.motion();
+        let p = self.physics_for(motion);
+        let spring = motion.resolve(
             Some(SCROLL_SCOPE),
             MotionClass::Standard,
             PropertyKind::Movement,
         );
-        let dt = cx.frame_delta();
+        let fade = motion.resolve(None, MotionClass::Standard, PropertyKind::Appearance);
         let moving = self.scroller.tick(dt, &p, spring);
         if moving || self.thumb_grab.is_some() {
             self.bar_idle = 0.0;
@@ -813,26 +970,49 @@ impl Render for ScrollView {
             self.bar_idle += dt;
         }
         let bars = self.bar_idle < p.bar_linger;
-        if moving || (bars && self.bar_idle.is_finite()) {
-            cx.notify();
-        } else if !bars {
+        let alpha = if bars { 1.0 } else { 0.0 };
+        if self.bar_alpha.target() != alpha {
+            self.bar_alpha.animate_to(alpha, fade);
+        }
+        let fading = self.bar_alpha.step(dt);
+        self.sync(cx);
+        if !bars {
             self.bar_idle = f32::INFINITY;
         }
+        moving || fading || bars
+    }
+}
+
+impl Render for ScrollView {
+    fn render(&mut self, cx: &mut ViewContext<'_, Self>) -> Element {
+        let view = cx.view();
+        let theme = cx.theme().clone();
+        let p = self.physics_for(cx.motion());
 
         let name = self
             .name
             .as_deref()
             .map_or_else(|| style::entity_name("scroll", view.id()), str::to_owned);
-        let (vp, content_size) = self.scroller.sizes();
-        let offset = self.scroller.offset;
+        // The viewport from the last layout (rendered again when it
+        // changes), so virtualized content is right before any event.
+        if let Some(b) = cx.layout_bounds().filter(|b| b.height > 0.0) {
+            let content = self.scroller.content;
+            self.scroller.set_sizes(b.size(), content);
+        }
+        let vp = self.viewport_or_window(cx);
+        let area = match self.built {
+            Some(b) if self.covers(b, vp) => b.area,
+            _ => self.region_around(vp),
+        };
         let info = ScrollInfo {
-            offset,
-            viewport: vp,
+            viewport: self.scroller.viewport,
+            region: area,
+            virtualized: Cell::new(false),
         };
         let axis = self.axis;
-        let content = (self.content)(cx, info)
+        let content = (self.content)(cx, &info)
             .key("content")
-            .translate(-offset)
+            .layer(cx.layer("content"))
             .style(move |s| {
                 s.position = Position::Absolute;
                 s.inset.left = LengthPercentageAuto::length(0.0);
@@ -846,6 +1026,11 @@ impl Render for ScrollView {
                     }
                 }
             });
+        self.built = info
+            .virtualized
+            .get()
+            .then_some(Built { area, viewport: vp });
+        self.sync(cx);
 
         let mut el = div()
             .name(name)
@@ -863,19 +1048,9 @@ impl Render for ScrollView {
         if self.focusable {
             el = el.focusable();
         }
-        let bar_opacity = if bars { 1.0 } else { 0.0 };
-        for vertical in [true, false] {
-            let on = match axis {
-                ScrollAxis::Vertical => vertical,
-                ScrollAxis::Horizontal => !vertical,
-                ScrollAxis::Both => true,
-            };
-            if !on {
-                continue;
-            }
-            if let Some(t) = thumb(view, vertical, vp, content_size, offset, &theme) {
-                el = el.child(t.opacity(bar_opacity).transition(MotionClass::Standard));
-            }
+        for vertical in self.axes() {
+            let layer = cx.layer(bar_layer_key(vertical));
+            el = el.child(thumb(view, vertical, &theme, layer));
         }
         el = self.semantics().apply(el);
         let el = el
@@ -885,10 +1060,7 @@ impl Render for ScrollView {
                 let hidden = !view.read(cx).bars_visible() || view.read(cx).bar_idle > 0.2;
                 if hidden {
                     measure(view, cx, sv);
-                    view.update(cx, |s, vcx| {
-                        s.bar_idle = 0.0;
-                        vcx.notify();
-                    });
+                    poke(view, cx, |_, _| {});
                 }
             })
             .on_action(SCROLL_INTO_VIEW, move |cx| reveal(view, cx));
@@ -951,17 +1123,18 @@ pub fn visible_range(
 }
 
 /// A virtualized list of `count` rows of one height: a [`ScrollView`] whose
-/// content is a spacer of the full height with only the visible rows (plus
-/// overscan) as children, keyed by index (`row-<i>`).
+/// content is a spacer of the full height with only the rows of the built
+/// region (the view and a margin of at least [`OVERSCAN`] rows) as
+/// children, keyed by index (`row-<i>`).
 #[derive(Debug, Clone, Copy)]
 pub struct VirtualList;
 
-/// Rows rendered beyond each edge of the viewport.
+/// Rows built at least beyond each edge of the viewport.
 pub const OVERSCAN: usize = 4;
 
 impl VirtualList {
     /// A scroll view over `count` rows built by `row` (called only for
-    /// visible rows; the row is placed and sized by the list).
+    /// rows near the view; the row is placed and sized by the list).
     #[must_use]
     pub fn build(
         env: &Env,
@@ -971,14 +1144,14 @@ impl VirtualList {
     ) -> ScrollView {
         #[allow(clippy::cast_precision_loss)]
         let total = count as f32 * row_height;
+        #[allow(clippy::cast_precision_loss)]
+        let overscan = OVERSCAN as f32 * row_height;
         ScrollView::new(env, move |app, info| {
-            let vh = if info.viewport.height > 0.0 {
-                info.viewport.height
-            } else {
-                app.viewport().height
-            };
-            let range = visible_range(info.offset.y, vh, row_height, count, OVERSCAN);
-            let mut spacer = div().name("virtual-list").h(total);
+            let region = info.region();
+            // The region already reaches past the view.
+            let top = region.y.max(0.0);
+            let range = visible_range(top, region.bottom() - top, row_height, count, 0);
+            let mut spacer = div().name("virtual-list").h(total).cull_offscreen();
             for i in range {
                 #[allow(clippy::cast_precision_loss)]
                 let y = i as f32 * row_height;
@@ -997,5 +1170,6 @@ impl VirtualList {
             }
             spacer.semantics(|s| s.role(CoreRole::List))
         })
+        .overscan(overscan)
     }
 }

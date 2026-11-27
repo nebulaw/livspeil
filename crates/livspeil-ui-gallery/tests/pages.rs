@@ -519,8 +519,9 @@ fn node_canvas_switches_to_the_stress_graph() {
     h.run_until_idle(600);
     assert_eq!(*graph.read(&h.app), 1);
     assert!(h.app.find("node:Node 0").is_some());
-    let built = stress.read(&h.app).stats().visible_nodes;
-    assert!(built > 20 && built < 200, "{built} cards built");
+    let built = stress.read(&h.app).stats().built_nodes;
+    // The view and a margin around it, not all 500.
+    assert!(built > 20 && built < 300, "{built} cards built");
     assert!(!h.app.needs_frame());
     check_tree(&h.app, Page::NodeCanvas);
 }
