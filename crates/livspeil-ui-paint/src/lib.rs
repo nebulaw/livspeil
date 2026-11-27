@@ -23,6 +23,8 @@
 //!   with tint, saturation, highlight or top rim, shadows and grain, plus a
 //!   hairline quad; without blur (Solid, T0, reduce transparency) it is a
 //!   plain quad with the opaque tint; Ink draws no surface.
+//! - **Wires**: one [`Curve`](livspeil_ui_render::Curve) each, with the
+//!   current transform, clip and opacity.
 //! - **Stacks**: transforms compose, opacity multiplies, clips intersect
 //!   (as screen-space rectangles: rounded clips clip to their bounds).
 //! - **Text**: shaped with `livspeil-ui-text` and cached by text, style
