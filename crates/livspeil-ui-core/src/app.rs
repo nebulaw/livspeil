@@ -128,6 +128,9 @@ pub struct App {
     deps: HashMap<EntityId, Vec<EntityId>>,
     observers: HashMap<EntityId, BTreeSet<EntityId>>,
     subscriptions: HashMap<EntityId, Vec<(u64, Callback)>>,
+    /// Entities released with their owner, by owner, and each one's owner.
+    children: HashMap<EntityId, BTreeSet<EntityId>>,
+    owner_of: HashMap<EntityId, EntityId>,
     /// Subscriptions cancelled when the view that made them is released.
     owned: HashMap<EntityId, Vec<Subscription>>,
     next_sub: u64,
@@ -202,6 +205,8 @@ impl App {
             observers: HashMap::new(),
             subscriptions: HashMap::new(),
             owned: HashMap::new(),
+            children: HashMap::new(),
+            owner_of: HashMap::new(),
             next_sub: 1,
             tracking: RefCell::new(None),
             pending: Vec::new(),
@@ -263,8 +268,41 @@ impl App {
         view
     }
 
-    /// Drop an entity. Handles to it become invalid.
+    /// Release `child` when `owner` is released. For the views and models an
+    /// entity creates for itself. An entity has one owner: a second call
+    /// moves it. If `owner` is already gone, `child` is released now.
+    pub fn own(&mut self, owner: EntityId, child: EntityId) {
+        if owner == child {
+            return;
+        }
+        if !self.exists(owner) {
+            self.release(child);
+            return;
+        }
+        self.disown(child);
+        self.children.entry(owner).or_default().insert(child);
+        self.owner_of.insert(child, owner);
+    }
+
+    fn disown(&mut self, child: EntityId) {
+        if let Some(owner) = self.owner_of.remove(&child)
+            && let Some(set) = self.children.get_mut(&owner)
+        {
+            set.remove(&child);
+            if set.is_empty() {
+                self.children.remove(&owner);
+            }
+        }
+    }
+
+    /// Drop an entity and everything it [owns](App::own). Handles to them
+    /// become invalid.
     pub fn release(&mut self, id: EntityId) {
+        self.disown(id);
+        for child in self.children.remove(&id).unwrap_or_default() {
+            self.owner_of.remove(&child);
+            self.release(child);
+        }
         self.entities.remove(&id);
         self.views.remove(&id);
         self.dirty_views.remove(&id);

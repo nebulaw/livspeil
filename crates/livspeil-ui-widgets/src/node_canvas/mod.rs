@@ -662,6 +662,7 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
                 None => {
                     let props = card::CardProps::new(cache, node, state);
                     let card = cx.new_view(NodeCard::new(&self.env, view, self.model, props));
+                    cx.own(card.id());
                     self.cards.insert(node.id, card);
                     card
                 }
@@ -678,7 +679,7 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
             .collect();
         for id in gone {
             if let Some(card) = self.cards.remove(&id) {
-                NodeCard::release(card, cx);
+                cx.release(card.id());
             }
         }
         elements
@@ -984,6 +985,7 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
             Some(w) => w,
             None => {
                 let w = cx.new_view(WireLayer::default());
+                cx.own(w.id());
                 self.wires = Some(w);
                 w
             }
@@ -1067,6 +1069,7 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
                 Some(m) => m,
                 None => {
                     let m = cx.new_view(MinimapNodes::new(Color::WHITE, Color::WHITE));
+                    cx.own(m.id());
                     self.minimap = Some(m);
                     self.minimap_stale = true;
                     m

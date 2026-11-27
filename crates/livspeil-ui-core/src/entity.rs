@@ -272,6 +272,12 @@ impl<V: Render> ViewContext<'_, V> {
         View::from_id(self.id)
     }
 
+    /// Release `child`, a view or model made for this view, together with
+    /// this view (see [`App::own`]).
+    pub fn own(&mut self, child: EntityId) {
+        self.app.own(self.id, child);
+    }
+
     /// Run `f` whenever `entity` is notified, until this view is released.
     ///
     /// `f` may run while this view renders, if the render itself notified

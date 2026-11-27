@@ -944,3 +944,43 @@ fn a_changed_parameter_range_replaces_its_field() {
         param(2.25, 8.0, 0.25)
     );
 }
+
+#[test]
+fn releasing_a_canvas_releases_everything_it_created() {
+    let mut out = None;
+    let (mut h, _) = host_sized(Size::new(900.0, 600.0), |app, env| {
+        let graph = app.new_model(DemoGraph::sample());
+        let shown: Model<Option<View<DemoCanvas>>> = app.new_model(None);
+        out = Some((graph, shown, env.clone()));
+        Box::new(move |cx| {
+            let el = div().w_full().h_full();
+            match *shown.read(cx) {
+                Some(view) => el.child(Element::view(&view)),
+                None => el,
+            }
+        })
+    });
+    let (graph, shown, env) = out.unwrap();
+    h.run_until_idle(100);
+    let count = |app: &livspeil_ui_core::App| {
+        let debug = format!("{app:?}");
+        debug.split(", ").next().unwrap_or_default().to_owned()
+    };
+    let empty = count(&h.app);
+    for _ in 0..3 {
+        let view = h.app.new_view(NodeCanvas::new(&env, graph));
+        shown.update(&mut h.app, |s, cx| {
+            *s = Some(view);
+            cx.notify();
+        });
+        h.run_until_idle(100);
+        assert!(h.app.find("node:Mix").is_some());
+        shown.update(&mut h.app, |s, cx| {
+            *s = None;
+            cx.notify();
+        });
+        h.app.release(view.id());
+        h.run_until_idle(100);
+        assert_eq!(count(&h.app), empty);
+    }
+}

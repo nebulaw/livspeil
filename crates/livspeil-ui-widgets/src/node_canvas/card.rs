@@ -202,15 +202,6 @@ impl<M: NodeGraphModel> NodeCard<M> {
             .set_transform(app, Transform2D::translate(to));
     }
 
-    /// Release the card and everything it created.
-    pub(super) fn release(view: View<Self>, app: &mut App) {
-        let fields = view.update(app, |s, _| std::mem::take(&mut s.fields));
-        for field in fields.into_values() {
-            release_field(app, field);
-        }
-        app.release(view.id());
-    }
-
     /// The field editing number parameter `index`, created on first use.
     fn field(
         &mut self,
@@ -231,6 +222,8 @@ impl<M: NodeGraphModel> NodeCard<M> {
                 .accessible_label(name.clone())
                 .name(format!("param:{node}:{index}")),
         );
+        cx.own(model.id());
+        cx.own(field.id());
         let graph = self.graph;
         // Cancelled when the card is released.
         cx.watch(model.id(), move |app| {

@@ -471,6 +471,8 @@ it. Without it every change reads the whole graph again.
   renders the wires; neither the canvas nor any card renders. An edited
   parameter renders that card. A card outside the built region is released
   with its fields.
+- The canvas owns the views it creates (`ViewContext::own`): releasing it
+  releases the cards, their fields, the wires and the minimap.
 - A card's layout box is at the origin: where it is on screen is
   `App::visual_bounds`, not `App::bounds`.
 
