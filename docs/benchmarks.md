@@ -423,3 +423,72 @@ Stress, zoom and pan for 20 s, press F4 and send
 `LIVSPEIL_PRESENT_MODE=mailbox` and `LIVSPEIL_FRAME_LATENCY=2`. The log
 holds the graphics report, the run summary and a CSV line per frame
 (`interval_us`, every phase, items, instances, upload bytes).
+
+## Compact instances and curves (frame pipeline P1)
+
+Stage P1 of `specs/livspeil-ui-frame-pipeline.md`: one record format per
+primitive family (section 4.5) instead of one 320-byte instance, and a wire
+as one curve instead of many rotated quads. Measured 2026-11-27, before
+(commit `4793319`) and after back to back, release profile.
+
+Machine: 12 threads, RTX 5070 Ti, driver 620.73.04, Linux, Vulkan. Nothing
+here used a window: no swapchain, no present, no vsync.
+
+### Gallery scenarios, offscreen
+
+The scenarios of `frame_budget.rs` at its 1274x1428 size and scale 1,
+rendered into an offscreen texture. Bytes and instances are the most of any
+frame (the budgets); times are medians of 88 frames. "Submit" is
+`Renderer::render` (buffer writes, recording, submission), GPU is the
+timestamp query. A temporary harness took these times; it is not in the
+repository, and they are not the on-screen numbers of the pipeline spec's
+section 2.
+
+| Scenario | instances | uploaded | draw calls | encode ms | submit ms | GPU ms |
+|---|---:|---:|---:|---:|---:|---:|
+| `pan-sample` | 579 -> 545 | 185 KB -> 33 KB | 5 -> 7 | 0.025 -> 0.023 | 0.24 -> 0.20 | 0.13 -> 0.11 |
+| `pan-stress` | 17,894 -> 4,500 | 5.73 MB -> 345 KB | 5 -> 7 | 1.02 -> 0.27 | 1.86 -> 0.29 | 0.17 -> 0.17 |
+| `pan-stress-fit` | 15,477 -> 2,169 | 4.95 MB -> 175 KB | 5 -> 7 | 0.88 -> 0.18 | 1.65 -> 0.25 | 0.15 -> 0.15 |
+| `zoom-stress` | 18,137 -> 4,500 | 5.80 MB -> 345 KB | 5 -> 7 | 0.98 -> 0.21 | 1.64 -> 0.28 | 0.18 -> 0.18 |
+| `drag-stress` | 18,089 -> 4,572 | 5.79 MB -> 351 KB | 5 -> 7 | 1.11 -> 0.29 | 2.21 -> 0.31 | 0.18 -> 0.18 |
+| `scroll-list` | 1,777 -> 1,777 | 569 KB -> 105 KB | 3 -> 3 | 0.076 -> 0.070 | 0.38 -> 0.14 | 0.15 -> 0.12 |
+
+Upload fell 16.6 times on `pan-stress` and 5.4 to 28 times across the
+scenarios. The two extra draw calls on the node canvas are the run of curves
+and the draw that resumes after it. Views rendered, elements reconciled and
+layouts are unchanged (P2).
+
+### `frame_phases` (2000 nodes, 3000 links, 1600x1000)
+
+`cargo bench -p livspeil-ui-gallery --bench frame_phases`, medians of 200
+frames, middle of three runs, microseconds:
+
+| | build | paint | encode | instances | uploaded | draw calls |
+|---|---:|---:|---:|---:|---:|---:|
+| zoom 1, before | 2169 | 301 | 500 | 5,552 | 1.78 MB | 3 |
+| zoom 1, after | 2090 | 150 | 250 | 3,337 | 295 KB | 5 |
+| zoom 0.4, before | 5163 | 934 | 1577 | 22,110 | 7.08 MB | 3 |
+| zoom 0.4, after | 4446 | 268 | 432 | 5,765 | 483 KB | 5 |
+| fit-all, before | 6767 | 908 | 1816 | 29,571 | 9.46 MB | 3 |
+| fit-all, after | 5676 | 165 | 690 | 7,006 | 605 KB | 5 |
+
+`build` is code this stage did not touch.
+
+### Quads only (`cargo bench -p livspeil-ui-render --bench quads`)
+
+10,000 quads, nearly all of different colors, 1,000 with a shadow, encode
+only: 1.31 ms before and 1.40 ms after into a fresh frame (7 % slower), 1.31
+and 1.35 ms into a reused frame (3 %), which is how hosts encode. This case
+has none of what the stage speeds up (no wires, no glyph runs); the time is
+mostly color conversion, and the cause of the difference was not profiled.
+
+### The curve's cost on the GPU
+
+Without a bound on the search, every stroke pixel measured its distance to
+all (up to 64) segments, and `pan-stress` took 0.24 ms of GPU time against
+0.17 before. The encoder now stores how many neighbouring segments can be
+nearer than a box's own (`curve::search_window`; a few for forward links,
+all of them for curves that may double back), which brought it back to 0.17
+with identical pixels. Not measured: an integrated GPU, where fragment work
+costs far more.
+
