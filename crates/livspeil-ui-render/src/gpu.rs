@@ -3,9 +3,11 @@
 
 //! wgpu backend.
 //!
-//! One instance storage buffer per frame; the vertex shader expands each
-//! instance to two triangles covering its bounds, the fragment shader
-//! evaluates the SDF. Ops map to render passes: consecutive `Draw` ops share
+//! Three buffers per frame (see [`record`](crate::record)): the draw order
+//! as a per-instance vertex attribute, and the record arena and property
+//! table as storage buffers (two per stage; the downlevel limit is four).
+//! The vertex shader covers each instance's record with two triangles, a
+//! curve with two per segment; the fragment shader evaluates it. Ops map to render passes: consecutive `Draw` ops share
 //! a pass; a `Backdrop` ends the pass, runs the dual-Kawase passes on the
 //! target (downsampled into `Rgba16Float` pyramid levels, scissored to the
 //! backdrop's region) and composites.
@@ -17,8 +19,9 @@ use crate::GpuTimer;
 use crate::RenderError;
 use crate::atlas::AtlasUpdate;
 use crate::cpu::{PassParams, blur_passes};
-use crate::encode::{Frame, INSTANCE_FLOATS, MAX_BLUR_LEVELS, Op, level_size};
+use crate::encode::{Frame, MAX_BLUR_LEVELS, Op, level_size};
 use crate::image::RgbaImage;
+use crate::record::{PROPERTY_BYTES, SLOT_BYTES};
 use crate::support::{BlurPath, BlurSupport, choose_blur_path};
 
 /// Format of the offscreen targets made by [`GpuContext::render_to_image`].
@@ -184,7 +187,7 @@ impl GpuContext {
 #[derive(Debug)]
 pub struct Renderer {
     format: wgpu::TextureFormat,
-    quad_pipeline: wgpu::RenderPipeline,
+    primitive_pipeline: wgpu::RenderPipeline,
     backdrop_pipeline: wgpu::RenderPipeline,
     down_pipeline: wgpu::RenderPipeline,
     up_pipeline: wgpu::RenderPipeline,
@@ -199,9 +202,10 @@ pub struct Renderer {
     timer: Option<GpuTimer>,
     sampler: wgpu::Sampler,
     globals: wgpu::Buffer,
-    instances: Option<wgpu::Buffer>,
-    /// Instance bytes of the frame being uploaded (capacity reused).
-    upload: Vec<u8>,
+    /// The draw order, the record arena and the property table.
+    instances: FrameBuffer,
+    records: FrameBuffer,
+    properties: FrameBuffer,
     levels: Vec<wgpu::Texture>,
     levels_for: (u32, u32),
     atlas_layout: wgpu::BindGroupLayout,
@@ -249,6 +253,64 @@ fn create_atlas(
     (texture, bind_group)
 }
 
+/// A GPU buffer holding one of a frame's arrays; grows in powers of two and
+/// is kept across frames.
+#[derive(Debug)]
+struct FrameBuffer {
+    label: &'static str,
+    usage: wgpu::BufferUsages,
+    /// Smallest size: one element, so an empty frame can still be bound.
+    min_size: u64,
+    buffer: Option<wgpu::Buffer>,
+}
+
+impl FrameBuffer {
+    fn new(label: &'static str, usage: wgpu::BufferUsages, min_size: usize) -> FrameBuffer {
+        FrameBuffer {
+            label,
+            usage: usage | wgpu::BufferUsages::COPY_DST,
+            min_size: min_size as u64,
+            buffer: None,
+        }
+    }
+
+    /// Makes room for `bytes` and writes them.
+    fn upload(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        bytes: &[u8],
+    ) -> Result<&wgpu::Buffer, RenderError> {
+        let needed = (bytes.len() as u64).max(self.min_size);
+        let limits = device.limits();
+        let mut limit = limits.max_buffer_size;
+        if self.usage.contains(wgpu::BufferUsages::STORAGE) {
+            limit = limit.min(limits.max_storage_buffer_binding_size);
+        }
+        if needed > limit {
+            return Err(RenderError::Device(format!(
+                "{}: {needed} bytes exceed the device's limit of {limit}",
+                self.label
+            )));
+        }
+        if self.buffer.as_ref().is_none_or(|b| b.size() < needed) {
+            self.buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(self.label),
+                size: needed.next_power_of_two().min(limit),
+                usage: self.usage,
+                mapped_at_creation: false,
+            }));
+        }
+        let Some(buffer) = self.buffer.as_ref() else {
+            return Err(RenderError::Device(format!("{} missing", self.label)));
+        };
+        if !bytes.is_empty() {
+            queue.write_buffer(buffer, 0, bytes);
+        }
+        Ok(buffer)
+    }
+}
+
 fn create_level(device: &wgpu::Device, w: u32, h: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("blur level"),
@@ -275,11 +337,11 @@ impl Renderer {
     /// Creates the pipelines for targets of `format` (a non-sRGB 8-bit
     /// format: the shaders output gamma-encoded sRGB and blend in it).
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Renderer {
-        let quad_src = include_str!("shaders/quad.wgsl");
+        let primitive_src = include_str!("shaders/primitives.wgsl");
         let blur_src = include_str!("shaders/blur.wgsl");
-        let quad_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("quad.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(quad_src.into()),
+        let primitive_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("primitives.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(primitive_src.into()),
         });
         let blur_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("blur.wgsl"),
@@ -290,29 +352,23 @@ impl Renderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/blit.wgsl").into()),
         });
         let vis = wgpu::ShaderStages::VERTEX_FRAGMENT;
+        let buffer_entry = |binding, ty| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: vis,
+            ty: wgpu::BindingType::Buffer {
+                ty,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let storage = wgpu::BufferBindingType::Storage { read_only: true };
         let globals_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("globals"),
             entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: vis,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: vis,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
+                buffer_entry(0, wgpu::BufferBindingType::Uniform),
+                buffer_entry(1, storage),
+                buffer_entry(2, storage),
             ],
         });
         let tex_entry = |binding| wgpu::BindGroupLayoutEntry {
@@ -396,7 +452,8 @@ impl Renderer {
                         vs: &str,
                         fs: &str,
                         fmt: wgpu::TextureFormat,
-                        blend: Option<wgpu::BlendState>| {
+                        blend: Option<wgpu::BlendState>,
+                        buffers: &[Option<wgpu::VertexBufferLayout<'_>>]| {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(label),
                 bind_group_layouts: layouts,
@@ -409,7 +466,7 @@ impl Renderer {
                     module,
                     entry_point: Some(vs),
                     compilation_options: Default::default(),
-                    buffers: &[],
+                    buffers,
                 },
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
@@ -428,14 +485,21 @@ impl Renderer {
                 cache: None,
             })
         };
-        let quad_pipeline = pipeline(
-            "quads",
+        // One instance reference per instance (see `record::InstanceRef`).
+        let instance_buffers = [Some(wgpu::VertexBufferLayout {
+            array_stride: 4,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![0 => Uint32],
+        })];
+        let primitive_pipeline = pipeline(
+            "primitives",
             &[Some(&globals_layout), None, Some(&atlas_layout)],
-            &quad_module,
+            &primitive_module,
             "vs_main",
-            "fs_quad",
+            "fs_main",
             format,
             Some(premul),
+            &instance_buffers,
         );
         // Everything blur needs is built inside a validation scope: a
         // device that rejects it must not take the whole UI down (D63).
@@ -443,11 +507,12 @@ impl Renderer {
         let backdrop_pipeline = pipeline(
             "backdrop",
             &[Some(&globals_layout), Some(&texture_layout)],
-            &quad_module,
+            &primitive_module,
             "vs_main",
             "fs_backdrop",
             format,
             Some(premul),
+            &instance_buffers,
         );
         let down_pipeline = pipeline(
             "kawase down",
@@ -457,6 +522,7 @@ impl Renderer {
             "fs_down",
             LEVEL_FORMAT,
             None,
+            &[],
         );
         let up_pipeline = pipeline(
             "kawase up",
@@ -466,6 +532,7 @@ impl Renderer {
             "fs_up",
             LEVEL_FORMAT,
             None,
+            &[],
         );
         let blit_pipeline = pipeline(
             "blit",
@@ -475,6 +542,7 @@ impl Renderer {
             "fs_blit",
             format,
             None,
+            &[],
         );
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("linear clamp"),
@@ -524,7 +592,7 @@ impl Renderer {
             offscreen: None,
             timer: None,
             format,
-            quad_pipeline,
+            primitive_pipeline,
             backdrop_pipeline,
             down_pipeline,
             up_pipeline,
@@ -533,8 +601,9 @@ impl Renderer {
             pass_layout,
             sampler,
             globals,
-            instances: None,
-            upload: Vec::new(),
+            instances: FrameBuffer::new("instances", wgpu::BufferUsages::VERTEX, 4),
+            records: FrameBuffer::new("records", wgpu::BufferUsages::STORAGE, SLOT_BYTES),
+            properties: FrameBuffer::new("properties", wgpu::BufferUsages::STORAGE, PROPERTY_BYTES),
             levels: Vec::new(),
             levels_for: (0, 0),
             atlas_layout,
@@ -772,23 +841,15 @@ impl Renderer {
             globals.extend_from_slice(&v.to_le_bytes());
         }
         queue.write_buffer(&self.globals, 0, &globals);
-        frame.instance_bytes_into(&mut self.upload);
-        let byte_len = self.upload.len() as u64;
-        let needed = byte_len.max((INSTANCE_FLOATS * 4) as u64);
-        if self.instances.as_ref().is_none_or(|b| b.size() < needed) {
-            self.instances = Some(device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("instances"),
-                size: needed.next_power_of_two(),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-        }
-        let Some(instances) = self.instances.as_ref() else {
-            return Err(RenderError::Device("instance buffer missing".into()));
-        };
-        if byte_len > 0 {
-            queue.write_buffer(instances, 0, &self.upload);
-        }
+        let instances =
+            self.instances
+                .upload(device, queue, bytemuck::cast_slice(&frame.instances))?;
+        let records = self
+            .records
+            .upload(device, queue, bytemuck::cast_slice(&frame.records))?;
+        let properties =
+            self.properties
+                .upload(device, queue, bytemuck::cast_slice(&frame.properties))?;
         let globals_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("globals"),
             layout: &self.globals_layout,
@@ -799,10 +860,15 @@ impl Renderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: instances.as_entire_binding(),
+                    resource: records.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: properties.as_entire_binding(),
                 },
             ],
         });
+        let instances = instances.clone();
 
         // Blur passes and their uniforms.
         let mut passes: Vec<Vec<(bool, u32, PassParams)>> = Vec::new();
@@ -895,16 +961,23 @@ impl Renderer {
         while i < ops.len() {
             match &ops[i] {
                 Op::Draw { .. } => {
-                    let mut pass = target_pass(&mut enc, &target_view, load, "quads");
+                    let mut pass = target_pass(&mut enc, &target_view, load, "primitives");
                     load = wgpu::LoadOp::Load;
-                    pass.set_pipeline(&self.quad_pipeline);
+                    pass.set_pipeline(&self.primitive_pipeline);
                     pass.set_bind_group(0, &globals_bg, &[]);
-                    while let Some(Op::Draw { start, end, atlas }) = ops.get(i) {
+                    pass.set_vertex_buffer(0, instances.slice(..));
+                    while let Some(Op::Draw {
+                        start,
+                        end,
+                        atlas,
+                        vertices,
+                    }) = ops.get(i)
+                    {
                         let atlas_bg = atlas
                             .and_then(|a| self.atlases.get(&a))
                             .map_or(&self.empty_atlas, |a| &a.bind_group);
                         pass.set_bind_group(2, atlas_bg, &[]);
-                        pass.draw(0..6, *start..*end);
+                        pass.draw(0..*vertices, *start..*end);
                         i += 1;
                     }
                 }
@@ -975,6 +1048,7 @@ impl Renderer {
                     pass.set_pipeline(&self.backdrop_pipeline);
                     pass.set_bind_group(0, &globals_bg, &[]);
                     pass.set_bind_group(1, level1_bg, &[]);
+                    pass.set_vertex_buffer(0, instances.slice(..));
                     pass.draw(0..6, *instance..*instance + 1);
                     i += 1;
                 }

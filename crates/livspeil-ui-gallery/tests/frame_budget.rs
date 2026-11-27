@@ -43,12 +43,7 @@ fn measure(scenario: Scenario) -> Work {
         clear: Color::BLACK,
     };
     let mut list = DisplayList::new();
-    let mut gpu = Frame {
-        options,
-        clear: [0.0; 4],
-        instances: Vec::new(),
-        ops: Vec::new(),
-    };
+    let mut gpu = Frame::new(options);
     let mut work = Work::default();
     for frame in 0..Scenario::WARMUP + FRAMES {
         scenario.step(&mut host.app, &mounted, frame);

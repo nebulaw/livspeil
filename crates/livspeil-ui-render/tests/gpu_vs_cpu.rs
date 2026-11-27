@@ -5,10 +5,10 @@
 //! exercise every op path. Skipped (with a message) when no adapter exists.
 
 use livspeil_ui_render::{
-    Affine, AtlasStore, AtlasUpdate, Backdrop, Border, Color, CornerStyle, DisplayList, Fill,
-    FrameOptions, GlyphSprite, Glyphs, GpuContext, GradientStop, Highlight, HighlightKind, Op,
-    Quad, Radii, Rect, RenderError, Renderer, RgbaImage, Shadow, TARGET_FORMAT, encode, render_cpu,
-    render_cpu_with,
+    Affine, AtlasStore, AtlasUpdate, Backdrop, Border, Color, CornerStyle, Curve, DisplayList,
+    Fill, FrameOptions, GlyphSprite, Glyphs, GpuContext, GradientStop, Highlight, HighlightKind,
+    Op, Quad, Radii, Rect, RenderError, Renderer, RgbaImage, Shadow, TARGET_FORMAT, encode,
+    render_cpu, render_cpu_with,
 };
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -364,5 +364,171 @@ fn glyphs_gpu_matches_cpu() {
         let cpu = render_cpu_with(&frame, &store);
         let gpu = ctx.render_to_image(&mut renderer, &frame).unwrap();
         assert!(diff(&cpu, &gpu).0 <= 4);
+    }
+}
+
+/// Curves that fold onto themselves: a loop, a cusp, a collinear stroke that
+/// turns back over itself (a node editor's backward level link), a bend
+/// tighter than the stroke is wide, and an ordinary link.
+const FOLDING: [[[f32; 2]; 4]; 5] = [
+    [[10.0, 50.0], [90.0, -20.0], [-20.0, -20.0], [60.0, 50.0]],
+    [[80.0, 10.0], [140.0, 60.0], [80.0, 60.0], [140.0, 10.0]],
+    [[40.0, 70.0], [100.0, 70.0], [-10.0, 70.0], [50.0, 70.0]],
+    [[100.0, 80.0], [180.0, 82.0], [180.0, 86.0], [100.0, 88.0]],
+    [[8.0, 100.0], [80.0, 100.0], [80.0, 114.0], [152.0, 114.0]],
+];
+
+const STROKE: f32 = 8.0;
+
+/// One translucent white stroke on black, on its own: one blend gives level
+/// 102, two would give 163.
+fn folding_list(points: [[f32; 2]; 4]) -> DisplayList {
+    let mut list = DisplayList::new();
+    list.add(Curve::new(points, STROKE, Color::WHITE.with_alpha(0.4)));
+    list
+}
+
+fn bezier(p: [[f32; 2]; 4], t: f32) -> [f32; 2] {
+    let u = 1.0 - t;
+    let w = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
+    [0, 1].map(|k| (0..4).map(|i| w[i] * p[i][k]).sum())
+}
+
+/// A translucent stroke is blended exactly once everywhere it covers: no
+/// pixel is brighter than one blend, and every pixel well inside the stroke
+/// has the full single blend (no gaps), at both renderers' hands.
+fn assert_single_blend(img: &RgbaImage, points: [[f32; 2]; 4], scale: f32, who: &str) {
+    let radius = STROKE * 0.5 * scale;
+    // Distance of every pixel center near the curve to the curve itself.
+    let mut distance = vec![f32::MAX; (img.width * img.height) as usize];
+    let reach = radius + 2.0;
+    for i in 0..=1500 {
+        let [x, y] = bezier(points, i as f32 / 1500.0).map(|v| v * scale);
+        for py in (y - reach).max(0.0) as u32..((y + reach) as u32 + 1).min(img.height) {
+            for px in (x - reach).max(0.0) as u32..((x + reach) as u32 + 1).min(img.width) {
+                let d = (px as f32 + 0.5 - x).hypot(py as f32 + 0.5 - y);
+                let best = &mut distance[(py * img.width + px) as usize];
+                *best = best.min(d);
+            }
+        }
+    }
+    let full = 102;
+    let mut covered = 0;
+    for (k, d) in distance.into_iter().enumerate() {
+        let (x, y) = (k as u32 % img.width, k as u32 / img.width);
+        let v = img.pixel(x, y).unwrap()[0];
+        assert!(v <= full, "{who}: double blend {v} at {x},{y}");
+        if d <= radius - 1.0 {
+            assert_eq!(v, full, "{who}: gap at {x},{y} ({d} px from the curve)");
+            covered += 1;
+        }
+        if d >= radius + 1.0 {
+            assert_eq!(v, 0, "{who}: stray pixel at {x},{y}");
+        }
+    }
+    assert!(covered > 100, "{who}: only {covered} interior pixels");
+}
+
+#[test]
+fn folded_translucent_curves_are_blended_once() {
+    let mut gpu = gpu();
+    for (i, points) in FOLDING.into_iter().enumerate() {
+        for scale in [1.0, 2.0] {
+            let options = FrameOptions {
+                width: (160.0 * scale) as u32,
+                height: (120.0 * scale) as u32,
+                scale,
+                clear: Color::BLACK,
+            };
+            let frame = encode(&folding_list(points), options).unwrap();
+            let cpu = render_cpu(&frame);
+            assert_single_blend(&cpu, points, scale, &format!("cpu curve {i} x{scale}"));
+            if let Some((_, ctx, renderer)) = gpu.as_mut() {
+                let img = ctx.render_to_image(renderer, &frame).unwrap();
+                assert_single_blend(&img, points, scale, &format!("gpu curve {i} x{scale}"));
+                let (max, over) = diff(&cpu, &img);
+                assert_eq!(over, 0, "curve {i} x{scale}: max delta {max}");
+            }
+        }
+    }
+}
+
+/// Curves among the other families: translucent, thinner than a pixel,
+/// transformed, clipped, faded, with different segment counts in one run,
+/// and quads and sprites above and below them.
+fn curve_list() -> DisplayList {
+    let mut list = DisplayList::new();
+    list.add(Quad::new(
+        Rect::new(10.0, 10.0, 90.0, 60.0),
+        Color::oklch(0.5, 0.1, 140.0),
+    ));
+    for (i, points) in FOLDING.into_iter().enumerate() {
+        list.add(Curve::new(
+            points,
+            1.0 + i as f32,
+            Color::oklch(0.8, 0.12, 60.0 * i as f32).with_alpha(0.7),
+        ));
+    }
+    // A straight one (one segment) in the same run, and hairlines.
+    list.add(Curve::new(
+        [[5.0, 5.0], [55.0, 15.0], [105.0, 25.0], [155.0, 35.0]],
+        3.0,
+        Color::WHITE,
+    ));
+    for (i, width) in [0.25, 0.5, 1.0].into_iter().enumerate() {
+        let y = 90.5 + 4.0 * i as f32;
+        list.add(Curve::new(
+            [[90.0, y], [110.0, y], [130.0, y + 9.0], [155.0, y + 9.0]],
+            width,
+            Color::WHITE,
+        ));
+    }
+    list.add(Quad::new(Rect::new(60.0, 40.0, 30.0, 30.0), Color::BLACK).radius(8.0));
+    list.add(Glyphs::new(
+        0,
+        vec![GlyphSprite {
+            rect: Rect::new(66.0, 46.0, 12.0, 12.0),
+            texels: [16, 0, 12, 12],
+        }],
+        Color::WHITE,
+    ));
+    let moved = Curve::new(FOLDING[4], 4.0, Color::oklch(0.7, 0.2, 20.0));
+    list.add(Curve {
+        transform: Affine::rotate_about(-0.5, 80.0, 60.0).then_after(Affine::scale(1.3, 0.7)),
+        opacity: 0.6,
+        ..moved
+    });
+    list.add(Curve {
+        transform: Affine::translate(0.25, -60.0),
+        clip: Some(Rect::new(30.5, 30.0, 60.0, 25.25)),
+        ..moved
+    });
+    list
+}
+
+#[test]
+fn curves_gpu_matches_cpu() {
+    let mut store = AtlasStore::new();
+    store.apply_all(&glyph_atlas(0)).unwrap();
+    let Some((_gpu, ctx, mut renderer)) = gpu() else {
+        return;
+    };
+    renderer
+        .update_atlases(&ctx.device, &ctx.queue, &glyph_atlas(0))
+        .unwrap();
+    for (scale, w, h) in [(1.0, 160, 120), (2.0, 320, 240), (1.5, 240, 180)] {
+        let frame = encode(&curve_list(), opts(w, h, scale)).unwrap();
+        // Quads, sprites and curves in painter order, curves in their own
+        // draws.
+        assert_eq!(frame.draw_calls(), 4, "{:?}", frame.ops);
+        let cpu = render_cpu_with(&frame, &store);
+        let gpu = ctx.render_to_image(&mut renderer, &frame).unwrap();
+        let (max, over) = diff(&cpu, &gpu);
+        eprintln!("curves scale {scale}: max delta {max}, {over} pixels over 4");
+        let limit = if ctx.is_software() { 0.002 } else { 0.001 };
+        assert!(
+            (over as f64) <= limit * f64::from(w * h),
+            "scale {scale}: {over} pixels differ"
+        );
     }
 }

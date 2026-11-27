@@ -67,17 +67,12 @@ impl PaintRenderer {
             blur_path: None,
             on_blur_path: None,
             list: render::DisplayList::new(),
-            frame: render::Frame {
-                options: render::FrameOptions {
-                    width: 1,
-                    height: 1,
-                    scale: 1.0,
-                    clear,
-                },
-                clear: [0.0; 4],
-                instances: Vec::new(),
-                ops: Vec::new(),
-            },
+            frame: render::Frame::new(render::FrameOptions {
+                width: 1,
+                height: 1,
+                scale: 1.0,
+                clear,
+            }),
             timings: RenderTimings::default(),
             gpu_timing: false,
         }

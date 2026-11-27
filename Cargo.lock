@@ -2302,7 +2302,9 @@ dependencies = [
 name = "livspeil-ui-render"
 version = "0.0.0"
 dependencies = [
+ "bytemuck",
  "criterion",
+ "naga",
  "pollster",
  "wgpu",
 ]
