@@ -17,9 +17,14 @@ publish.workspace = true
 # DX12 or WebGPU backends.
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "wgsl", "metal", "vulkan", "gles"] }
 pollster = "1"
+# Safe casts of the frame's plain u32 arrays to the bytes uploaded.
+bytemuck = "1.25"
 
 [dev-dependencies]
 criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
+# The shader as the backends see it: layout checks, and translation to the
+# GLES 3.1 and Metal shading languages.
+naga = { version = "30", default-features = false, features = ["wgsl-in", "glsl-out", "msl-out"] }
 
 [[bench]]
 name = "quads"

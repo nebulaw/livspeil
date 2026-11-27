@@ -4,11 +4,22 @@
 //! Livspeil UI renderer.
 //!
 //! Build a [`DisplayList`] (quads with continuous corners, gradients,
-//! hairline borders and shadow stacks; backdrops for the Frost and Glass
-//! materials), [`encode`] it for a target size, then draw the [`Frame`] with
+//! hairline borders and shadow stacks; glyph and icon sprites; cubic Bezier
+//! curves; backdrops for the Frost and Glass materials), [`encode`] it for a target size, then draw the [`Frame`] with
 //! the wgpu [`Renderer`] or with the CPU reference [`render_cpu`].
 //!
 //! Design notes:
+//! - **Data formats**: one record format per primitive family in one arena
+//!   (sprite 48 B, quad 96 B, curve 64 B, shadow 96 B, backdrop 112 B),
+//!   effect data (gradients) as records of their own, transform, clip and
+//!   opacity in a shared property table, and the draw order as one `u32` per
+//!   instance. One pipeline reads every family, so painter order is the
+//!   instance order and changing family costs no state change. See
+//!   `record.rs`.
+//! - **Curves** ([`Curve`]): one instance each, expanded in the vertex
+//!   shader into a box per polyline segment; every pixel is drawn by the box
+//!   of its nearest segment, so a stroke is blended once even where it bends
+//!   sharply or crosses itself. Strokes thinner than a pixel fade.
 //! - **Corners**: per-corner superellipse `|x|^n + |y|^n = R^n` in a box of
 //!   size `R`; circular corners are `n = 2`. Continuous corners use
 //!   `R = 1.7 r` and pick `n` so the 45-degree point matches a circle of
@@ -29,9 +40,8 @@
 //!   alpha in gamma-encoded sRGB (UI spec, section 3) into a non-sRGB 8-bit
 //!   target, so the bytes read back are sRGB. Gradients, shadows and
 //!   backdrops add a 4x4 ordered dither of +-0.5 LSB against banding.
-//! - **Text**: [`Glyphs`] are instanced quads (the same instance layout and
-//!   pipeline as quads, kind 3, so text and boxes on one layer batch into
-//!   one draw call) that read an R8 coverage atlas (uploaded through
+//! - **Text**: [`Glyphs`] are sprites (one instance each, so text and boxes
+//!   batch into one draw call) that read an R8 coverage atlas (uploaded through
 //!   [`AtlasUpdate`]s: dirty rectangles, or a full upload when the
 //!   producer's generation changes). Sampling is a manual bilinear filter
 //!   with `textureLoad` that treats texels outside the glyph's own rect as
@@ -51,31 +61,35 @@
 mod atlas;
 mod color;
 mod cpu;
+mod curve;
 mod encode;
 mod geom;
 mod gpu;
 mod gpu_timer;
 mod image;
 mod list;
+mod record;
 mod shade;
 mod support;
 
 pub use atlas::{AtlasStore, AtlasUpdate, MAX_ATLAS_SIZE};
 pub use color::{Color, linear_to_srgb, oklab_to_srgb, srgb_to_linear};
 pub use cpu::{render_cpu, render_cpu_with};
+pub use curve::{CURVE_TOLERANCE_PX, MAX_CURVE_SEGMENTS};
 pub use encode::{
-    BlurPlan, Frame, FrameOptions, INSTANCE_FLOATS, Instance, MAX_BLUR_LEVELS, Op, TEXT_GAMMA,
-    corner_params, encode, encode_into, kawase_params, level_size,
+    BlurPlan, Frame, FrameOptions, MAX_BLUR_LEVELS, Op, TEXT_GAMMA, corner_params, encode,
+    encode_into, kawase_params, level_size,
 };
 pub use geom::{Affine, Rect};
 pub use gpu::{GpuContext, Renderer, TARGET_FORMAT};
 pub use gpu_timer::{FEATURES as GPU_TIMER_FEATURES, GpuTimer};
 pub use image::RgbaImage;
 pub use list::{
-    Backdrop, Border, BorderWidth, CornerStyle, DisplayList, Fill, GlyphSprite, Glyphs,
+    Backdrop, Border, BorderWidth, CornerStyle, Curve, DisplayList, Fill, GlyphSprite, Glyphs,
     GradientStop, Highlight, HighlightKind, Image, Item, MAX_GRADIENT_STOPS, Primitive, Quad,
     Radii, Shadow,
 };
+pub use record::{Family, InstanceRef, PROPERTY_BYTES, SLOT_BYTES, Slot};
 pub use support::{BlurPath, BlurSupport, choose_blur_path};
 
 /// Errors from encoding or rendering.

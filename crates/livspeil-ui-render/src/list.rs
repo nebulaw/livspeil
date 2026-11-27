@@ -344,6 +344,43 @@ impl Glyphs {
     }
 }
 
+/// A stroked cubic Bezier with round caps: one primitive per curve, however
+/// long it is.
+///
+/// The stroke is antialiased analytically and blended once where it covers,
+/// also where the curve bends sharply or crosses itself. A stroke thinner
+/// than one physical pixel is drawn one pixel wide and fades in proportion.
+/// A curve whose control points all coincide draws nothing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Curve {
+    /// Start, first control, second control and end point, local units.
+    pub points: [[f32; 2]; 4],
+    /// Stroke width, local units.
+    pub width: f32,
+    /// Color.
+    pub color: Color,
+    /// Clip rectangle in logical screen coordinates (after the transform).
+    pub clip: Option<Rect>,
+    /// Multiplies the curve's alpha.
+    pub opacity: f32,
+    /// Local-to-screen transform.
+    pub transform: Affine,
+}
+
+impl Curve {
+    /// A curve with no clip, full opacity and no transform.
+    pub fn new(points: [[f32; 2]; 4], width: f32, color: Color) -> Curve {
+        Curve {
+            points,
+            width,
+            color,
+            clip: None,
+            opacity: 1.0,
+            transform: Affine::IDENTITY,
+        }
+    }
+}
+
 /// An image or icon from a texture atlas. Placeholder: draws nothing yet.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Image {
@@ -368,6 +405,8 @@ pub enum Primitive {
     Backdrop(Backdrop),
     /// Text.
     Glyphs(Glyphs),
+    /// A stroked cubic Bezier.
+    Curve(Curve),
     /// An image (draws nothing yet).
     Image(Image),
 }
@@ -455,6 +494,12 @@ impl From<Backdrop> for Primitive {
 impl From<Glyphs> for Primitive {
     fn from(g: Glyphs) -> Self {
         Primitive::Glyphs(g)
+    }
+}
+
+impl From<Curve> for Primitive {
+    fn from(c: Curve) -> Self {
+        Primitive::Curve(c)
     }
 }
 

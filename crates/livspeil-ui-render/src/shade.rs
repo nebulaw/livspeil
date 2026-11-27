@@ -1,19 +1,20 @@
 // SPDX-FileCopyrightText: 2026 Livspeil contributors
 // SPDX-License-Identifier: MPL-2.0
 
-//! Per-pixel math, mirrored line by line from `shaders/quad.wgsl`. The CPU
-//! reference rasterizer runs these functions; keep both files in step (the
-//! GPU-vs-CPU tests catch drift).
+//! Per-record math, mirrored from `shaders/primitives.wgsl`: the geometry
+//! each record covers (also what the encoder culls by) and the color of one
+//! pixel. The CPU reference rasterizer runs these functions; keep both files
+//! in step (the GPU-vs-CPU tests catch drift).
 
 use crate::color::oklab_to_srgb;
-use crate::encode::{Instance, field, fill_kind, kind};
+use crate::encode::TEXT_GAMMA;
+use crate::record::{
+    BackdropRecord, CurveRecord, GradientRecord, Property, QuadRecord, ShadowRecord, SpriteRecord,
+    fill_kind,
+};
 
 type V2 = [f32; 2];
 type V4 = [f32; 4];
-
-pub(crate) fn v4(inst: &Instance, at: usize) -> V4 {
-    [inst[at], inst[at + 1], inst[at + 2], inst[at + 3]]
-}
 
 fn clamp01(x: f32) -> f32 {
     x.clamp(0.0, 1.0)
@@ -45,12 +46,86 @@ pub(crate) fn noise(px: V2) -> f32 {
 }
 
 /// Local position of a physical pixel center.
-pub(crate) fn local_pos(inst: &Instance, px: V2, scale: f32) -> V2 {
-    let [a, b, c, d] = v4(inst, field::INV);
-    let e = inst[field::INV2];
-    let f = inst[field::INV2 + 1];
+pub(crate) fn local_pos(prop: &Property, px: V2, scale: f32) -> V2 {
+    let [a, b, c, d] = prop.inverse;
+    let [_, _, e, f] = prop.offset;
     let (sx, sy) = (px[0] / scale, px[1] / scale);
     [a * sx + c * sy + e, b * sx + d * sy + f]
+}
+
+/// `[x0, y0, x1, y1]` of `(x, y, w, h)` grown by `d` on every side.
+fn grown(rect: V4, d: f32) -> V4 {
+    let [x, y, w, h] = rect;
+    let (x, y) = (x - d, y - d);
+    [x, y, x + (w + 2.0 * d), y + (h + 2.0 * d)]
+}
+
+/// What a quad or backdrop covers: its rect and a pixel for the AA ramp.
+pub(crate) fn shape_bounds(rect: V4, prop: &Property) -> V4 {
+    grown(rect, 1.0 / prop.ppu)
+}
+
+/// What a sprite covers. Texels map 1:1 to pixels only without rotation or
+/// scale, then it is exactly its rect; otherwise it grows by a pixel so the
+/// bilinear edge is drawn.
+pub(crate) fn sprite_bounds(sprite: &SpriteRecord, prop: &Property) -> V4 {
+    let exact = prop.linear == [1.0, 0.0, 0.0, 1.0];
+    let d = if exact { 0.0 } else { 1.0 / prop.ppu };
+    grown(sprite.rect, d)
+}
+
+/// What a shadow covers: the spread shape and three sigmas around it.
+pub(crate) fn shadow_bounds(sh: &ShadowRecord, prop: &Property) -> V4 {
+    let [x, y, w, h] = sh.rect;
+    let [dx, dy, spread, sigma] = sh.shadow;
+    let spread = spread.max(-0.5 * w.min(h));
+    let shape = [
+        x + dx - spread,
+        y + dy - spread,
+        w + 2.0 * spread,
+        h + 2.0 * spread,
+    ];
+    grown(shape, 3.0 * sigma + 1.0 / prop.ppu)
+}
+
+/// How far from its center line a curve's segment boxes reach: half the
+/// width and a pixel for the AA ramp.
+pub(crate) fn curve_reach(curve: &CurveRecord, prop: &Property) -> f32 {
+    curve.half_width + 1.0 / prop.ppu
+}
+
+/// How far from its own segment a pixel can be and still be drawn by that
+/// segment's box: the stroke and its AA ramp, with room for rounding.
+/// Mirrored in the shader's `shade_curve`.
+pub(crate) fn curve_claim(half_width: f32, ppu: f32) -> f32 {
+    half_width + 0.75 / ppu
+}
+
+/// What a curve covers: its control hull grown by [`curve_reach`].
+pub(crate) fn curve_bounds(curve: &CurveRecord, prop: &Property) -> V4 {
+    let p = control_points(curve);
+    let (mut lo, mut hi) = (p[0], p[0]);
+    for q in &p[1..] {
+        lo = [lo[0].min(q[0]), lo[1].min(q[1])];
+        hi = [hi[0].max(q[0]), hi[1].max(q[1])];
+    }
+    let r = curve_reach(curve, prop);
+    [lo[0] - r, lo[1] - r, hi[0] + r, hi[1] + r]
+}
+
+pub(crate) fn control_points(curve: &CurveRecord) -> crate::curve::Points {
+    let [ax, ay, bx, by] = curve.p01;
+    let [cx, cy, dx, dy] = curve.p23;
+    [[ax, ay], [bx, by], [cx, cy], [dx, dy]]
+}
+
+fn scaled(c: V4, k: f32) -> V4 {
+    [c[0] * k, c[1] * k, c[2] * k, c[3] * k]
+}
+
+/// Opacity times the clip's coverage at `px`.
+fn visibility(prop: &Property, px: V2) -> f32 {
+    prop.opacity * clip_coverage(px, prop.clip)
 }
 
 fn corner_index(q: V2) -> usize {
@@ -92,7 +167,7 @@ pub(crate) fn coverage(d: f32, ppu: f32) -> f32 {
     clamp01(0.5 - d * ppu)
 }
 
-fn clip_coverage(px: V2, clip: V4) -> f32 {
+pub(crate) fn clip_coverage(px: V2, clip: V4) -> f32 {
     clamp01(px[0] - clip[0] + 0.5)
         * clamp01(clip[2] - px[0] + 0.5)
         * clamp01(px[1] - clip[1] + 0.5)
@@ -147,11 +222,11 @@ fn circle_equivalent(ext: f32, n: f32) -> f32 {
     ext * (1.0 - (-1.0 / n).exp2()) / 0.292_893_2
 }
 
-fn shade_shadow(inst: &Instance, p: V2, ppu: f32) -> V4 {
-    let rect = v4(inst, field::RECT);
-    let ext = v4(inst, field::RADII);
-    let exps = v4(inst, field::EXPS);
-    let [dx, dy, spread, sigma] = v4(inst, field::SHADOW);
+/// A drop shadow at one pixel, premultiplied gamma sRGB.
+pub(crate) fn shade_shadow(sh: &ShadowRecord, prop: &Property, px: V2, scale: f32) -> V4 {
+    let p = local_pos(prop, px, scale);
+    let rect = sh.rect;
+    let [dx, dy, spread, sigma] = sh.shadow;
     let half = [
         (rect[2] * 0.5 + spread).max(0.0),
         (rect[3] * 0.5 + spread).max(0.0),
@@ -159,31 +234,32 @@ fn shade_shadow(inst: &Instance, p: V2, ppu: f32) -> V4 {
     let center = [rect[0] + rect[2] * 0.5 + dx, rect[1] + rect[3] * 0.5 + dy];
     let rel = [p[0] - center[0], p[1] - center[1]];
     let i = corner_index(rel);
-    let r = (circle_equivalent(ext[i], exps[i]) + spread)
+    let r = (circle_equivalent(sh.ext[i], sh.exps[i]) + spread)
         .max(0.0)
         .min(half[0].min(half[1]));
     let mut a = box_shadow(rel, half, sigma, r);
     // Not under the shape itself.
-    a *= 1.0 - coverage(sd_shape(p, rect, ext, exps), ppu);
-    let c = v4(inst, field::SHADOW_COLOR);
-    [c[0] * a, c[1] * a, c[2] * a, c[3] * a]
+    a *= 1.0 - coverage(sd_shape(p, rect, sh.ext, sh.exps), prop.ppu);
+    let c = scaled(sh.color, a);
+    let n = bayer(px) / 255.0 * c[3].min(1.0);
+    scaled([c[0] + n, c[1] + n, c[2] + n, c[3]], visibility(prop, px))
 }
 
-fn gradient(inst: &Instance, p: V2) -> V4 {
-    let fk = inst[field::FILL];
-    let n = inst[field::FILL + 1] as usize;
-    let g = v4(inst, field::GRAD);
-    let t = if fk == fill_kind::LINEAR {
-        let d = [g[2] - g[0], g[3] - g[1]];
+fn gradient(g: &GradientRecord, flags: u32, p: V2) -> V4 {
+    let kind = flags & 0xff;
+    let n = ((flags >> 8) as usize).min(g.stops.len());
+    let geo = g.geometry;
+    let t = if kind == fill_kind::LINEAR {
+        let d = [geo[2] - geo[0], geo[3] - geo[1]];
         let len2 = (d[0] * d[0] + d[1] * d[1]).max(1e-12);
-        ((p[0] - g[0]) * d[0] + (p[1] - g[1]) * d[1]) / len2
+        ((p[0] - geo[0]) * d[0] + (p[1] - geo[1]) * d[1]) / len2
     } else {
-        let u = [(p[0] - g[0]) / g[2], (p[1] - g[1]) / g[3]];
+        let u = [(p[0] - geo[0]) / geo[2], (p[1] - geo[1]) / geo[3]];
         (u[0] * u[0] + u[1] * u[1]).sqrt()
     };
-    let offs = v4(inst, field::STOP_OFFSETS);
+    let offs = g.offsets;
     let stop = |i: usize| -> V4 {
-        let c = v4(inst, field::STOPS + 4 * i);
+        let c = g.stops[i];
         [c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]]
     };
     let mut lab = stop(0);
@@ -211,60 +287,50 @@ fn gradient(inst: &Instance, p: V2) -> V4 {
     [rgb[0] * alpha, rgb[1] * alpha, rgb[2] * alpha, alpha]
 }
 
-fn shade_quad(inst: &Instance, p: V2, ppu: f32) -> V4 {
-    let rect = v4(inst, field::RECT);
-    let ext = v4(inst, field::RADII);
-    let exps = v4(inst, field::EXPS);
-    let d = sd_shape(p, rect, ext, exps);
+/// A quad's fill and border at one pixel. `grad` is its effect record
+/// (gradient fills only).
+pub(crate) fn shade_quad(
+    q: &QuadRecord,
+    grad: Option<&GradientRecord>,
+    prop: &Property,
+    px: V2,
+    scale: f32,
+) -> V4 {
+    let p = local_pos(prop, px, scale);
+    let ppu = prop.ppu;
+    let d = sd_shape(p, q.rect, q.ext, q.exps);
     let shape = coverage(d, ppu);
-    let fk = inst[field::FILL];
-    let fill = if fk == fill_kind::SOLID {
-        v4(inst, field::STOPS)
-    } else if fk == fill_kind::NONE {
-        [0.0; 4]
-    } else {
-        gradient(inst, p)
+    let kind = q.flags & 0xff;
+    let fill = match (kind, grad) {
+        (fill_kind::SOLID, _) => q.fill,
+        (fill_kind::LINEAR | fill_kind::RADIAL, Some(g)) => gradient(g, q.flags, p),
+        _ => [0.0; 4],
     };
-    let bw = inst[field::BORDER];
-    if bw > 0.0 {
+    let bw = q.border_width;
+    let mut c = if bw > 0.0 {
         let bcov = shape - coverage(d + bw, ppu);
-        let b = v4(inst, field::BORDER_COLOR);
+        let b = q.border;
         let k = shape - bcov * b[3];
-        return [
+        [
             b[0] * bcov + fill[0] * k,
             b[1] * bcov + fill[1] * k,
             b[2] * bcov + fill[2] * k,
             b[3] * bcov + fill[3] * k,
-        ];
+        ]
+    } else {
+        scaled(fill, shape)
+    };
+    if kind >= fill_kind::LINEAR {
+        let n = bayer(px) / 255.0 * c[3];
+        c = [c[0] + n, c[1] + n, c[2] + n, c[3]];
     }
-    [
-        fill[0] * shape,
-        fill[1] * shape,
-        fill[2] * shape,
-        fill[3] * shape,
-    ]
+    scaled(c, visibility(prop, px))
 }
 
-/// Output of the quad pipeline (quads and shadows) for one pixel center
-/// `px` (physical pixels), premultiplied gamma sRGB.
-pub(crate) fn shade(inst: &Instance, px: V2, scale: f32) -> V4 {
-    let p = local_pos(inst, px, scale);
-    let ppu = inst[field::XFORM2 + 2];
-    let mut c = if inst[field::XFORM2 + 3] == kind::SHADOW {
-        shade_shadow(inst, p, ppu)
-    } else {
-        shade_quad(inst, p, ppu)
-    };
-    let dither = inst[field::INV2 + 3];
-    if inst[field::FILL] >= fill_kind::LINEAR && inst[field::XFORM2 + 3] == kind::QUAD {
-        let n = bayer(px) * dither / 255.0 * c[3];
-        c = [c[0] + n, c[1] + n, c[2] + n, c[3]];
-    } else if inst[field::XFORM2 + 3] == kind::SHADOW {
-        let n = bayer(px) * dither / 255.0 * c[3].min(1.0);
-        c = [c[0] + n, c[1] + n, c[2] + n, c[3]];
-    }
-    let k = inst[field::INV2 + 2] * clip_coverage(px, v4(inst, field::CLIP));
-    [c[0] * k, c[1] * k, c[2] * k, c[3] * k]
+/// A curve at a pixel `distance` local units from its polyline.
+pub(crate) fn shade_curve(curve: &CurveRecord, prop: &Property, px: V2, distance: f32) -> V4 {
+    let cov = coverage(distance - curve.half_width, prop.ppu);
+    scaled(curve.color, cov * visibility(prop, px))
 }
 
 /// Remaps glyph coverage `a` for a text color of lightness `l` (see the
@@ -275,18 +341,25 @@ pub(crate) fn glyph_alpha(a: f32, l: f32, inv_g: f32) -> f32 {
     dark + (light - dark) * l
 }
 
-/// Output of the quad pipeline for a glyph instance. `texel(x, y)` reads
-/// the atlas (0..1, 0 outside it); texels outside the glyph's own rect
-/// count as empty, so a manual bilinear filter never bleeds.
-pub(crate) fn shade_glyph(
-    inst: &Instance,
+/// A sprite at one pixel. `texel(x, y)` reads the atlas (0..1, 0 outside
+/// it); texels outside the sprite's own rect count as empty, so a manual
+/// bilinear filter never bleeds.
+pub(crate) fn shade_sprite(
+    sprite: &SpriteRecord,
+    prop: &Property,
     px: V2,
     scale: f32,
     texel: impl Fn(i64, i64) -> f32,
 ) -> V4 {
-    let p = local_pos(inst, px, scale);
-    let rect = v4(inst, field::RECT);
-    let t = v4(inst, field::GRAD);
+    let p = local_pos(prop, px, scale);
+    let rect = sprite.rect;
+    let [origin, size] = sprite.texels;
+    let t = [
+        (origin & 0xffff) as f32,
+        (origin >> 16) as f32,
+        (size & 0xffff) as f32,
+        (size >> 16) as f32,
+    ];
     let tx = t[0] + (p[0] - rect[0]) / rect[2] * t[2] - 0.5;
     let ty = t[1] + (p[1] - rect[1]) / rect[3] * t[3] - 0.5;
     let (x0, y0) = (tx.floor(), ty.floor());
@@ -301,12 +374,8 @@ pub(crate) fn shade_glyph(
     let top = tap(x0, y0) + (tap(x0 + 1.0, y0) - tap(x0, y0)) * fx;
     let bottom = tap(x0, y0 + 1.0) + (tap(x0 + 1.0, y0 + 1.0) - tap(x0, y0 + 1.0)) * fx;
     let cov = clamp01(top + (bottom - top) * fy);
-    let [l, inv_g, _, _] = v4(inst, field::BORDER);
-    let a = glyph_alpha(cov, l, inv_g)
-        * inst[field::INV2 + 2]
-        * clip_coverage(px, v4(inst, field::CLIP));
-    let c = v4(inst, field::STOPS);
-    [c[0] * a, c[1] * a, c[2] * a, c[3] * a]
+    let a = glyph_alpha(cov, sprite.lightness, 1.0 / TEXT_GAMMA) * visibility(prop, px);
+    scaled(sprite.color, a)
 }
 
 /// CSS `saturate()` on gamma sRGB.
@@ -317,19 +386,22 @@ fn saturate(c: [f32; 3], s: f32) -> [f32; 3] {
     [clamp01(r), clamp01(g), clamp01(b)]
 }
 
-/// Output of the backdrop pipeline for one pixel; `blurred` is the
-/// bilinear sample of the blurred level (ignored without blur).
-pub(crate) fn shade_backdrop(inst: &Instance, px: V2, scale: f32, blurred: [f32; 3]) -> V4 {
-    let p = local_pos(inst, px, scale);
-    let ppu = inst[field::XFORM2 + 2];
-    let rect = v4(inst, field::RECT);
-    let ext = v4(inst, field::RADII);
-    let exps = v4(inst, field::EXPS);
-    let d = sd_shape(p, rect, ext, exps);
+/// A backdrop composite at one pixel; `blurred` is the bilinear sample of
+/// the blurred level (ignored without blur).
+pub(crate) fn shade_backdrop(
+    b: &BackdropRecord,
+    prop: &Property,
+    px: V2,
+    scale: f32,
+    blurred: [f32; 3],
+) -> V4 {
+    let p = local_pos(prop, px, scale);
+    let ppu = prop.ppu;
+    let d = sd_shape(p, b.rect, b.ext, b.exps);
     let shape = coverage(d, ppu);
-    let tint = v4(inst, field::STOPS);
-    let [hw, hk, sat, grain] = v4(inst, field::BORDER);
-    let base = if inst[field::GRAD + 2] > 0.0 {
+    let tint = b.tint;
+    let [hw, hk, sat, grain] = b.params;
+    let base = if b.has_blur != 0 {
         let c = saturate(blurred, sat);
         let k = 1.0 - tint[3];
         [
@@ -345,11 +417,11 @@ pub(crate) fn shade_backdrop(inst: &Instance, px: V2, scale: f32, blurred: [f32;
     if hw > 0.0 {
         rim = shape - coverage(d + hw, ppu);
         if hk > 0.0 {
-            let fade = ext[0].max(ext[1]).max(4.0);
-            rim *= clamp01(1.0 - (p[1] - rect[1]) / fade);
+            let fade = b.ext[0].max(b.ext[1]).max(4.0);
+            rim *= clamp01(1.0 - (p[1] - b.rect[1]) / fade);
         }
     }
-    let h = v4(inst, field::BORDER_COLOR);
+    let h = b.rim;
     let k = shape - rim * h[3];
     let mut c = [
         h[0] * rim + base[0] * k,
@@ -357,10 +429,9 @@ pub(crate) fn shade_backdrop(inst: &Instance, px: V2, scale: f32, blurred: [f32;
         h[2] * rim + base[2] * k,
         h[3] * rim + base[3] * k,
     ];
-    let n = (bayer(px) * inst[field::INV2 + 3] / 255.0 + noise(px) * grain) * c[3];
+    let n = (bayer(px) / 255.0 + noise(px) * grain) * c[3];
     c = [c[0] + n, c[1] + n, c[2] + n, c[3]];
-    let k = inst[field::INV2 + 2] * clip_coverage(px, v4(inst, field::CLIP));
-    [c[0] * k, c[1] * k, c[2] * k, c[3] * k]
+    scaled(c, visibility(prop, px))
 }
 
 #[cfg(test)]
