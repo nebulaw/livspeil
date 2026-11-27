@@ -565,3 +565,90 @@ fn layers_are_per_view_and_key() {
     let b = app.new_model(());
     assert_ne!(app.layer(b.id(), "x"), first);
 }
+
+/// An untracked read does not subscribe the view, and an owned watcher ends
+/// with its view.
+#[test]
+fn untracked_reads_and_watches() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    struct Reader {
+        model: Model<u32>,
+        seen: Rc<Cell<u32>>,
+        watching: bool,
+    }
+    impl Render for Reader {
+        fn render(&mut self, cx: &mut ViewContext<'_, Self>) -> Element {
+            let value = cx.untracked(|app| *self.model.read(app));
+            if !self.watching {
+                self.watching = true;
+                let (model, seen) = (self.model, self.seen.clone());
+                cx.watch(model.id(), move |app| seen.set(*model.read(app)));
+            }
+            div().name(format!("value-{value}"))
+        }
+    }
+
+    let mut app = App::new();
+    let model = app.new_model(1_u32);
+    let seen = Rc::new(Cell::new(0));
+    let view = app.new_view(Reader {
+        model,
+        seen: seen.clone(),
+        watching: false,
+    });
+    app.set_root(view);
+    let mut h = TestHost::new(app, SIZE);
+    h.run_until_idle(20);
+    model.update(&mut h.app, |v, cx| {
+        *v = 2;
+        cx.notify();
+    });
+    assert_eq!(seen.get(), 2);
+    assert!(!h.app.needs_frame(), "the read did not subscribe the view");
+    assert!(h.app.find("value-1").is_some());
+
+    h.app.release(view.id());
+    model.update(&mut h.app, |v, cx| {
+        *v = 3;
+        cx.notify();
+    });
+    assert_eq!(seen.get(), 2);
+}
+
+#[test]
+fn releasing_an_owner_releases_what_it_owns() {
+    let mut app = App::new();
+    let count = |app: &App| {
+        let debug = format!("{app:?}");
+        debug.split(", ").next().unwrap_or_default().to_owned()
+    };
+    let empty = count(&app);
+    let (a, b, c) = (app.new_model(()), app.new_model(()), app.new_model(()));
+    let layer = app.layer(c.id(), "x");
+    app.own(a.id(), b.id());
+    app.own(b.id(), c.id());
+    app.release(a.id());
+    assert_eq!(count(&app), empty);
+    assert!(!layer.is_alive(&app));
+
+    // Moved to a second owner; a child released early; a cycle.
+    let (a, b, c) = (app.new_model(1), app.new_model(2), app.new_model(3));
+    app.own(a.id(), c.id());
+    app.own(b.id(), c.id());
+    app.release(a.id());
+    assert_eq!(*c.read(&app), 3);
+    app.release(c.id());
+    app.own(b.id(), b.id());
+    let d = app.new_model(4);
+    app.own(b.id(), d.id());
+    app.own(d.id(), b.id());
+    app.release(b.id());
+    assert_eq!(count(&app), empty);
+
+    // An owner that is already gone.
+    let e = app.new_model(5);
+    app.own(a.id(), e.id());
+    assert_eq!(count(&app), empty);
+}

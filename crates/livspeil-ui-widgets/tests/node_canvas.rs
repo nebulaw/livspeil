@@ -9,13 +9,13 @@ mod common;
 use common::{down, find, host_sized, moved, pointer, scene, up};
 use livspeil_ui_core::{
     Element, InputEvent, Key, Model, Modifiers, MouseButton, NamedKey, PointerKind, ScrollDelta,
-    TestHost, View, div,
+    SharedString, TestHost, View, div,
 };
 use livspeil_ui_layout::{Canvas, Point, Size, Vec2};
 use livspeil_ui_theme::MotionConfig;
 use livspeil_ui_widgets::{
-    CardMetrics, DemoGraph, GraphCache, Link, Lod, NodeCanvas, NodeGraphModel, ParamValue, PortRef,
-    find_snap, rubber_select,
+    CardMetrics, DemoGraph, GraphCache, Link, Lod, NodeCanvas, NodeGraphModel, ParamValue,
+    PortInfo, PortRef, find_snap, rubber_select,
 };
 
 type DemoCanvas = NodeCanvas<DemoGraph>;
@@ -63,18 +63,21 @@ impl Fx {
         self.h.run_until_idle(100);
     }
     fn node(&self, title: &str) -> Point {
+        // The canvas is at the window's origin.
         let b = self
             .h
             .app
-            .bounds(find(&self.h, &format!("node:{title}")))
+            .visual_bounds(find(&self.h, &format!("node:{title}")))
             .unwrap();
-        // Bounds are untransformed layout bounds = canvas space here; map
-        // to the window through the canvas (origin at 0,0).
-        self.canvas().to_view(Point::new(b.x + 100.0, b.y + 12.0))
+        let zoom = self.canvas().zoom;
+        Point::new(b.x + 100.0 * zoom, b.y + 12.0 * zoom)
     }
     fn port(&self, name: &str) -> Point {
-        let b = self.h.app.bounds(find(&self.h, name)).unwrap();
-        self.canvas().to_view(b.center())
+        self.h
+            .app
+            .visual_bounds(find(&self.h, name))
+            .unwrap()
+            .center()
     }
 }
 
@@ -404,8 +407,8 @@ fn parameters_edit_the_model() {
     // The Clamp toggle of Color Ramp.
     assert!(f.h.app.find("node:Color Ramp").is_some());
     let toggle = f.h.app.find("toggle").expect("a toggle row in a card");
-    let b = f.h.app.bounds(toggle).unwrap();
-    let p = f.canvas().to_view(b.center());
+    let b = f.h.app.visual_bounds(toggle).unwrap();
+    let p = b.center();
     f.h.click(p.x, p.y);
     f.h.run_until_idle(100);
     assert_eq!(
@@ -634,13 +637,14 @@ impl Rng {
     }
 }
 
-/// After random pans, zooms, node moves and selections, the canvas that was
-/// maintained incrementally (layers, virtualization) paints exactly what a
-/// new one paints.
+/// After random pans, zooms, selections and graph edits, several of them
+/// sometimes within one frame, the canvas that was maintained incrementally
+/// (layers, virtualization, per-node changes) paints exactly what a new one
+/// paints.
 #[test]
 fn retained_equals_fresh() {
     const SIZE: Size = Size::new(900.0, 600.0);
-    for seed in 0..4 {
+    for seed in 0..8 {
         let mut rng = Rng(seed);
         let mut f = fixture_with(DemoGraph::grid(60, 80), SIZE);
         // The fixture's pointer move must not leave a hover behind.
@@ -649,7 +653,7 @@ fn retained_equals_fresh() {
         let view = f.view;
         let mut checked = 0;
         for step in 0..120 {
-            match rng.below(8) {
+            match rng.below(12) {
                 0..=2 => {
                     let by = Vec2::new(rng.between(-250, 250), rng.between(-200, 200));
                     DemoCanvas::pan_by(view, &mut f.h.app, by);
@@ -676,14 +680,58 @@ fn retained_equals_fresh() {
                         cx.notify();
                     });
                 }
+                7 => {
+                    // A few small moves, as a drag makes.
+                    let node = 1 + rng.below(60);
+                    for _ in 0..=rng.below(4) {
+                        f.graph.update(&mut f.h.app, |g, cx| {
+                            let by = Vec2::new(rng.between(-30, 30), rng.between(-30, 30));
+                            g.set_position(node, g.position(node) + by);
+                            cx.notify();
+                        });
+                    }
+                }
+                8 => {
+                    let node = 1 + rng.below(60);
+                    let value = ParamValue::Number {
+                        value: f64::from(rng.between(0, 100)) / 100.0,
+                        min: 0.0,
+                        max: 1.0,
+                        step: 0.01,
+                    };
+                    f.graph.update(&mut f.h.app, |g, cx| {
+                        g.set_param(node, 0, value);
+                        cx.notify();
+                    });
+                }
+                9 => {
+                    let (a, b) = (1 + rng.below(60), 1 + rng.below(60));
+                    let drop = rng.below(2) == 0;
+                    f.graph.update(&mut f.h.app, |g, cx| {
+                        if drop && !g.links.is_empty() {
+                            let link = g.links[usize::try_from(a).unwrap() % g.links.len()];
+                            g.disconnect(link);
+                        } else {
+                            g.connect(Link {
+                                from: PortRef::output(a, 0),
+                                to: PortRef::input(b, 0),
+                            });
+                        }
+                        cx.notify();
+                    });
+                }
                 _ => {
                     DemoCanvas::fit(view, &mut f.h.app);
                 }
             }
-            f.h.run_until_idle(200);
             if step % 3 != 0 {
+                // Sometimes the next edit lands before a frame is drawn.
+                if rng.below(2) == 0 {
+                    f.h.run_until_idle(200);
+                }
                 continue;
             }
+            f.h.run_until_idle(200);
             let graph = f.graph.read(&f.h.app).clone();
             let (canvas, selection) = (f.canvas(), f.s().selection().clone());
             let mut fresh = fixture_with(graph, SIZE);
@@ -720,4 +768,219 @@ fn first_difference(a: &str, b: &str) -> String {
         a.lines().nth(at),
         b.lines().nth(at)
     )
+}
+
+fn move_node(f: &mut Fx, node: u64, by: Vec2) {
+    f.graph.update(&mut f.h.app, |g, cx| {
+        g.set_position(node, g.position(node) + by);
+        cx.notify();
+    });
+}
+
+fn entities(f: &Fx) -> String {
+    let debug = format!("{:?}", f.h.app);
+    debug.split(", ").next().unwrap_or_default().to_owned()
+}
+
+#[test]
+fn moving_a_node_renders_only_its_wires() {
+    let mut f = fixture_with(DemoGraph::grid(500, 700), Size::new(1200.0, 800.0));
+    let view = f.view;
+    let card = find(&f.h, "node:Node 21");
+    let before = f.h.app.visual_bounds(card).unwrap();
+    let (renders, built) = (f.h.app.render_count(view.id()), f.s().stats());
+    let layouts = f.h.app.layout_stats();
+    for _ in 0..10 {
+        // Several moves before a frame cost one update.
+        for _ in 0..3 {
+            move_node(&mut f, 22, Vec2::new(2.0, 1.0));
+        }
+        let frame = f.h.step().expect("a frame").stats;
+        assert_eq!(
+            (frame.views_rendered, frame.reconciled, frame.layout),
+            (1, 2, false)
+        );
+    }
+    assert_eq!(f.h.app.render_count(view.id()), renders);
+    assert_eq!(f.s().stats(), built);
+    assert_eq!(f.h.app.layout_stats(), layouts);
+    let after = f.h.app.visual_bounds(card).unwrap();
+    assert_eq!(after.origin(), before.origin() + Vec2::new(60.0, 30.0));
+    assert_eq!(
+        f.s().cache().unwrap().node(22).unwrap().rect.origin(),
+        f.graph.read(&f.h.app).position(22)
+    );
+    // The card is hit where it now is.
+    let p = Point::new(after.x + 100.0, after.y + 12.0);
+    f.click_mod(p, Modifiers::NONE);
+    assert_eq!(f.sel(), [22]);
+}
+
+#[test]
+fn a_node_entering_or_leaving_the_built_region_gets_or_loses_its_card() {
+    let mut f = fixture_with(DemoGraph::grid(100, 120), Size::new(900.0, 600.0));
+    let start = f.s().stats().built_nodes;
+    let home = f.graph.read(&f.h.app).position(2);
+    let count = entities(&f);
+    for _ in 0..5 {
+        for (to, built) in [(Point::new(9000.0, 9000.0), start - 1), (home, start)] {
+            f.graph.update(&mut f.h.app, |g, cx| {
+                g.set_position(2, to);
+                cx.notify();
+            });
+            f.h.run_until_idle(100);
+            assert_eq!(f.s().stats().built_nodes, built);
+            assert_eq!(f.h.app.find("node:Node 1").is_some(), built == start);
+        }
+    }
+    // Released cards take their fields with them.
+    assert_eq!(entities(&f), count);
+}
+
+#[test]
+fn a_parameter_changed_outside_shows_in_the_card() {
+    let mut f = fixture();
+    let set = |f: &mut Fx, value: f64| {
+        f.graph.update(&mut f.h.app, |g, cx| {
+            g.set_param(
+                3,
+                0,
+                ParamValue::Number {
+                    value,
+                    min: 0.0,
+                    max: 1.0,
+                    step: 0.01,
+                },
+            );
+            cx.notify();
+        });
+        f.h.run_until_idle(100);
+    };
+    assert!(scene(&f.h).contains("\"0.50\""));
+    set(&mut f, 0.83);
+    let shown = scene(&f.h);
+    assert!(shown.contains("\"0.83\"") && !shown.contains("\"0.50\""));
+}
+
+/// A model that does not say what changed.
+struct Opaque(DemoGraph);
+
+impl NodeGraphModel for Opaque {
+    fn revision(&self) -> u64 {
+        self.0.revision()
+    }
+    fn node_ids(&self) -> Vec<u64> {
+        self.0.node_ids()
+    }
+    fn title(&self, node: u64) -> SharedString {
+        self.0.title(node)
+    }
+    fn position(&self, node: u64) -> Point {
+        self.0.position(node)
+    }
+    fn inputs(&self, node: u64) -> Vec<PortInfo> {
+        self.0.inputs(node)
+    }
+    fn outputs(&self, node: u64) -> Vec<PortInfo> {
+        self.0.outputs(node)
+    }
+    fn links(&self) -> Vec<Link> {
+        self.0.links()
+    }
+    fn set_position(&mut self, node: u64, position: Point) {
+        self.0.set_position(node, position);
+    }
+    fn connect(&mut self, link: Link) {
+        self.0.connect(link);
+    }
+}
+
+#[test]
+fn a_model_without_change_reports_still_updates() {
+    let mut out = None;
+    let (mut h, _) = host_sized(Size::new(900.0, 600.0), |app, env| {
+        let graph = app.new_model(Opaque(DemoGraph::sample()));
+        let view = app.new_view(NodeCanvas::new(env, graph));
+        out = Some((graph, view));
+        Box::new(move |_| div().w_full().h_full().child(Element::view(&view)))
+    });
+    let (graph, view) = out.unwrap();
+    h.run_until_idle(100);
+    let card = find(&h, "node:Mix");
+    let before = h.app.visual_bounds(card).unwrap();
+    let renders = h.app.render_count(view.id());
+    graph.update(&mut h.app, |g, cx| {
+        g.set_position(3, g.position(3) + Vec2::new(40.0, 25.0));
+        cx.notify();
+    });
+    h.run_until_idle(100);
+    assert_eq!(h.app.render_count(view.id()), renders + 1);
+    assert_eq!(
+        h.app.visual_bounds(card).unwrap().origin(),
+        before.origin() + Vec2::new(40.0, 25.0)
+    );
+}
+
+#[test]
+fn a_changed_parameter_range_replaces_its_field() {
+    let mut f = fixture();
+    let param = |value, max, step| ParamValue::Number {
+        value,
+        min: 0.0,
+        max,
+        step,
+    };
+    f.graph.update(&mut f.h.app, |g, cx| {
+        g.set_param(3, 0, param(2.0, 8.0, 0.25));
+        cx.notify();
+    });
+    f.h.run_until_idle(100);
+    let field = find(&f.h, "param:3:0");
+    f.h.app.focus(field);
+    f.h.key("up");
+    f.h.run_until_idle(100);
+    assert_eq!(
+        f.graph.read(&f.h.app).nodes[2].params[0].value,
+        param(2.25, 8.0, 0.25)
+    );
+}
+
+#[test]
+fn releasing_a_canvas_releases_everything_it_created() {
+    let mut out = None;
+    let (mut h, _) = host_sized(Size::new(900.0, 600.0), |app, env| {
+        let graph = app.new_model(DemoGraph::sample());
+        let shown: Model<Option<View<DemoCanvas>>> = app.new_model(None);
+        out = Some((graph, shown, env.clone()));
+        Box::new(move |cx| {
+            let el = div().w_full().h_full();
+            match *shown.read(cx) {
+                Some(view) => el.child(Element::view(&view)),
+                None => el,
+            }
+        })
+    });
+    let (graph, shown, env) = out.unwrap();
+    h.run_until_idle(100);
+    let count = |app: &livspeil_ui_core::App| {
+        let debug = format!("{app:?}");
+        debug.split(", ").next().unwrap_or_default().to_owned()
+    };
+    let empty = count(&h.app);
+    for _ in 0..3 {
+        let view = h.app.new_view(NodeCanvas::new(&env, graph));
+        shown.update(&mut h.app, |s, cx| {
+            *s = Some(view);
+            cx.notify();
+        });
+        h.run_until_idle(100);
+        assert!(h.app.find("node:Mix").is_some());
+        shown.update(&mut h.app, |s, cx| {
+            *s = None;
+            cx.notify();
+        });
+        h.app.release(view.id());
+        h.run_until_idle(100);
+        assert_eq!(count(&h.app), empty);
+    }
 }

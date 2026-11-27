@@ -98,10 +98,11 @@ pub use menu::{
     shortcut_for,
 };
 pub use node_canvas::{
-    CANVAS_SCOPE, CanvasStats, CardMetrics, DemoGraph, DemoNode, GraphCache, LOD_COMPACT, LOD_FULL,
-    Link, Lod, MINIMAP, NODE_WIDTH, NodeCanvas, NodeGeom, NodeGraphModel, NodeId, PORT_DOT,
-    ParamInfo, ParamValue, PortInfo, PortRef, PortSide, SNAP_RADIUS, WIRE_WIDTH, find_snap,
-    graph_bounds, minimap_mapping, oriented, palette_color, rect_from, rubber_select,
+    Applied, CANVAS_SCOPE, CanvasStats, CardMetrics, ChangeLog, DemoGraph, DemoNode, GraphCache,
+    GraphChange, LOD_COMPACT, LOD_FULL, Link, Lod, MINIMAP, NODE_WIDTH, NodeCanvas, NodeGeom,
+    NodeGraphModel, NodeId, PORT_DOT, ParamInfo, ParamValue, PortInfo, PortRef, PortSide,
+    SNAP_RADIUS, WIRE_WIDTH, find_snap, graph_bounds, minimap_mapping, oriented, palette_color,
+    rect_from, rubber_select,
 };
 pub use number_field::{NumberField, Scrub, scrub_precision};
 pub use popover::{POPOVER_GAP, POPOVER_MARGIN, Placement, Popover, place_popover};

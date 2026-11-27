@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-4.0
 
 # Livspeil UI frame pipeline (retained rendering)
 
-Status: **accepted** (D65, 2026-11-27); P0, P1 and P2 built. Extends
+Status: **accepted** (D65, 2026-11-27); P0, P1, P2 and P4 built. Extends
 `livspeil-ui-spec-v0.md` sections 3, 5, 12 and 13. Nothing else is built
 unless marked so.
 
@@ -218,10 +218,25 @@ layer, so content never moves relative to its box.
   needed. Lists and `ScrollView` content do the same through
   `ScrollInfo::region`. The first bullet above is built; cards as layers and
   change sets are P4.)
-- `NodeGraphModel` reports **what** changed (moved, edited, topology) in
-  addition to a revision, so the geometry cache and spatial index update
-  incrementally. A full rebuild stays the correct fallback.
+- `NodeGraphModel` reports **what** changed (`changes_since`: a node moved
+  or was edited) in addition to a revision, so the geometry cache and spatial
+  index update incrementally. A structural change, or a model that cannot
+  tell, rebuilds, which stays the correct fallback.
 - The minimap is its own fragment, updated by the same change set.
+
+Built in P4:
+
+- A card is a view on its own layer; the wires are one view. The canvas
+  reads the model without subscribing to it, watches it, and applies the
+  changes at the start of the next frame (`ViewContext::watch`,
+  `App::untracked`, `App::animate`), so a burst of edits costs one update and
+  the cost is inside the frame.
+- A moved node: its card's transform, the wire view, one minimap rect. No
+  canvas or card render, no layout.
+- Wires of all built links are one element, rebuilt when any of them changes;
+  fragments (P3) are what would make that per link.
+- The minimap remaps exactly when the graph's bounds change, so that a
+  long-lived canvas draws what a new one draws.
 
 ### 4.8 Damage and blur
 
@@ -269,7 +284,7 @@ before and after numbers.
 | P1 (built) | Instance families and the curve primitive | upload down at least 5x on the stress graph (16.6x on `pan-stress`, `docs/benchmarks.md`); goldens reviewed |
 | P2 (built) | Property tree and layout boundaries | pan, zoom and scroll render no view and run no layout |
 | P3 | Paint fragments and retained buffers | upload targets of section 3 met |
-| P4 | NodeCanvas change sets and virtualization margin | CPU targets of section 3 met at 2000 nodes |
+| P4 (built, see below) | NodeCanvas change sets and virtualization margin | CPU targets of section 3 met at 2000 nodes |
 | P5 | Damage and blur caching | idle GPU work gone; measured on the iGPU |
 
 P1 is independent of P2. P3 needs P2.
@@ -310,6 +325,30 @@ scene conversion and encoding):
 
 Times on screen, for P1 and P2 together, are in `docs/benchmarks.md`
 ("Frame pipeline P1 and P2 on screen").
+
+### P4 results
+
+Dragging one node of 2000 (`frame_phases`, headless, release, i5-12500T,
+CPU in ms: build, scene conversion and encoding):
+
+| Zoom | before | after | pan before | pan after |
+|---|---:|---:|---:|---:|
+| 1 (64 nodes built) | 3.87 | 0.59 | 0.52 | 0.60 |
+| 0.4 (440 built) | 10.33 | 0.86 | 0.86 | 0.93 |
+| fit all (2000 built) | 7.29 | 1.53 | 1.06 | 1.51 |
+
+The `drag-stress` budget renders one view and reconciles 2 elements (was 2
+views and 2,607).
+
+- Section 3's 1 ms is met for dragging and panning except with the whole
+  graph in view, where encoding alone takes 0.8 ms. That needs P3.
+- Panning got slower, most with everything in view: each card now has its own
+  transform, so painting walks 4,000 more commands and the property table has
+  one entry per card (+160 KB uploaded fit to all). With retained fragments
+  (P3) an unchanged card is not painted or encoded again.
+- On screen (500 nodes, `docs/benchmarks.md`): `drag-stress` holds 144 fps
+  at 1.35 ms of CPU (was 118 fps, 6.34 ms); pan and zoom stay at 144 fps and
+  cost 0.06 to 0.33 ms more.
 
 ## 8. Alternatives not taken
 

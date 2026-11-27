@@ -477,10 +477,11 @@ fn node_canvas(scale: f32) -> Result<Shot, ShotError> {
             let Some(view) = out.get() else { return };
             host.pointer_move(1.0, 1.0);
             host.run_until_idle(50);
-            let canvas = view.read(&host.app).canvas();
+            // `(dx, dy)` canvas units from an element's top left, on screen.
+            let zoom = view.read(&host.app).canvas().zoom;
             let to_view = |host: &TestHost, name: &str, dx: f32, dy: f32| {
-                let b = host.app.bounds(host.app.find(name)?)?;
-                Some(canvas.to_view(Point::new(b.x + dx, b.y + dy)))
+                let b = host.app.visual_bounds(host.app.find(name)?)?;
+                Some(Point::new(b.x + dx * zoom, b.y + dy * zoom))
             };
             if let Some(p) = to_view(host, "node:Mix", 60.0, 14.0) {
                 host.click(p.x, p.y);

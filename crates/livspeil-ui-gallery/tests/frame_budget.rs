@@ -83,15 +83,17 @@ fn measure(scenario: Scenario) -> Work {
 /// (frames that rendered, frames that ran layout, views in a frame,
 /// elements reconciled in a frame, instances, bytes uploaded: draw order,
 /// records and property table).
+///
+/// Node canvas uploads include one property entry per built card (P4: each
+/// card is a layer, so that moving one changes only its entry).
 fn budget(scenario: Scenario) -> (u32, u32, usize, usize, usize, usize) {
     match scenario {
-        Scenario::PanSample => (0, 0, 0, 0, 545, 33_300),
-        Scenario::PanStress => (0, 0, 0, 0, 4500, 345_152),
-        Scenario::PanStressFit => (0, 0, 0, 0, 2169, 175_204),
-        Scenario::ZoomStress => (0, 0, 0, 0, 4500, 345_152),
-        // Still renders until P4; it reconciles the margin around the view
-        // that pan and zoom need to render nothing.
-        Scenario::DragStress => (88, 0, 2, 2607, 4572, 351_328),
+        Scenario::PanSample => (0, 0, 0, 0, 545, 33_780),
+        Scenario::PanStress => (0, 0, 0, 0, 4500, 364_272),
+        Scenario::PanStressFit => (0, 0, 0, 0, 2169, 215_124),
+        Scenario::ZoomStress => (0, 0, 0, 0, 4500, 364_272),
+        // Only the dragged node's wires are rendered.
+        Scenario::DragStress => (88, 0, 1, 2, 4572, 370_528),
         // One frame leaves the built rows.
         Scenario::ScrollList => (1, 1, 1, 466, 1808, 106_000),
         Scenario::HoverButtons => (0, 0, 0, 0, 458, 26_216),

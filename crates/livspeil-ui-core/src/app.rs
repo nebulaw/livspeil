@@ -128,6 +128,11 @@ pub struct App {
     deps: HashMap<EntityId, Vec<EntityId>>,
     observers: HashMap<EntityId, BTreeSet<EntityId>>,
     subscriptions: HashMap<EntityId, Vec<(u64, Callback)>>,
+    /// Entities released with their owner, by owner, and each one's owner.
+    children: HashMap<EntityId, BTreeSet<EntityId>>,
+    owner_of: HashMap<EntityId, EntityId>,
+    /// Subscriptions cancelled when the view that made them is released.
+    owned: HashMap<EntityId, Vec<Subscription>>,
     next_sub: u64,
     tracking: RefCell<Option<Vec<EntityId>>>,
     pending: Vec<EntityId>,
@@ -199,6 +204,9 @@ impl App {
             deps: HashMap::new(),
             observers: HashMap::new(),
             subscriptions: HashMap::new(),
+            owned: HashMap::new(),
+            children: HashMap::new(),
+            owner_of: HashMap::new(),
             next_sub: 1,
             tracking: RefCell::new(None),
             pending: Vec::new(),
@@ -260,8 +268,41 @@ impl App {
         view
     }
 
-    /// Drop an entity. Handles to it become invalid.
+    /// Release `child` when `owner` is released. For the views and models an
+    /// entity creates for itself. An entity has one owner: a second call
+    /// moves it. If `owner` is already gone, `child` is released now.
+    pub fn own(&mut self, owner: EntityId, child: EntityId) {
+        if owner == child {
+            return;
+        }
+        if !self.exists(owner) {
+            self.release(child);
+            return;
+        }
+        self.disown(child);
+        self.children.entry(owner).or_default().insert(child);
+        self.owner_of.insert(child, owner);
+    }
+
+    fn disown(&mut self, child: EntityId) {
+        if let Some(owner) = self.owner_of.remove(&child)
+            && let Some(set) = self.children.get_mut(&owner)
+        {
+            set.remove(&child);
+            if set.is_empty() {
+                self.children.remove(&owner);
+            }
+        }
+    }
+
+    /// Drop an entity and everything it [owns](App::own). Handles to them
+    /// become invalid.
     pub fn release(&mut self, id: EntityId) {
+        self.disown(id);
+        for child in self.children.remove(&id).unwrap_or_default() {
+            self.owner_of.remove(&child);
+            self.release(child);
+        }
         self.entities.remove(&id);
         self.views.remove(&id);
         self.dirty_views.remove(&id);
@@ -277,6 +318,9 @@ impl App {
         }
         self.tasks.retain(|t| t.owner != id);
         self.subscriptions.remove(&id);
+        for sub in self.owned.remove(&id).unwrap_or_default() {
+            self.unsubscribe(sub);
+        }
         if let Some(observed) = self.deps.remove(&id) {
             for m in observed {
                 if let Some(set) = self.observers.get_mut(&m) {
@@ -289,6 +333,33 @@ impl App {
 
     pub(crate) fn exists(&self, id: EntityId) -> bool {
         self.entities.contains_key(&id)
+    }
+
+    /// Run `f` without recording its reads: a view that reads a model this
+    /// way in `render` is not rendered again when the model changes. For
+    /// views that keep their own copy and apply changes themselves (see
+    /// [`ViewContext::watch`](crate::ViewContext::watch)).
+    pub fn untracked<R>(&self, f: impl FnOnce(&App) -> R) -> R {
+        let reads = self.tracking.replace(None);
+        let out = f(self);
+        self.tracking.replace(reads);
+        out
+    }
+
+    /// [`App::observe`] on behalf of `owner`: cancelled when it is released.
+    pub(crate) fn observe_for(
+        &mut self,
+        owner: EntityId,
+        entity: EntityId,
+        f: impl Fn(&mut App) + 'static,
+    ) {
+        let sub = self.observe(entity, move |app| {
+            // The owner may have been released by an earlier callback.
+            if app.exists(owner) {
+                f(app);
+            }
+        });
+        self.owned.entry(owner).or_default().push(sub);
     }
 
     pub(crate) fn read_entity<T: 'static>(&self, id: EntityId) -> Option<&T> {
