@@ -492,3 +492,32 @@ all of them for curves that may double back), which brought it back to 0.17
 with identical pixels. Not measured: an integrated GPU, where fragment work
 costs far more.
 
+## Frame pipeline P1 and P2 on screen
+
+2026-11-28, release build, RTX 5070 Ti, driver 620.73.04, Hyprland, 144 Hz,
+Vulkan, FIFO, 1600x1000 at scale 1, gallery scenarios, 7 s each, medians
+without the first 30 frames. One run per scenario. "Before" is the P0 table of
+`specs/livspeil-ui-frame-pipeline.md` section 2, taken a day earlier; "after"
+is P1 and P2 together. P1 alone was not measured on screen. CPU = build +
+paint + encode.
+
+| Scenario | fps | CPU ms | submit ms | GPU ms | instances | uploaded |
+|---|---:|---:|---:|---:|---:|---:|
+| `pan-sample` | 144 -> 144 | 1.29 -> 0.35 | 1.23 -> 1.13 | 0.12 -> 0.11 | 579 -> 545 | 0.19 MB -> 33 KB |
+| `pan-stress` | 108 -> 144 | 5.66 -> 1.30 | 1.95 -> 0.53 | 0.17 -> 0.17 | 16,871 -> 4,330 | 5.40 MB -> 331 KB |
+| `pan-stress-fit` | 144 -> 143 | 3.18 -> 1.31 | 2.19 -> 0.90 | 0.14 -> 0.16 | 19,799 -> 2,134 | 6.34 MB -> 172 KB |
+| `zoom-stress` | 124 -> 144 | 4.79 -> 1.43 | 1.70 -> 0.53 | 0.17 -> 0.17 | 13,608 -> 3,060 | 4.35 MB -> 235 KB |
+| `drag-stress` | 99 -> 118 | 6.66 -> 6.34 | 2.07 -> 0.48 | 0.17 -> 0.17 | 18,449 -> 4,573 | 5.90 MB -> 349 KB |
+| `scroll-list` | - -> 144 | - -> 0.94 | - -> 0.88 | - -> 0.11 | - -> 1,312 | - -> 77 KB |
+| `hover-buttons` | - -> 144 | - -> 0.31 | - -> 0.83 | - -> 0.07 | - -> 458 | - -> 26 KB |
+
+`scroll-list` has no "before": the P0 scenario never scrolled. `hover-buttons`
+did not exist.
+
+- **Dragging is not fixed.** `build` is 5.8 of its 6.3 ms, 86 of 648 frames
+  were late (p95 interval 13.8 ms) and the mean rate was 101 fps. P4.
+- Pan and zoom hold the refresh rate; at most 8 of about 940 frames were late.
+- The 1 ms CPU target of the pipeline spec's section 3 (2000 nodes) is not
+  met: the 500-node scenarios already take 1.3 to 1.4 ms. Paint, encode and
+  upload still cover the whole scene (P3).
+
