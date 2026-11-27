@@ -347,9 +347,10 @@ fn core_text_weight_and_features_reach_the_shaper() {
 }
 
 #[test]
-fn wires_become_rotated_round_quads() {
+fn a_wire_becomes_one_curve_under_the_current_state() {
     use livspeil_ui_core::Wire;
-    use livspeil_ui_layout::Point;
+    use livspeil_ui_layout::{Point, Transform2D};
+    use livspeil_ui_render::{Affine, Primitive};
     let w = Wire::link(
         Point::new(10.0, 10.0),
         Point::new(150.0, 80.0),
@@ -357,24 +358,42 @@ fn wires_become_rotated_round_quads() {
         Color::WHITE,
     );
     let scene = Scene {
-        commands: vec![PaintCmd::Wire(w)],
+        commands: vec![
+            PaintCmd::PushTransform(Transform2D {
+                a: 0.5,
+                b: 0.0,
+                c: 0.0,
+                d: 0.5,
+                e: 3.0,
+                f: 4.0,
+            }),
+            PaintCmd::PushOpacity(0.5),
+            PaintCmd::Wire(w),
+            PaintCmd::PopOpacity,
+            PaintCmd::PopTransform,
+        ],
     };
     let mut bridge = PaintBridge::new(FontSystem::test());
     let mut list = DisplayList::new();
     bridge.paint_scene(&scene, 2.0, &mut list).unwrap();
-    assert!(list.len() >= 4, "{}", list.len());
-    for item in &list.items {
-        let livspeil_ui_render::Primitive::Quad(q) = &item.primitive else {
-            panic!("not a quad");
-        };
-        assert_eq!(q.rect.h, 2.0);
-        assert_eq!(q.radii.tl, 1.0);
-    }
-    // The first segment starts at the wire's start (local origin).
-    let livspeil_ui_render::Primitive::Quad(first) = &list.items[0].primitive else {
-        unreachable!()
+    assert_eq!(list.len(), 1);
+    let Primitive::Curve(c) = &list.items[0].primitive else {
+        panic!("not a curve");
     };
-    assert_eq!(first.transform.apply(0.0, 0.0), (10.0, 10.0));
+    assert_eq!(
+        c.points,
+        [[10.0, 10.0], [80.0, 10.0], [80.0, 80.0], [150.0, 80.0]]
+    );
+    // The width stays in local units; the renderer applies the transform.
+    assert_eq!(c.width, 2.0);
+    assert_eq!(c.opacity, 0.5);
+    assert_eq!(
+        c.transform,
+        Affine {
+            m: [0.5, 0.0, 0.0, 0.5, 3.0, 4.0]
+        }
+    );
+    assert_eq!(c.clip, None);
 }
 
 /// A text run moved by fractions of a pixel keeps the same glyph positions

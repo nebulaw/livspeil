@@ -45,8 +45,8 @@ License: **MPL-2.0** (D33, "choose the loose option, relicense later if needed")
   - `Image` / `Icon`: atlas-backed.
   - `Backdrop`: a region that samples and blurs what is behind it.
   - `Surface`: an external texture (the 3D viewport, a world preview).
-  - Wires (Bézier strokes for the node canvas) are flattened by the paint bridge into rotated pill quads; the renderer has no separate path primitive.
-- **Batching**: sort by layer, batch by pipeline and texture; instanced quads evaluated as SDFs in the fragment shader; one shadow pass and one blur pipeline shared by all.
+  - `Curve`: a stroked cubic Bézier (node canvas wires), one instance each; there is no general path primitive. Data formats: `livspeil-ui-frame-pipeline.md`, section 4.5.
+- **Batching**: sort by layer; one instanced pipeline for quads (SDFs in the fragment shader), shadows, sprites and curves, so painter order costs no state changes; batches break at backdrops, glyph atlas changes and runs of curves.
 - **Icons are not drawn with Vello.** Boxicons are simple filled paths, so they are rasterized once per needed physical size into an alpha atlas (zeno, the glyph rasterizer; the atlas is the glyph atlas), cached, and tinted at draw time. Vello is reserved for the Design Studio canvas (vector content), not for UI chrome.
 - **Blur**: dual-Kawase at half or quarter resolution, per-region, cached while the backdrop region and the content under it are unchanged (caching not built yet). Quality by tier: T2 radius ~24 px at half res; T1 ~12 px at quarter res; T0 none (opaque tint).
 - **Grain/dither**: tiled noise overlay on large gradients and blur surfaces to prevent banding.

@@ -418,10 +418,23 @@ built) 4.7 ms; zoom 0.4 (324 compact nodes, 533 wires) 9.1 ms; fit all
 
 `Element::wires(vec![Wire::link(a, b, width, color)])` paints cubic Béziers
 in the element's local coordinates (above its background, below its
-children) as `PaintCmd::Wire`. The paint bridge flattens each to segments
-of about 10 screen px and draws each as a rotated pill-shaped quad, so the
-CPU and GPU renderers need nothing new; strokes thinner than a physical
-pixel fade instead of disappearing.
+children) as `PaintCmd::Wire`. The paint bridge turns each into one
+`render::Curve` with the current transform, clip and opacity; nothing is
+flattened on the CPU (`Wire::flatten` serves hit testing).
+
+The renderer draws a curve as one instance (64 bytes):
+
+- The encoder picks a segment count (up to 64) that keeps the polyline
+  within 0.2 physical px of the curve, so it follows the size on screen.
+- The vertex shader draws one box per segment. Each pixel is drawn by the
+  box of its nearest segment, so a translucent wire is blended once, without
+  gaps, also where it bends sharply, crosses itself or (a level link running
+  backward) lies on itself. Caps and joints are round.
+- Antialiasing is analytic, from the distance to the polyline. A stroke
+  thinner than a physical pixel is drawn one pixel wide and fades in
+  proportion.
+- Wires of one element are one draw call; a run of wires starts and ends a
+  draw call.
 
 ## Known gaps
 

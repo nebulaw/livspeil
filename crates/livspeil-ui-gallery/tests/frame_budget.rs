@@ -43,12 +43,7 @@ fn measure(scenario: Scenario) -> Work {
         clear: Color::BLACK,
     };
     let mut list = DisplayList::new();
-    let mut gpu = Frame {
-        options,
-        clear: [0.0; 4],
-        instances: Vec::new(),
-        ops: Vec::new(),
-    };
+    let mut gpu = Frame::new(options);
     let mut work = Work::default();
     for frame in 0..Scenario::WARMUP + FRAMES {
         scenario.step(&mut host.app, &mounted, frame);
@@ -73,15 +68,15 @@ fn measure(scenario: Scenario) -> Work {
 
 /// Today's work, the ceiling for tomorrow's:
 /// (views rendered, elements reconciled, frames with layout out of 88,
-/// instances, bytes uploaded).
+/// instances, bytes uploaded: draw order, records and property table).
 fn budget(scenario: Scenario) -> (usize, usize, u32, usize, usize) {
     match scenario {
-        Scenario::PanSample => (1, 80, 88, 579, 185_280),
-        Scenario::PanStress => (1, 1827, 88, 17_894, 5_726_080),
-        Scenario::PanStressFit => (1, 507, 88, 15_477, 4_952_640),
-        Scenario::ZoomStress => (1, 1827, 88, 18_137, 5_803_840),
-        Scenario::DragStress => (2, 2328, 88, 18_089, 5_788_480),
-        Scenario::ScrollList => (1, 388, 0, 1777, 568_640),
+        Scenario::PanSample => (1, 80, 88, 545, 33_300),
+        Scenario::PanStress => (1, 1827, 88, 4500, 345_152),
+        Scenario::PanStressFit => (1, 507, 88, 2169, 175_204),
+        Scenario::ZoomStress => (1, 1827, 88, 4500, 345_152),
+        Scenario::DragStress => (2, 2328, 88, 4572, 351_328),
+        Scenario::ScrollList => (1, 388, 0, 1777, 105_060),
     }
 }
 

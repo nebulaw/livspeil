@@ -7,8 +7,8 @@
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use livspeil_ui_render::{
-    Border, Color, DisplayList, FrameOptions, GpuContext, Quad, Rect, Renderer, Shadow,
-    TARGET_FORMAT, encode,
+    Border, Color, DisplayList, Frame, FrameOptions, GpuContext, Quad, Rect, Renderer, Shadow,
+    TARGET_FORMAT, encode, encode_into,
 };
 
 const W: u32 = 1920;
@@ -49,8 +49,10 @@ fn bench(c: &mut Criterion) {
     c.bench_function("encode 10k quads", |b| {
         b.iter(|| encode(std::hint::black_box(&list), opts))
     });
-    c.bench_function("encode 10k quads + instance bytes", |b| {
-        b.iter(|| encode(&list, opts).map(|f| f.instance_bytes().len()))
+    // As hosts encode: into the previous frame's buffers.
+    let mut reused = Frame::new(opts);
+    c.bench_function("encode 10k quads into a reused frame", |b| {
+        b.iter(|| encode_into(std::hint::black_box(&list), opts, &mut reused))
     });
 
     let ctx = match GpuContext::headless() {
