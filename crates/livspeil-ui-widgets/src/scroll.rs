@@ -12,9 +12,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use livspeil_ui_core::{
-    Animated, App, DragPhase, Element, ElementId, EventCx, Layer, PointerKind, Render, Role as CoreRole,
-    SCROLL_INTO_VIEW, ScrollDelta, SharedString, VelocityTracker, View, ViewContext, div,
-    spring_step,
+    Animated, App, DragPhase, Element, ElementId, EventCx, Layer, PointerKind, Render,
+    Role as CoreRole, SCROLL_INTO_VIEW, ScrollDelta, SharedString, VelocityTracker, View,
+    ViewContext, div, spring_step,
 };
 use livspeil_ui_layout::style::{Dimension, LengthPercentageAuto, Position};
 use livspeil_ui_layout::{Rect, Size, Transform2D, Vec2};
@@ -795,10 +795,8 @@ fn reveal(view: View<ScrollView>, cx: &mut EventCx<'_>) {
     }
     measure(view, cx, sv);
     let content = sv.child("content");
-    let (Some(t), Some(origin)) = (
-        cx.bounds_within(target, content),
-        App::bounds(cx, content),
-    ) else {
+    let (Some(t), Some(origin)) = (cx.bounds_within(target, content), App::bounds(cx, content))
+    else {
         return;
     };
     let rel = Rect::new(t.x - origin.x, t.y - origin.y, t.width, t.height);
@@ -889,11 +887,13 @@ fn thumb(view: View<ScrollView>, vertical: bool, theme: &Theme, layer: Layer) ->
 impl ScrollView {
     fn axes(&self) -> impl Iterator<Item = bool> {
         let axis = self.axis;
-        [true, false].into_iter().filter(move |&vertical| match axis {
-            ScrollAxis::Vertical => vertical,
-            ScrollAxis::Horizontal => !vertical,
-            ScrollAxis::Both => true,
-        })
+        [true, false]
+            .into_iter()
+            .filter(move |&vertical| match axis {
+                ScrollAxis::Vertical => vertical,
+                ScrollAxis::Horizontal => !vertical,
+                ScrollAxis::Both => true,
+            })
     }
 
     /// The region to build for a view of `viewport` at the current offset.
@@ -1151,10 +1151,7 @@ impl VirtualList {
             // The region already reaches past the view.
             let top = region.y.max(0.0);
             let range = visible_range(top, region.bottom() - top, row_height, count, 0);
-            let mut spacer = div()
-                .name("virtual-list")
-                .h(total)
-                .cull_offscreen();
+            let mut spacer = div().name("virtual-list").h(total).cull_offscreen();
             for i in range {
                 #[allow(clippy::cast_precision_loss)]
                 let y = i as f32 * row_height;

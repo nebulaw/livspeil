@@ -223,8 +223,10 @@ fn edit(view: View<TextField>, cx: &mut App, f: impl FnOnce(&mut TextField, f32)
     }
 }
 
+/// A pointer position in text coordinates.
 fn local(cx: &EventCx<'_>, tf: &TextField, p: Point, height: f32, pad: f32) -> Point {
     let b = cx.bounds();
+    let p = cx.layout_position(p);
     Point::new(
         p.x - b.x - pad + tf.tb.scroll,
         p.y - b.y - tf.tb.text_y(height),

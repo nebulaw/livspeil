@@ -624,7 +624,8 @@ impl App {
         // Layer changes made while the tree was being reconciled, and
         // elements that got or lost a layer.
         for layer in std::mem::take(&mut self.layers.reframed) {
-            tree.relayered.extend_from_slice(tree.layered(layer).to_vec().as_slice());
+            tree.relayered
+                .extend_from_slice(tree.layered(layer).to_vec().as_slice());
         }
         for id in std::mem::take(&mut tree.relayered) {
             tree.update_bounds_from(&self.layers, id);
@@ -682,15 +683,16 @@ impl App {
     }
 
     /// The transform from the space `id` is placed in (its parent's layout
-    /// space) to the window.
+    /// space) to the window. Composed from the root down, in the order
+    /// [`App::moved_since`] composes, so the two agree to the bit.
     fn to_window(&self, id: ElementId) -> Option<Transform2D> {
-        let mut out = Transform2D::IDENTITY;
-        let mut cur = self.tree.nodes.get(&id)?.parent;
-        while let Some(p) = cur.and_then(|p| self.tree.nodes.get(&p)) {
-            out = out.then(p.transform(&self.layers));
-            cur = p.parent;
-        }
-        Some(out)
+        let parent = self.tree.nodes.get(&id)?.parent;
+        Some(
+            match parent.and_then(|p| Some((p, self.tree.nodes.get(&p)?))) {
+                Some((p, node)) => node.transform(&self.layers).then(self.to_window(p)?),
+                None => Transform2D::IDENTITY,
+            },
+        )
     }
 
     /// The bounds of `view`'s root element as of the last layout, and
@@ -885,9 +887,7 @@ impl App {
     #[must_use]
     pub fn visual_bounds(&self, id: ElementId) -> Option<Rect> {
         let node = self.tree.nodes.get(&id)?;
-        let t = node
-            .layer_transform(&self.layers)
-            .then(self.to_window(id)?);
+        let t = node.layer_transform(&self.layers).then(self.to_window(id)?);
         Some(t.apply_rect(&node.bounds))
     }
 
@@ -897,9 +897,7 @@ impl App {
     #[must_use]
     pub fn to_layout(&self, id: ElementId, point: Point) -> Option<Point> {
         let node = self.tree.nodes.get(&id)?;
-        let t = node
-            .layer_transform(&self.layers)
-            .then(self.to_window(id)?);
+        let t = node.layer_transform(&self.layers).then(self.to_window(id)?);
         Some(t.inverse()?.apply(point))
     }
 

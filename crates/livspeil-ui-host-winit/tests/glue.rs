@@ -17,9 +17,9 @@ use livspeil_ui_host_winit::widget_platform::{
     CaretBlink, apply_config_event, role_cursor, scene_without, text_focus,
 };
 use livspeil_ui_host_winit::{Accessibility, MemoryClipboard, WidgetClipboard};
-use livspeil_ui_layout::{Point, Size};
+use livspeil_ui_layout::{Point, Size, Vec2};
 use livspeil_ui_theme::ConfigEvent;
-use livspeil_ui_widgets::{Button, Env, NumberField, Slider, TextField, Toggle};
+use livspeil_ui_widgets::{Button, Env, NumberField, ScrollView, Slider, TextField, Toggle};
 
 struct Form {
     count: Model<u32>,
@@ -406,4 +406,38 @@ fn widget_clipboard_reaches_the_host_clipboard() {
     f.host.key("ctrl-v");
     f.host.run_until_idle(100);
     assert_eq!(f.text.read(&f.host.app).text(), "world");
+}
+
+#[test]
+fn ime_area_follows_scrolled_content() {
+    struct Page(View<ScrollView>);
+    impl Render for Page {
+        fn render(&mut self, _cx: &mut ViewContext<'_, Self>) -> Element {
+            div().size(300.0, 100.0).child(Element::view(&self.0))
+        }
+    }
+    let mut app = App::new();
+    let env = Env::headless(&mut app);
+    let field = app.new_view(TextField::new(&env, "hello").name("text"));
+    let scroll = app.new_view(ScrollView::new(&env, move |_, _| {
+        div()
+            .flex_col()
+            .p(40.0)
+            .h(600.0)
+            .child(Element::view(&field))
+    }));
+    let page = app.new_view(Page(scroll));
+    let root = env.root(&mut app, page);
+    app.set_root(root);
+    let mut host = TestHost::new(app, Size::new(400.0, 300.0));
+    host.run_until_idle(100);
+    let p = center(&host, "text");
+    host.click(p.x, p.y);
+    host.run_until_idle(100);
+    let before = text_focus(&host.app).expect("focused").area;
+
+    ScrollView::jump_to(scroll, &mut host.app, Vec2::new(0.0, 25.0));
+    host.run_until_idle(100);
+    let after = text_focus(&host.app).expect("focused").area;
+    assert_eq!(after.origin(), before.origin() - Vec2::new(0.0, 25.0));
 }

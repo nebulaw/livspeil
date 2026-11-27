@@ -8,8 +8,8 @@ mod common;
 
 use common::{down, find, host_sized, moved, pointer, scene, up};
 use livspeil_ui_core::{
-    Element, InputEvent, Key, Model, Modifiers, MouseButton, NamedKey, PointerKind, ScrollDelta, TestHost,
-    View, div,
+    Element, InputEvent, Key, Model, Modifiers, MouseButton, NamedKey, PointerKind, ScrollDelta,
+    TestHost, View, div,
 };
 use livspeil_ui_layout::{Canvas, Point, Size, Vec2};
 use livspeil_ui_theme::MotionConfig;
@@ -255,10 +255,14 @@ fn dragging_moves_the_selection() {
     assert_eq!(g.nodes[1].position, Point::new(90.0, 170.0));
     assert_eq!(f.sel(), vec![1, 2], "dragging keeps the selection");
     // At zoom 2 a drag moves half as far in canvas space.
-    DemoCanvas::set_canvas(f.view, &mut f.h.app, Canvas {
+    DemoCanvas::set_canvas(
+        f.view,
+        &mut f.h.app,
+        Canvas {
             zoom: 2.0,
             ..Canvas::default()
-        });
+        },
+    );
     f.h.run_until_idle(50);
     let mix = f.node("Mix");
     f.h.drag(mix, mix + Vec2::new(40.0, 0.0), 4);
@@ -382,10 +386,14 @@ fn culling_and_level_of_detail_with_2k_nodes() {
         frame.nodes
     );
     // Panning far away culls everything.
-    DemoCanvas::set_canvas(f.view, &mut f.h.app, Canvas {
+    DemoCanvas::set_canvas(
+        f.view,
+        &mut f.h.app,
+        Canvas {
             pan: Vec2::new(-1e6, -1e6),
             ..Canvas::default()
-        });
+        },
+    );
     f.h.run_until_idle(50);
     assert_eq!(f.s().stats().built_nodes, 0);
 }
@@ -491,7 +499,9 @@ fn panning_and_zooming_inside_the_built_region_render_nothing() {
     // A small zoom of the same level of detail.
     let mut canvas = f.canvas();
     canvas.zoom_at(Point::new(600.0, 400.0), 1.1);
-    let stats = frame_after(&mut f, |f| DemoCanvas::set_canvas(view, &mut f.h.app, canvas));
+    let stats = frame_after(&mut f, |f| {
+        DemoCanvas::set_canvas(view, &mut f.h.app, canvas)
+    });
     assert_eq!(stats, (0, false));
 }
 
@@ -586,7 +596,10 @@ fn a_canvas_inside_scaled_and_moved_content_maps_the_pointer() {
     // The canvas point under the pointer stays: pointer positions are read
     // through the canvas's own transforms.
     let pointer = Point::new(350.0, 230.0);
-    let under = view.read(&h.app).canvas().to_canvas(Point::new(300.0, 200.0));
+    let under = view
+        .read(&h.app)
+        .canvas()
+        .to_canvas(Point::new(300.0, 200.0));
     pointer_scroll(&mut h, pointer);
     h.run_until_idle(100);
     let canvas = view.read(&h.app).canvas();
@@ -686,7 +699,11 @@ fn retained_equals_fresh() {
             f.h.step();
             fresh.h.step();
             let (a, b) = (scene(&f.h), scene(&fresh.h));
-            assert!(a == b, "seed {seed} step {step}: {}", first_difference(&a, &b));
+            assert!(
+                a == b,
+                "seed {seed} step {step}: {}",
+                first_difference(&a, &b)
+            );
             checked += 1;
         }
         assert!(checked >= 40);

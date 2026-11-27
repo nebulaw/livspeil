@@ -586,7 +586,12 @@ pub(crate) fn remove_subtree(tree: &mut Tree, app: &mut App, id: ElementId) {
 }
 
 /// Hit test: the path from the root to the topmost element under `point`.
-pub(crate) fn hit_path(tree: &Tree, layers: &Layers, viewport: Rect, point: Point) -> Vec<ElementId> {
+pub(crate) fn hit_path(
+    tree: &Tree,
+    layers: &Layers,
+    viewport: Rect,
+    point: Point,
+) -> Vec<ElementId> {
     let mut path = Vec::new();
     if let Some(root) = tree.root {
         hit(tree, layers, root, point, viewport, &mut path);

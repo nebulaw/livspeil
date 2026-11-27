@@ -720,7 +720,7 @@ impl<R: SceneRenderer> Host<R> {
         }
         let caret = text_focus(&self.app).and_then(|t| {
             let id = t.caret?;
-            Some((id, self.app.bounds(id)?))
+            Some((id, self.app.visual_bounds(id)?))
         });
         if self.blink.set_caret(Instant::now(), caret) {
             self.request_redraw();

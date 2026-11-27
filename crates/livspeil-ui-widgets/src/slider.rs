@@ -222,11 +222,13 @@ impl Render for Slider {
                 .focusable()
                 .on_pointer_down(move |ev, cx| {
                     let track = cx.bounds();
-                    set_value(&view, cx, |s, _| s.snap(s.value_at(ev.position.x, track)));
+                    let x = cx.layout_position(ev.position).x;
+                    set_value(&view, cx, |s, _| s.snap(s.value_at(x, track)));
                 })
                 .on_drag(move |ev, cx| {
                     let track = cx.bounds();
                     let thumb = cx.element_id().child("thumb");
+                    let x = cx.layout_position(ev.position).x;
                     match ev.phase {
                         DragPhase::Start | DragPhase::Move => {
                             view.update(cx, |s, vcx| {
@@ -235,7 +237,7 @@ impl Render for Slider {
                                     vcx.notify();
                                 }
                             });
-                            set_value(&view, cx, |s, _| s.value_at(ev.position.x, track));
+                            set_value(&view, cx, |s, _| s.value_at(x, track));
                         }
                         DragPhase::End => {
                             view.update(cx, |s, vcx| {

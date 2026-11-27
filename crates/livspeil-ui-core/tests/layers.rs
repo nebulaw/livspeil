@@ -145,10 +145,7 @@ fn a_property_change_draws_a_frame_without_render_diff_or_layout() {
     assert!(!f.h.app.needs_frame());
     assert_eq!(f.hit(20.0, 15.0).as_deref(), Some("row-1-0"));
     assert_eq!(f.painted(), ["card-1", "row-1-0", "mark"]);
-    let (renders, layouts) = (
-        f.h.app.render_count(f.view.id()),
-        f.h.app.layout_stats(),
-    );
+    let (renders, layouts) = (f.h.app.render_count(f.view.id()), f.h.app.layout_stats());
     let (card, row) = (f.find("card-2"), f.find("row-2-0"));
     f.h.app.focus(card);
     f.h.app.focus_next();
@@ -215,7 +212,10 @@ fn moved_since_reports_what_moved() {
         .moved_since(seen, |id, r| moved.push((f.h.app.label(id).unwrap(), r)));
     moved.sort_by(|a, b| a.0.cmp(&b.0));
     assert_eq!(moved.len(), 5, "{moved:?}");
-    assert_eq!(moved[0], ("card-1".into(), Rect::new(11.0, 12.0, 40.0, 30.0)));
+    assert_eq!(
+        moved[0],
+        ("card-1".into(), Rect::new(11.0, 12.0, 40.0, 30.0))
+    );
     let seen = f.h.app.revision();
     let mut none = 0;
     f.h.app.moved_since(seen, |_, _| none += 1);

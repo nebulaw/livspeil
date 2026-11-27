@@ -20,8 +20,12 @@
 //!   their descendants. Hidden elements are dropped with their subtree.
 //! - Updates are incremental: the tree caches the last AccessKit node of
 //!   every id and sends only nodes that changed (the full tree first).
+//! - Bounds are where elements are on screen. While nothing renders (only
+//!   layers, animations or layout moved things, as when panning or
+//!   scrolling), the tree is not rebuilt: only the bounds of what moved are
+//!   recomputed.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Write as _};
 
 use accesskit::{Action, ActionData, ActionRequest, Node, NodeId, TreeId, TreeInfo, TreeUpdate};
@@ -29,6 +33,7 @@ use livspeil_ui_core::{
     App, ElementId, Role, SemanticAction, SemanticActionError, SemanticNode, SemanticRequest,
     SemanticValue, Toggled, ValueRequest,
 };
+use livspeil_ui_layout::Rect;
 
 pub use accesskit;
 
@@ -112,6 +117,16 @@ fn map_toggled(t: Toggled) -> accesskit::Toggled {
     }
 }
 
+/// Logical window pixels to physical ones.
+fn physical(b: Rect, scale: f64) -> accesskit::Rect {
+    accesskit::Rect {
+        x0: f64::from(b.x) * scale,
+        y0: f64::from(b.y) * scale,
+        x1: f64::from(b.x + b.width) * scale,
+        y1: f64::from(b.y + b.height) * scale,
+    }
+}
+
 /// Build the AccessKit node for an exposed element (without children).
 fn build_node(n: &SemanticNode<'_>, role: Role, scale: f64) -> Node {
     let mut node = Node::new(map_role(role));
@@ -128,13 +143,7 @@ fn build_node(n: &SemanticNode<'_>, role: Role, scale: f64) -> Node {
             node.set_label(label);
         }
     }
-    let b = n.bounds;
-    node.set_bounds(accesskit::Rect {
-        x0: f64::from(b.x) * scale,
-        y0: f64::from(b.y) * scale,
-        x1: f64::from(b.x + b.width) * scale,
-        y1: f64::from(b.y + b.height) * scale,
-    });
+    node.set_bounds(physical(n.bounds, scale));
     if let Some(s) = n.semantics {
         if let Some(d) = s.get_description() {
             node.set_description(d);
@@ -240,6 +249,9 @@ pub struct UpdateStats {
     pub sent: usize,
     /// Nodes removed since the previous update.
     pub removed: usize,
+    /// Whether every node was built again (something rendered), not only
+    /// the bounds of what moved.
+    pub rebuilt: bool,
 }
 
 /// The accessibility tree mirrored to the platform adapter: caches the
@@ -250,6 +262,9 @@ pub struct A11yTree {
     root: Option<NodeId>,
     focus: Option<NodeId>,
     stats: UpdateStats,
+    /// The [`App::revision`] and scale the nodes are up to date with.
+    seen: u64,
+    scale: f64,
 }
 
 impl A11yTree {
@@ -320,7 +335,16 @@ impl A11yTree {
     /// changed (or the app has no root yet). `scale` converts logical to
     /// physical pixels.
     pub fn update(&mut self, app: &App, scale: f64) -> Option<TreeUpdate> {
+        let current = self.root.is_some()
+            && self.root == app.semantic_root().map(node_id)
+            && self.scale.to_bits() == scale.to_bits()
+            && app.content_revision() <= self.seen;
+        if current {
+            return self.update_bounds(app);
+        }
         let (root, nodes) = build_all(app, scale)?;
+        self.seen = app.revision();
+        self.scale = scale;
         let focus = focus_node(app, &nodes, root);
         let first = self.root != Some(root);
         if first {
@@ -341,6 +365,7 @@ impl A11yTree {
             nodes: nodes.len(),
             sent: changed.len(),
             removed,
+            rebuilt: true,
         };
         let focus_changed = self.focus != Some(focus);
         self.nodes = nodes;
@@ -356,6 +381,40 @@ impl A11yTree {
                 toolkit_name: Some(TOOLKIT_NAME.to_owned()),
                 toolkit_version: Some(env!("CARGO_PKG_VERSION").to_owned()),
             }),
+            tree_id: TreeId::ROOT,
+            focus,
+        })
+    }
+
+    /// Nothing rendered since the last update: only positions can differ.
+    fn update_bounds(&mut self, app: &App) -> Option<TreeUpdate> {
+        let root = self.root?;
+        // Sorted by id; an element may be reported twice.
+        let mut changed = BTreeMap::new();
+        let (nodes, scale) = (&mut self.nodes, self.scale);
+        app.moved_since(self.seen, |id, bounds| {
+            let id = node_id(id);
+            if let Some(node) = nodes.get_mut(&id) {
+                let bounds = physical(bounds, scale);
+                if node.bounds() != Some(bounds) {
+                    node.set_bounds(bounds);
+                    changed.insert(id.0, (id, node.clone()));
+                }
+            }
+        });
+        self.seen = app.revision();
+        let focus = focus_node(app, &self.nodes, root);
+        let focus_changed = self.focus != Some(focus);
+        self.focus = Some(focus);
+        self.stats = UpdateStats {
+            nodes: self.nodes.len(),
+            sent: changed.len(),
+            removed: 0,
+            rebuilt: false,
+        };
+        (focus_changed || !changed.is_empty()).then(|| TreeUpdate {
+            nodes: changed.into_values().collect(),
+            tree: None,
             tree_id: TreeId::ROOT,
             focus,
         })

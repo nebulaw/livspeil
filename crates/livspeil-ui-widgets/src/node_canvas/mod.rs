@@ -566,7 +566,11 @@ fn view_point<M: NodeGraphModel>(view: View<NodeCanvas<M>>, app: &App, window: P
     }
 }
 
-fn on_scroll<M: NodeGraphModel>(view: View<NodeCanvas<M>>, ev: &PointerEvent, cx: &mut EventCx<'_>) {
+fn on_scroll<M: NodeGraphModel>(
+    view: View<NodeCanvas<M>>,
+    ev: &PointerEvent,
+    cx: &mut EventCx<'_>,
+) {
     let PointerKind::Scroll(delta) = ev.kind else {
         return;
     };

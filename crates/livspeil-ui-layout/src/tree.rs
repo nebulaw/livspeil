@@ -282,7 +282,10 @@ fn sized_out_of_flow(s: &Style) -> bool {
 
 fn is_boundary(s: &Style) -> bool {
     let p = &s.padding;
-    sized_out_of_flow(s) && [p.left, p.right, p.top, p.bottom].into_iter().all(fixed_padding)
+    sized_out_of_flow(s)
+        && [p.left, p.right, p.top, p.bottom]
+            .into_iter()
+            .all(fixed_padding)
 }
 
 /// The style Taffy places the box with, and the offset taken out of it.
@@ -609,7 +612,9 @@ impl LayoutTree {
     pub fn needs_compute(&self, root: LayoutNode) -> bool {
         !self.pending.is_empty()
             || !self.moved.is_empty()
-            || self.id(root).is_ok_and(|id| self.taffy.dirty(id).unwrap_or(false))
+            || self
+                .id(root)
+                .is_ok_and(|id| self.taffy.dirty(id).unwrap_or(false))
     }
 
     /// The node's parent, if attached.
@@ -735,10 +740,8 @@ impl LayoutTree {
         available: taffy::Size<AvailableSpace>,
     ) -> Result<(), LayoutError> {
         let counter = &self.measure_calls;
-        self.taffy.compute_layout_with_measure(
-            root,
-            available,
-            |inputs, _id, ctx, style| {
+        self.taffy
+            .compute_layout_with_measure(root, available, |inputs, _id, ctx, style| {
                 let measure = ctx.map(|m| &*m);
                 compute_leaf_layout(
                     inputs,
@@ -756,8 +759,7 @@ impl LayoutTree {
                         }
                     },
                 )
-            },
-        )?;
+            })?;
         Ok(())
     }
 

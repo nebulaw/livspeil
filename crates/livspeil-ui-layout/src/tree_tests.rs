@@ -99,7 +99,11 @@ fn moving_a_boundary_runs_no_layout() {
     let after = t.stats();
     assert_eq!(
         (after.computes, after.boundary_computes, after.measure_calls),
-        (before.computes, before.boundary_computes, before.measure_calls)
+        (
+            before.computes,
+            before.boundary_computes,
+            before.measure_calls
+        )
     );
     assert_eq!(after.moves, before.moves + 1);
     assert!(!t.needs_compute(root));
