@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::geometry::Rect;
-use taffy::FlexDirection;
+use taffy::{BoxSizing, FlexDirection};
 
 const VIEWPORT: Size = Size::new(400.0, 300.0);
 
@@ -200,7 +200,13 @@ fn random_style(rng: &mut Rng) -> Style {
     } else {
         LengthPercentage::length(rng.quarter(4))
     };
+    let box_sizing = if rng.below(4) == 0 {
+        BoxSizing::ContentBox
+    } else {
+        BoxSizing::BorderBox
+    };
     Style {
+        box_sizing,
         display,
         position,
         flex_direction: if rng.below(2) == 0 {
@@ -458,4 +464,32 @@ fn changes_in_a_detached_subtree_are_laid_out_after_reattaching() {
     t.compute(root, VIEWPORT).unwrap();
     assert_eq!(t.rect(child).unwrap(), Rect::new(0.0, 0.0, 30.0, 10.0));
     assert!(!t.needs_compute(root));
+}
+
+#[test]
+fn a_content_box_boundary_gives_its_content_the_inner_size() {
+    let mut t = LayoutTree::new();
+    let root = t.create(leaf(400.0, 300.0), Measure::None).unwrap();
+    let mut style = absolute(0.0, 0.0, 100.0, 50.0);
+    style.box_sizing = BoxSizing::ContentBox;
+    style.padding = taffy::Rect {
+        left: LengthPercentage::length(10.0),
+        right: LengthPercentage::length(10.0),
+        top: LengthPercentage::length(10.0),
+        bottom: LengthPercentage::length(10.0),
+    };
+    let card = t.create(style, Measure::None).unwrap();
+    let fill = Style {
+        size: taffy::Size {
+            width: Dimension::percent(1.0),
+            height: Dimension::percent(1.0),
+        },
+        ..Style::default()
+    };
+    let child = t.create(fill, Measure::None).unwrap();
+    t.set_children(card, &[child]).unwrap();
+    t.set_children(root, &[card]).unwrap();
+    t.compute(root, VIEWPORT).unwrap();
+    assert_eq!(t.rect(card).unwrap(), Rect::new(0.0, 0.0, 120.0, 70.0));
+    assert_eq!(t.rect(child).unwrap(), Rect::new(10.0, 10.0, 100.0, 50.0));
 }

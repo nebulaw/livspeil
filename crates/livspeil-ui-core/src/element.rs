@@ -358,6 +358,9 @@ impl Element {
     }
 
     /// Embed a view; it renders separately and only when it is notified.
+    ///
+    /// The element only places the view: of what is set on it, just the key
+    /// is kept. Style, layer and handlers belong on the view's own root.
     #[must_use]
     pub fn view<V: Render>(view: &View<V>) -> Element {
         Element::from(*view)

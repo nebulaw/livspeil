@@ -88,12 +88,20 @@ impl Layers {
         self.live.get(&layer).copied()
     }
 
-    /// Drop every layer of `owner`.
-    pub(crate) fn release(&mut self, owner: EntityId) {
-        for layer in self.by_key.remove(&owner).unwrap_or_default().into_values() {
-            self.live.remove(&layer);
-            self.reframed.remove(&layer);
+    /// Drop every layer of `owner` and return them. They count as reframed:
+    /// an element still attached to one goes back to its layout box.
+    pub(crate) fn release(&mut self, owner: EntityId) -> Vec<Layer> {
+        let released: Vec<Layer> = self
+            .by_key
+            .remove(&owner)
+            .unwrap_or_default()
+            .into_values()
+            .collect();
+        for layer in &released {
+            self.live.remove(layer);
+            self.reframed.insert(*layer);
         }
+        released
     }
 }
 
@@ -155,7 +163,10 @@ type Step = Box<dyn FnMut(&mut App, f32) -> bool>;
 pub(crate) struct Task {
     pub(crate) owner: EntityId,
     key: &'static str,
-    step: Step,
+    /// Registration order; the list stays sorted by it.
+    seq: u64,
+    /// Taken out while it runs, so the task stays listed.
+    step: Option<Step>,
 }
 
 impl fmt::Debug for Task {
@@ -218,10 +229,12 @@ impl App {
         step: impl FnMut(&mut App, f32) -> bool + 'static,
     ) {
         self.stop_animation(owner, key);
+        self.task_seq += 1;
         self.tasks.push(Task {
             owner,
             key,
-            step: Box::new(step),
+            seq: self.task_seq,
+            step: Some(Box::new(step)),
         });
     }
 
@@ -236,13 +249,30 @@ impl App {
         self.tasks.retain(|t| t.owner != owner || t.key != key);
     }
 
+    /// Run every task registered before this call, in registration order.
+    /// A task may stop or replace any task, itself included; one registered
+    /// meanwhile first runs in the next frame.
     pub(crate) fn run_tasks(&mut self, dt: f32) {
-        let mut running = std::mem::take(&mut self.tasks);
-        running.retain_mut(|t| self.exists(t.owner) && (t.step)(self, dt));
-        // A task registered while running wins over the one that ran.
-        running.retain(|t| self.exists(t.owner) && !self.is_animating(t.owner, t.key));
-        running.append(&mut self.tasks);
-        self.tasks = running;
+        let (mut done, last) = (0, self.task_seq);
+        while let Some(task) = self.tasks.iter_mut().find(|t| t.seq > done) {
+            if task.seq > last {
+                break;
+            }
+            done = task.seq;
+            let (owner, step) = (task.owner, task.step.take());
+            let Some(mut step) = step else {
+                continue;
+            };
+            let again = self.exists(owner) && step(self, dt);
+            // Gone if it was stopped or replaced while running.
+            if let Ok(at) = self.tasks.binary_search_by_key(&done, |t| t.seq) {
+                if again && self.exists(owner) {
+                    self.tasks[at].step = Some(step);
+                } else {
+                    self.tasks.remove(at);
+                }
+            }
+        }
         self.flush_effects();
     }
 }

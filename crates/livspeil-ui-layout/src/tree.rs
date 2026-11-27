@@ -32,8 +32,8 @@ use std::fmt;
 use std::rc::Rc;
 
 use taffy::{
-    AvailableSpace, CompactLength, Dimension, Display, LengthPercentage, LengthPercentageAuto,
-    NodeId, Position, TaffyTree, compute_leaf_layout,
+    AvailableSpace, BoxSizing, CompactLength, Dimension, Display, LengthPercentage,
+    LengthPercentageAuto, NodeId, Position, TaffyTree, compute_leaf_layout,
 };
 
 use crate::geometry::{Rect, Size, Vec2};
@@ -323,6 +323,8 @@ fn content_style(style: &Style, size: taffy::Size<f32>, hidden: bool) -> Style {
         top: LengthPercentageAuto::length(0.0),
         bottom: LengthPercentageAuto::length(0.0),
     };
+    // `size` is the border box, whatever the box's own sizing is.
+    s.box_sizing = BoxSizing::BorderBox;
     s.size = taffy::Size {
         width: Dimension::length(size.width),
         height: Dimension::length(size.height),

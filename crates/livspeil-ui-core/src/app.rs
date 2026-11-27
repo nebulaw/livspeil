@@ -146,6 +146,7 @@ pub struct App {
     pub(crate) tree: Tree,
     pub(crate) layers: Layers,
     pub(crate) tasks: Vec<Task>,
+    pub(crate) task_seq: u64,
     /// A layer property changed since the last frame.
     pub(crate) positions_changed: bool,
     /// Counter behind the two revisions below.
@@ -214,6 +215,7 @@ impl App {
             tree: Tree::default(),
             layers: Layers::default(),
             tasks: Vec::new(),
+            task_seq: 0,
             positions_changed: false,
             revision: 0,
             content_revision: 0,
@@ -264,7 +266,15 @@ impl App {
         self.views.remove(&id);
         self.dirty_views.remove(&id);
         self.layout_watch.remove(&id);
-        self.layers.release(id);
+        for layer in self.layers.release(id) {
+            // By index: noting a move borrows the whole app.
+            for i in 0..self.tree.layered(layer).len() {
+                let element = self.tree.layered(layer)[i];
+                self.note_moved(element);
+                self.positions_changed = true;
+                self.paint_dirty = true;
+            }
+        }
         self.tasks.retain(|t| t.owner != id);
         self.subscriptions.remove(&id);
         if let Some(observed) = self.deps.remove(&id) {

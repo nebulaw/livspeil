@@ -31,6 +31,8 @@ struct State {
 
 struct Board {
     state: Model<State>,
+    /// A layer of another owner, attached to a leaf of its own.
+    borrowed: Option<Layer>,
 }
 
 impl Render for Board {
@@ -60,6 +62,13 @@ impl Render for Board {
             }
             content = content.child(card);
         }
+        let borrowed = self.borrowed.map(|layer| {
+            div()
+                .key("borrowed")
+                .name("borrowed")
+                .absolute(Rect::new(0.0, 0.0, 4.0, 4.0))
+                .layer(layer)
+        });
         div()
             .name("viewport")
             .size(200.0, 150.0)
@@ -73,6 +82,7 @@ impl Render for Board {
                     .layer(mark)
                     .bg(Color::BLACK),
             )
+            .children(borrowed)
     }
 }
 
@@ -85,7 +95,10 @@ struct Fx {
 fn board(state: State) -> Fx {
     let mut app = App::new();
     let state = app.new_model(state);
-    let view = app.new_view(Board { state });
+    let view = app.new_view(Board {
+        state,
+        borrowed: None,
+    });
     app.set_root(view);
     let mut h = TestHost::new(app, SIZE);
     h.run_until_idle(20);
@@ -342,6 +355,74 @@ fn tasks_run_before_rendering_until_done() {
     assert_eq!(f.h.step().map(|f| f.stats.views_rendered), Some(0));
     f.h.app.release(id);
     assert!(!f.h.app.is_animating(id, "slide"));
+}
+
+#[test]
+fn a_running_task_can_stop_and_see_the_others() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    let mut f = board(two_cards());
+    let id = f.view.id();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let seen = log.clone();
+    f.h.app.animate(id, "a", move |app, _| {
+        seen.borrow_mut()
+            .push(("a", app.is_animating(id, "a"), app.is_animating(id, "b")));
+        app.stop_animation(id, "b");
+        false
+    });
+    let seen = log.clone();
+    f.h.app.animate(id, "b", move |_, _| {
+        seen.borrow_mut().push(("b", true, true));
+        true
+    });
+    f.h.step().unwrap();
+    assert_eq!(
+        *log.borrow(),
+        [("a", true, true)],
+        "b was stopped before its turn"
+    );
+    assert!(!f.h.app.is_animating(id, "a") && !f.h.app.is_animating(id, "b"));
+
+    // A task that stops itself stays stopped; one added while running
+    // starts with the next frame.
+    let runs = Rc::new(RefCell::new(Vec::new()));
+    let seen = runs.clone();
+    f.h.app.animate(id, "self", move |app, _| {
+        app.stop_animation(id, "self");
+        let seen = seen.clone();
+        seen.borrow_mut().push("self");
+        app.animate(id, "later", move |_, _| {
+            seen.borrow_mut().push("later");
+            false
+        });
+        true
+    });
+    f.h.step().unwrap();
+    assert_eq!(*runs.borrow(), ["self"]);
+    f.h.step().unwrap();
+    assert_eq!(*runs.borrow(), ["self", "later"]);
+    assert!(!f.h.app.is_animating(id, "self") && !f.h.app.needs_frame());
+}
+
+#[test]
+fn releasing_the_owner_of_an_attached_layer_redraws() {
+    let mut f = board(two_cards());
+    // A layer owned by another entity than the view that attaches it.
+    let owner = f.h.app.new_model(());
+    let borrowed = f.h.app.layer(owner.id(), "x");
+    f.view.update(&mut f.h.app, |v, cx| {
+        v.borrowed = Some(borrowed);
+        cx.notify();
+    });
+    borrowed.set_frame(&mut f.h.app, Some(Rect::new(20.0, 30.0, 10.0, 8.0)));
+    f.h.run_until_idle(20);
+    assert_eq!(f.visual("borrowed"), Rect::new(20.0, 30.0, 10.0, 8.0));
+    let seen = f.h.app.revision();
+    f.h.app.release(owner.id());
+    assert!(f.h.app.needs_frame() && f.h.app.revision() > seen);
+    f.h.run_until_idle(20);
+    assert_eq!(f.visual("borrowed"), Rect::new(0.0, 0.0, 4.0, 4.0));
 }
 
 /// SplitMix64.

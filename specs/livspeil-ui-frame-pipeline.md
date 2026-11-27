@@ -278,26 +278,26 @@ P1 is independent of P2. P3 needs P2.
 
 Work per measured frame in the headless budgets
 (`tests/frame_budget.rs`, 88 frames at 1274x1428; "rendered" and "layout"
-count frames):
+count frames). Instance counts are in the budgets; P1 changed them:
 
-| Scenario | rendered | layout | most reconciled | most instances |
-|---|---|---|---|---|
-| `pan-sample` | 88 → 0 | 88 → 0 | 80 → 0 | 579 → 579 |
-| `pan-stress` | 88 → 0 | 88 → 0 | 1,827 → 0 | 17,894 → 17,895 |
-| `pan-stress-fit` | 88 → 0 | 88 → 0 | 507 → 0 | 15,477 → 15,477 |
-| `zoom-stress` | 88 → 0 | 88 → 0 | 1,827 → 0 | 18,137 → 18,137 |
-| `drag-stress` | 88 → 88 | 88 → 0 | 2,328 → 2,607 | 18,089 → 18,089 |
-| `scroll-list` | 88 → 1 | 0 → 1 | 388 → 466 | 1,777 → 1,808 |
-| `hover-buttons` (new) | 0 | 0 | 0 | 458 |
+| Scenario | rendered | layout | most reconciled |
+|---|---|---|---|
+| `pan-sample` | 88 → 0 | 88 → 0 | 80 → 0 |
+| `pan-stress` | 88 → 0 | 88 → 0 | 1,827 → 0 |
+| `pan-stress-fit` | 88 → 0 | 88 → 0 | 507 → 0 |
+| `zoom-stress` | 88 → 0 | 88 → 0 | 1,827 → 0 |
+| `drag-stress` | 88 → 88 | 88 → 0 | 2,328 → 2,607 |
+| `scroll-list` | 88 → 1 | 0 → 1 | 388 → 466 |
+| `hover-buttons` (new) | 0 | 0 | 0 |
 
 `drag-stress` reconciles more because the canvas now builds the margin
 around the view; P4 removes that render. The P0 `scroll-list` never
 scrolled (an unmeasured list clamped every offset to zero), so its P0
 timings in section 2 are of a list re-rendering in place.
 
-CPU time headless, release, i5-12500T, same steps (median of 900 frames;
-build is the scenario step plus `App::draw_frame`, CPU adds scene conversion
-and encoding):
+CPU time of P2 without P1, headless, release, i5-12500T, same steps (median
+of 900 frames; build is the scenario step plus `App::draw_frame`, CPU adds
+scene conversion and encoding):
 
 | Scenario | build ms | CPU ms |
 |---|---|---|
@@ -308,7 +308,8 @@ and encoding):
 | `drag-stress` | 8.88 → 5.49 | 11.85 → 7.35 |
 | `scroll-list` | 0.78 → 0.10 | 1.17 → 0.41 |
 
-Times on screen are still to be measured.
+Times on screen, for P1 and P2 together, are in `docs/benchmarks.md`
+("Frame pipeline P1 and P2 on screen").
 
 ## 8. Alternatives not taken
 
