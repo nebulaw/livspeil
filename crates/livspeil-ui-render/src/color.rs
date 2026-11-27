@@ -117,7 +117,7 @@ pub fn srgb_to_linear(x: f32) -> f32 {
 }
 
 /// sRGB transfer function, encode (linear -> gamma). Input clamped to 0..1.
-/// Mirrors `linear_to_srgb` in `quad.wgsl`.
+/// Mirrors `linear_to_srgb` in `primitives.wgsl`.
 pub fn linear_to_srgb(x: f32) -> f32 {
     let x = x.clamp(0.0, 1.0);
     if x <= 0.003_130_8 {
@@ -127,7 +127,7 @@ pub fn linear_to_srgb(x: f32) -> f32 {
     }
 }
 
-/// OKLab -> gamma sRGB, clamped. Mirrors `oklab_to_srgb` in `quad.wgsl`.
+/// OKLab -> gamma sRGB, clamped. Mirrors `oklab_to_srgb` in `primitives.wgsl`.
 pub fn oklab_to_srgb(lab: [f32; 3]) -> [f32; 3] {
     let [l, a, b] = lab;
     let l_ = l + 0.396_337_78 * a + 0.215_803_76 * b;

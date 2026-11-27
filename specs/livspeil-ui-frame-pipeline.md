@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-4.0
 
 # Livspeil UI frame pipeline (retained rendering)
 
-Status: **accepted** (D65, 2026-11-27); P0 and P2 built. Extends
+Status: **accepted** (D65, 2026-11-27); P0, P1 and P2 built. Extends
 `livspeil-ui-spec-v0.md` sections 3, 5, 12 and 13. Nothing else is built
 unless marked so.
 
@@ -161,20 +161,43 @@ fragment's display items (shaped text, glyph and icon placements) by
 - Draw order is a list of ranges, rebuilt only when fragments are added,
   removed or reordered.
 
-### 4.5 Instance formats
+### 4.5 Instance formats (built, P1)
 
 One format per primitive family instead of one 320-byte union:
 
-| Family | Contents | Size goal |
-|---|---|---:|
-| Sprite (glyph, icon) | rect, atlas rect, colour, property index | <= 48 B |
-| Quad | rect, radii, fill, border, property index | <= 96 B |
-| Effect (shadow, gradient, material) | indexed from a side table | as needed |
-| Curve (wire) | four control points, width, colours | <= 64 B |
+| Family | Contents | Size goal | Built |
+|---|---|---:|---:|
+| Sprite (glyph, icon) | rect, atlas rect, colour, property index | <= 48 B | 48 B |
+| Quad | rect, radii, fill, border, property index | <= 96 B | 96 B |
+| Effect (shadow, gradient, material) | indexed from a side table | as needed | shadow 96 B, gradient +96 B, backdrop 112 B |
+| Curve (wire) | four control points, width, colour | <= 64 B | 64 B |
+| Property | transform, inverse, clip, opacity | | 80 B |
 
-A **curve is one instance**: the vertex shader expands it to a strip along
-the Bezier and the fragment shader antialiases across it. The CPU reference
-renderer implements the same primitive, so goldens stay the contract.
+A frame is three arrays (`livspeil-ui-render`, `record.rs`): a **record
+arena** of 16-byte slots, where every record is a whole number of slots and
+effect data is a record referred to by slot; the **property table**, one
+entry per distinct transform, clip and opacity; and the **draw order**, one
+`u32` per instance (family and slot) read as a per-instance vertex
+attribute. So an instance costs its record plus 4 bytes.
+
+One pipeline reads every family. Painter order is the draw order and a
+change of family costs nothing; separate per-family pipelines were rejected
+because cards interleave quads and text and would switch pipelines several
+times per node. A single arena (instead of one typed buffer per family)
+uses two storage buffers of the four the downlevel limits allow, and lets
+P3 give each fragment one contiguous range.
+
+A **curve is one instance**: the vertex shader expands it to a box per
+polyline segment along the Bezier, and each pixel is drawn by the box of its
+nearest segment, so one curve never blends twice. Runs of curves are
+separate draws (more vertices per instance). The CPU reference renderer
+implements the same primitive, so goldens stay the contract.
+
+For P3: records are position independent apart from slot and property
+indices. Some values do depend on the on-screen scale and are fixed at
+encode time: hairline border width, the minimum shadow sigma, and a curve's
+minimum width, fade, segment count and search window. A retained fragment
+must be re-encoded when its scale changes, or those must move to the shader.
 
 ### 4.6 Zoom and text
 
@@ -243,7 +266,7 @@ before and after numbers.
 | Stage | Content | Done when |
 |---|---|---|
 | P0 (built) | Scenarios (pan, zoom, drag, scroll), work counters, GPU timing, section 6 | baseline of every target recorded |
-| P1 | Instance families and the curve primitive | upload down at least 5x on the stress graph; goldens reviewed |
+| P1 (built) | Instance families and the curve primitive | upload down at least 5x on the stress graph (16.6x on `pan-stress`, `docs/benchmarks.md`); goldens reviewed |
 | P2 (built) | Property tree and layout boundaries | pan, zoom and scroll render no view and run no layout |
 | P3 | Paint fragments and retained buffers | upload targets of section 3 met |
 | P4 | NodeCanvas change sets and virtualization margin | CPU targets of section 3 met at 2000 nodes |

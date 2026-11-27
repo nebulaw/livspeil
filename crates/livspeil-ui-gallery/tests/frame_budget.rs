@@ -51,12 +51,7 @@ fn measure(scenario: Scenario) -> Work {
         clear: Color::BLACK,
     };
     let mut list = DisplayList::new();
-    let mut gpu = Frame {
-        options,
-        clear: [0.0; 4],
-        instances: Vec::new(),
-        ops: Vec::new(),
-    };
+    let mut gpu = Frame::new(options);
     let mut work = Work::default();
     let mut last = None;
     for frame in 0..Scenario::WARMUP + FRAMES {
@@ -86,19 +81,20 @@ fn measure(scenario: Scenario) -> Work {
 
 /// Today's work, the ceiling for tomorrow's, over 88 measured frames:
 /// (frames that rendered, frames that ran layout, views in a frame,
-/// elements reconciled in a frame, instances, bytes uploaded).
+/// elements reconciled in a frame, instances, bytes uploaded: draw order,
+/// records and property table).
 fn budget(scenario: Scenario) -> (u32, u32, usize, usize, usize, usize) {
     match scenario {
-        Scenario::PanSample => (0, 0, 0, 0, 579, 185_280),
-        Scenario::PanStress => (0, 0, 0, 0, 17_895, 5_726_400),
-        Scenario::PanStressFit => (0, 0, 0, 0, 15_477, 4_952_640),
-        Scenario::ZoomStress => (0, 0, 0, 0, 18_137, 5_803_840),
+        Scenario::PanSample => (0, 0, 0, 0, 545, 33_300),
+        Scenario::PanStress => (0, 0, 0, 0, 4500, 345_152),
+        Scenario::PanStressFit => (0, 0, 0, 0, 2169, 175_204),
+        Scenario::ZoomStress => (0, 0, 0, 0, 4500, 345_152),
         // Still renders until P4; it reconciles the margin around the view
         // that pan and zoom need to render nothing.
-        Scenario::DragStress => (88, 0, 2, 2607, 18_089, 5_788_480),
+        Scenario::DragStress => (88, 0, 2, 2607, 4572, 351_328),
         // One frame leaves the built rows.
-        Scenario::ScrollList => (1, 1, 1, 466, 1808, 578_560),
-        Scenario::HoverButtons => (0, 0, 0, 0, 458, 146_560),
+        Scenario::ScrollList => (1, 1, 1, 466, 1808, 106_000),
+        Scenario::HoverButtons => (0, 0, 0, 0, 458, 26_216),
     }
 }
 

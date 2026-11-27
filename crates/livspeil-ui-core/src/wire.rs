@@ -6,9 +6,9 @@
 //! An element carries wires with [`Element::wires`] in coordinates
 //! relative to its top-left corner; they are painted (offset to window
 //! space, under any enclosing transform such as a canvas's pan/zoom) after
-//! its background and before its children, as [`PaintCmd::Wire`]s. Renderers
-//! flatten them with [`Wire::flatten`] into short segments and stroke each
-//! as a thin rotated quad with round ends (`livspeil-ui-paint`).
+//! its background and before its children, as [`PaintCmd::Wire`]s. The paint
+//! bridge turns each into one curve primitive of the renderer;
+//! [`Wire::flatten`] serves hit testing ([`Wire::distance_to`]).
 //!
 //! [`PaintCmd::Wire`]: crate::PaintCmd::Wire
 

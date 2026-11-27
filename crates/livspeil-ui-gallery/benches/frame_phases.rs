@@ -6,11 +6,12 @@
 //! 0.4 (Compact) and fit-all (Block), split into the phases the gallery's
 //! frame HUD shows: build (`App::draw_frame`: render, diff, layout, core
 //! paint list), paint (`PaintBridge::paint_scene`: scene to display list,
-//! wires flattened into quads) and encode (`render::encode`: display list
-//! to instance data). GPU work is not measured here.
+//! one curve per wire) and encode (`render::encode`: display list to
+//! instance data). GPU work is not measured here.
 //!
 //! Prints the median and the minimum of `ITERATIONS` frames per phase, in
-//! microseconds, plus the size of the scene and display list. Run with
+//! microseconds, plus the size of the scene, the display list and the
+//! encoded frame. Run with
 //! `cargo bench -p livspeil-ui-gallery --bench frame_phases`.
 
 use std::time::{Duration, Instant};
@@ -89,12 +90,7 @@ fn main() {
         clear: Color::BLACK,
     };
     let mut list = DisplayList::new();
-    let mut gpu_frame = Frame {
-        options,
-        clear: [0.0; 4],
-        instances: Vec::new(),
-        ops: Vec::new(),
-    };
+    let mut gpu_frame = Frame::new(options);
     for (name, zoom) in [
         ("zoom 1 (Full)", Some(1.0)),
         ("zoom 0.4 (Compact)", Some(0.4)),
@@ -104,6 +100,7 @@ fn main() {
         let st = canvas.read(&app).stats();
         let (mut build, mut paint, mut enc) = (Vec::new(), Vec::new(), Vec::new());
         let (mut cmds, mut items) = (0, 0);
+        let (mut instances, mut bytes, mut draws) = (0, 0, 0);
         let mut sign = 1.0;
         for i in 0..iters + 20 {
             sign = -sign;
@@ -118,6 +115,9 @@ fn main() {
             let t3 = Instant::now();
             cmds = frame.scene.commands.len();
             items = list.items.len();
+            instances = gpu_frame.instances.len();
+            bytes = gpu_frame.instance_byte_len();
+            draws = gpu_frame.draw_calls();
             if i >= 20 {
                 build.push(t1 - t0);
                 paint.push(t2 - t1);
@@ -129,6 +129,7 @@ fn main() {
             "{name}: {} nodes, {} wires built; {cmds} scene commands, {items} display items",
             st.built_nodes, st.built_wires
         );
+        println!("  {instances} instances, {bytes} bytes uploaded, {draws} draw calls");
         println!(
             "  build {:.0} us, paint {:.0} us, encode {:.0} us, total {:.0} us (medians of {iters})",
             us(b),

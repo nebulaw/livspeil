@@ -1,89 +1,36 @@
 // SPDX-FileCopyrightText: 2026 Livspeil contributors
 // SPDX-License-Identifier: MPL-2.0
 
-//! Encoding: turns a [`DisplayList`] into GPU-ready instance data and a short
-//! list of operations. Both backends (wgpu and the CPU reference) consume
-//! the same [`Frame`], so everything that is not per-pixel math (corner
-//! shapes, color conversion of solid colors, bounds, culling, batching,
-//! blur plans) is computed once, here.
+//! Encoding: turns a [`DisplayList`] into GPU-ready records (see
+//! [`record`](crate::record)) and a short list of operations. Both backends
+//! (wgpu and the CPU reference) consume the same [`Frame`], so everything
+//! that is not per-pixel math (corner shapes, color conversion of solid
+//! colors, culling, curve subdivision, batching, blur plans) is computed
+//! once, here.
 //!
 //! Batching: items are sorted by layer (stable, so insertion order holds
-//! within a layer). Quads, their shadows and backdrop shadows all go through
-//! one instanced pipeline, so consecutive items become one draw call; only a
-//! [`Backdrop`] breaks the batch, because it has to blur what was drawn
-//! before it.
+//! within a layer) and drawn in that order whatever their family. One
+//! instanced pipeline reads every family from the record arena, so changing
+//! family costs nothing. A new draw call starts only for a [`Backdrop`]
+//! (it has to blur what was drawn before it), for another glyph atlas, and
+//! where a run of curves begins or ends (curves have more vertices per
+//! instance than the other families).
+
+use std::collections::HashMap;
 
 use crate::RenderError;
 use crate::color::Color;
+use crate::curve;
 use crate::geom::{Affine, Rect};
 use crate::list::{
-    Backdrop, BorderWidth, CornerStyle, DisplayList, Fill, Glyphs, GradientStop, HighlightKind,
-    MAX_GRADIENT_STOPS, Primitive, Quad, Radii, Shadow,
+    Backdrop, BorderWidth, CornerStyle, Curve, DisplayList, Fill, Glyphs, GradientStop,
+    HighlightKind, MAX_GRADIENT_STOPS, Primitive, Quad, Radii, Shadow,
 };
-
-/// Number of `f32`s in one instance (20 `vec4<f32>`).
-pub const INSTANCE_FLOATS: usize = 80;
-
-/// One instance: 20 `vec4<f32>`, laid out as `Instance` in `quad.wgsl`.
-pub type Instance = [f32; INSTANCE_FLOATS];
-
-/// Instance kinds (`kind` field).
-pub(crate) mod kind {
-    pub const QUAD: f32 = 0.0;
-    pub const SHADOW: f32 = 1.0;
-    pub const BACKDROP: f32 = 2.0;
-    pub const GLYPH: f32 = 3.0;
-}
-
-/// Field offsets (in floats) inside an [`Instance`]. Must match `quad.wgsl`.
-pub(crate) mod field {
-    /// Shape rect `(x, y, w, h)`, local units.
-    pub const RECT: usize = 0;
-    /// Forward transform `(a, b, c, d)`.
-    pub const XFORM: usize = 4;
-    /// `(e, f, px_per_unit, kind)`.
-    pub const XFORM2: usize = 8;
-    /// Inverse transform `(a, b, c, d)`.
-    pub const INV: usize = 12;
-    /// `(e, f, opacity, dither)`.
-    pub const INV2: usize = 16;
-    /// Corner extents (superellipse box size) `tl, tr, br, bl`.
-    pub const RADII: usize = 20;
-    /// Corner exponents (2 = circle).
-    pub const EXPS: usize = 24;
-    /// Clip `(x0, y0, x1, y1)`, physical pixels.
-    pub const CLIP: usize = 28;
-    /// Draw bounds `(x0, y0, x1, y1)`, local units.
-    pub const BOUNDS: usize = 32;
-    /// Gradient geometry; for backdrops `(uv_scale_x, uv_scale_y, has_blur, 0)`;
-    /// for glyphs the atlas texel rect `(x, y, w, h)`.
-    pub const GRAD: usize = 36;
-    /// `(fill_kind, n_stops, 0, 0)`; fill kind 0 none, 1 solid, 2 linear, 3 radial.
-    pub const FILL: usize = 40;
-    /// Stop offsets.
-    pub const STOP_OFFSETS: usize = 44;
-    /// Stop colors (4 x vec4); solid fill and backdrop tint use the first as
-    /// premultiplied sRGB, gradients store straight OKLab + alpha.
-    pub const STOPS: usize = 48;
-    /// Border (or backdrop highlight) color, premultiplied sRGB.
-    pub const BORDER_COLOR: usize = 64;
-    /// `(border_width, 0, 0, 0)`; backdrop:
-    /// `(highlight_width, highlight_kind, saturation, grain)`; glyphs:
-    /// `(text lightness, 1 / TEXT_GAMMA, 0, 0)`.
-    pub const BORDER: usize = 68;
-    /// Shadow `(dx, dy, spread, sigma)`.
-    pub const SHADOW: usize = 72;
-    /// Shadow color, premultiplied sRGB.
-    pub const SHADOW_COLOR: usize = 76;
-}
-
-/// Fill kinds.
-pub(crate) mod fill_kind {
-    pub const NONE: f32 = 0.0;
-    pub const SOLID: f32 = 1.0;
-    pub const LINEAR: f32 = 2.0;
-    pub const RADIAL: f32 = 3.0;
-}
+use crate::record::{
+    BackdropRecord, CurveRecord, Family, GradientRecord, InstanceRef, MAX_SLOT, PROPERTY_BYTES,
+    Property, QuadRecord, SLOT_BYTES, ShadowRecord, Slot, SpriteRecord, fill_kind,
+};
+use crate::shade;
 
 /// Exponent of the glyph coverage remapping (see the crate docs, "Text").
 pub const TEXT_GAMMA: f32 = 1.8;
@@ -123,16 +70,18 @@ pub const MAX_BLUR_LEVELS: u32 = 6;
 /// One step of a frame.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Op {
-    /// Draw instances `start..end` with the quad pipeline.
+    /// Draw instances `start..end` with the primitive pipeline.
     Draw {
         /// First instance.
         start: u32,
         /// One past the last instance.
         end: u32,
-        /// The coverage atlas glyph instances in the range sample (`None`
-        /// when the range has no glyphs). A different atlas starts a new
-        /// draw.
+        /// The coverage atlas sprites in the range sample (`None` when the
+        /// range has no sprites). A different atlas starts a new draw.
         atlas: Option<u32>,
+        /// Vertices per instance: 6, or for a run of curves 6 times the
+        /// most segments any of them has.
+        vertices: u32,
     },
     /// Blur the target under a backdrop (if `blur` is set), then composite
     /// instance `instance` with the backdrop pipeline.
@@ -151,41 +100,54 @@ pub struct Frame {
     pub options: FrameOptions,
     /// Clear color, premultiplied gamma sRGB.
     pub clear: [f32; 4],
-    /// Instance data.
-    pub instances: Vec<Instance>,
+    /// The draw order: one packed [`InstanceRef`] each.
+    pub instances: Vec<u32>,
+    /// The record arena the instances refer to.
+    pub records: Vec<Slot>,
+    /// Transform, clip and opacity entries the records refer to.
+    pub properties: Vec<[Slot; Property::SLOTS]>,
     /// Operations in order.
     pub ops: Vec<Op>,
 }
 
 impl Frame {
-    /// Number of draw calls the GPU backend issues (instanced quad draws plus
+    /// An empty frame for [`encode_into`].
+    #[must_use]
+    pub fn new(options: FrameOptions) -> Frame {
+        Frame {
+            options,
+            clear: [0.0; 4],
+            instances: Vec::new(),
+            records: Vec::new(),
+            properties: Vec::new(),
+            ops: Vec::new(),
+        }
+    }
+
+    fn clear_data(&mut self) {
+        self.instances.clear();
+        self.records.clear();
+        self.properties.clear();
+        self.ops.clear();
+    }
+
+    /// Number of draw calls the GPU backend issues (instanced draws plus
     /// backdrop composites; blur passes not counted).
     pub fn draw_calls(&self) -> usize {
         self.ops.len()
     }
 
-    /// Instance data as little-endian bytes (for upload).
-    pub fn instance_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::new();
-        self.instance_bytes_into(&mut out);
-        out
+    /// Instance `i` of the draw order.
+    pub fn instance(&self, i: usize) -> Option<InstanceRef> {
+        self.instances.get(i).copied().and_then(InstanceRef::unpack)
     }
 
-    /// Size of the instance data in bytes.
+    /// Bytes of instance data a backend uploads for this frame: the draw
+    /// order, the record arena and the property table.
     pub fn instance_byte_len(&self) -> usize {
-        self.instances.len() * INSTANCE_FLOATS * 4
-    }
-
-    /// As [`Frame::instance_bytes`], into `out` (cleared first; its
-    /// capacity is reused).
-    pub fn instance_bytes_into(&self, out: &mut Vec<u8>) {
-        out.clear();
-        out.reserve(self.instances.len() * INSTANCE_FLOATS * 4);
-        for inst in &self.instances {
-            for v in inst {
-                out.extend_from_slice(&v.to_le_bytes());
-            }
-        }
+        self.instances.len() * 4
+            + self.records.len() * SLOT_BYTES
+            + self.properties.len() * PROPERTY_BYTES
     }
 }
 
@@ -240,6 +202,9 @@ fn kawase_reach(levels: u32, offset: f32) -> f32 {
 
 const NO_CLIP: [f32; 4] = [-1.0e9, -1.0e9, 1.0e9, 1.0e9];
 
+/// Curves whose control polygon is no longer than this draw nothing.
+const MIN_CURVE_LENGTH: f32 = 1e-4;
+
 /// Continuous corners start this much further along the edge than circular
 /// ones of the same radius.
 const CONTINUOUS_EXTENT: f32 = 1.7;
@@ -282,19 +247,34 @@ pub fn corner_params(rect: Rect, radii: Radii, style: CornerStyle) -> ([f32; 4],
     (ext, exps)
 }
 
-struct Encoder {
-    options: FrameOptions,
-    instances: Vec<Instance>,
-    ops: Vec<Op>,
+/// Where a property entry is and what it says.
+#[derive(Debug, Clone, Copy)]
+struct Prop {
+    index: u32,
+    data: Property,
+}
+
+/// Everything a property entry is made of: transform, clip, opacity.
+type PropKey = [u32; 11];
+
+struct Encoder<'a> {
+    frame: &'a mut Frame,
+    /// First instance of the draw being built.
     pending_start: u32,
     pending_atlas: Option<u32>,
-    viewport: Rect,
+    /// Segments of the longest curve of the pending run; 0 outside curves.
+    pending_segments: u32,
+    viewport: [f32; 2],
     colors: ColorMemo,
+    /// Entries of the property table by content, and the last one used (runs
+    /// of items share their transform, clip and opacity).
+    props: HashMap<PropKey, Prop>,
+    last_prop: Option<(PropKey, Prop)>,
 }
 
 /// A small direct-mapped memo of color conversions: a frame uses a few
-/// dozen distinct colors over thousands of items (a wire's segments share
-/// one), and OKLab to sRGB costs a cube root and a power per channel.
+/// dozen distinct colors over thousands of items, and OKLab to sRGB costs a
+/// cube root and a power per channel.
 struct ColorMemo {
     keys: Box<[[u32; 4]; Self::SLOTS]>,
     values: Box<[[f32; 4]; Self::SLOTS]>,
@@ -331,51 +311,42 @@ impl ColorMemo {
 
 /// Encodes a display list for a target.
 pub fn encode(list: &DisplayList, options: FrameOptions) -> Result<Frame, RenderError> {
-    let mut frame = Frame {
-        options,
-        clear: [0.0; 4],
-        instances: Vec::new(),
-        ops: Vec::new(),
-    };
+    let mut frame = Frame::new(options);
     encode_into(list, options, &mut frame)?;
     Ok(frame)
 }
 
-/// As [`encode`], into `frame`, whose instance and operation buffers are
-/// reused (a frame of thousands of instances is megabytes: encoding into
-/// the previous frame avoids allocating, and page-faulting, them anew
-/// every frame). On error `frame` is left cleared.
+/// As [`encode`], into `frame`, whose buffers are reused (encoding into the
+/// previous frame avoids allocating them anew every frame). On error `frame`
+/// is left cleared.
 pub fn encode_into(
     list: &DisplayList,
     options: FrameOptions,
     frame: &mut Frame,
 ) -> Result<(), RenderError> {
-    frame.instances.clear();
-    frame.ops.clear();
+    frame.clear_data();
     if options.width == 0 || options.height == 0 {
         return Err(RenderError::EmptyTarget);
     }
     if !(options.scale.is_finite() && options.scale > 0.0) {
         return Err(RenderError::InvalidScale(options.scale));
     }
+    frame.options = options;
+    frame.clear = options.clear.to_srgb_premul();
     let mut enc = Encoder {
-        options,
-        instances: std::mem::take(&mut frame.instances),
-        ops: std::mem::take(&mut frame.ops),
+        frame: &mut *frame,
         pending_start: 0,
         pending_atlas: None,
-        viewport: Rect::new(0.0, 0.0, options.width as f32, options.height as f32),
+        pending_segments: 0,
+        viewport: [options.width as f32, options.height as f32],
         colors: ColorMemo::new(),
+        props: HashMap::new(),
+        last_prop: None,
     };
     let result = enc.run(list);
     enc.flush();
-    frame.options = options;
-    frame.clear = options.clear.to_srgb_premul();
-    frame.instances = enc.instances;
-    frame.ops = enc.ops;
     if result.is_err() {
-        frame.instances.clear();
-        frame.ops.clear();
+        frame.clear_data();
     }
     result
 }
@@ -384,11 +355,15 @@ fn invalid(index: usize, reason: &'static str) -> RenderError {
     RenderError::InvalidPrimitive { index, reason }
 }
 
-fn put(inst: &mut Instance, at: usize, v: [f32; 4]) {
-    inst[at..at + 4].copy_from_slice(&v);
+fn valid_rect(index: usize, rect: Rect) -> Result<(), RenderError> {
+    if rect.is_valid() {
+        Ok(())
+    } else {
+        Err(invalid(index, "rect is not finite or has negative size"))
+    }
 }
 
-impl Encoder {
+impl Encoder<'_> {
     fn run(&mut self, list: &DisplayList) -> Result<(), RenderError> {
         let sorted = list.items.windows(2).all(|w| w[0].layer <= w[1].layer);
         // Layers in order (the usual case): no index vector needed.
@@ -397,7 +372,7 @@ impl Encoder {
             order.sort_by_key(|&i| list.items[i].layer);
             order
         });
-        self.instances.reserve(list.items.len());
+        self.frame.instances.reserve(list.items.len());
         for k in 0..list.items.len() {
             let index = match &order {
                 Some(order) => order[k],
@@ -407,24 +382,138 @@ impl Encoder {
                 Primitive::Quad(q) => self.quad(index, q)?,
                 Primitive::Backdrop(b) => self.backdrop(index, b)?,
                 Primitive::Glyphs(g) => self.glyphs(index, g)?,
+                Primitive::Curve(c) => self.curve(index, c)?,
                 // Typed hook: images draw nothing yet.
                 Primitive::Image(_) => {}
+            }
+            if self.frame.records.len() > MAX_SLOT {
+                return Err(invalid(index, "the frame has too many records"));
             }
         }
         Ok(())
     }
 
+    /// Ends the pending draw.
     fn flush(&mut self) {
-        let end = self.instances.len() as u32;
+        let end = self.frame.instances.len() as u32;
         if end > self.pending_start {
-            self.ops.push(Op::Draw {
+            self.frame.ops.push(Op::Draw {
                 start: self.pending_start,
                 end,
                 atlas: self.pending_atlas,
+                vertices: 6 * self.pending_segments.max(1),
             });
         }
         self.pending_start = end;
         self.pending_atlas = None;
+        self.pending_segments = 0;
+    }
+
+    /// Appends effect data (not drawn by itself) and returns its slot.
+    #[inline]
+    fn effect<const N: usize>(&mut self, slots: [Slot; N]) -> u32 {
+        let at = self.frame.records.len() as u32;
+        self.frame.records.extend_from_slice(&slots);
+        at
+    }
+
+    /// Appends a record and its instance to the draw order.
+    #[inline]
+    fn push<const N: usize>(&mut self, family: Family, slots: [Slot; N]) {
+        let slot = self.effect(slots);
+        self.frame
+            .instances
+            .push(InstanceRef { family, slot }.pack());
+    }
+
+    /// Appends a record that is drawn with six vertices.
+    fn push_box<const N: usize>(&mut self, family: Family, slots: [Slot; N]) {
+        if self.pending_segments > 0 {
+            self.flush();
+        }
+        self.push(family, slots);
+    }
+
+    /// The property entry for a transform, clip and opacity, shared with
+    /// earlier items that had the same. `None` when nothing would be seen
+    /// (singular transform, zero opacity).
+    fn property(
+        &mut self,
+        index: usize,
+        transform: Affine,
+        clip: Option<Rect>,
+        opacity: f32,
+    ) -> Result<Option<Prop>, RenderError> {
+        if !opacity.is_finite() {
+            return Err(invalid(index, "opacity is not finite"));
+        }
+        let opacity = opacity.clamp(0.0, 1.0);
+        if opacity == 0.0 {
+            return Ok(None);
+        }
+        let s = self.frame.options.scale;
+        let clip_px = match clip {
+            Some(c) if !c.is_valid() => return Err(invalid(index, "clip is not finite")),
+            Some(c) => [c.x * s, c.y * s, c.right() * s, c.bottom() * s],
+            None => NO_CLIP,
+        };
+        let [a, b, c, d, e, f] = transform.m;
+        let key: PropKey = [
+            a, b, c, d, e, f, clip_px[0], clip_px[1], clip_px[2], clip_px[3], opacity,
+        ]
+        .map(f32::to_bits);
+        if let Some((k, prop)) = &self.last_prop
+            && *k == key
+        {
+            return Ok(Some(*prop));
+        }
+        let prop = match self.props.get(&key) {
+            Some(prop) => *prop,
+            None => {
+                let Some(inv) = transform.inverse() else {
+                    return Ok(None);
+                };
+                let [ia, ib, ic, id, ie, iff] = inv.m;
+                let data = Property {
+                    linear: [a, b, c, d],
+                    inverse: [ia, ib, ic, id],
+                    offset: [e, f, ie, iff],
+                    clip: clip_px,
+                    ppu: s * transform.det().abs().sqrt(),
+                    opacity,
+                    pad: [0.0; 2],
+                };
+                let prop = Prop {
+                    index: self.frame.properties.len() as u32,
+                    data,
+                };
+                self.frame.properties.push(data.to_slots());
+                self.props.insert(key, prop);
+                prop
+            }
+        };
+        self.last_prop = Some((key, prop));
+        Ok(Some(prop))
+    }
+
+    /// Whether anything of the local rectangle `[x0, y0, x1, y1]` is inside
+    /// the clip and the target.
+    fn visible(&self, bounds: [f32; 4], transform: Affine, prop: &Prop) -> bool {
+        let local = Rect::new(
+            bounds[0],
+            bounds[1],
+            bounds[2] - bounds[0],
+            bounds[3] - bounds[1],
+        );
+        let s = self.frame.options.scale;
+        let b = transform.bounds(local);
+        let c = prop.data.clip;
+        let (x0, y0) = ((b.x * s).max(c[0]).max(0.0), (b.y * s).max(c[1]).max(0.0));
+        let (x1, y1) = (
+            (b.right() * s).min(c[2]).min(self.viewport[0]),
+            (b.bottom() * s).min(c[3]).min(self.viewport[1]),
+        );
+        x1 > x0 && y1 > y0
     }
 
     fn glyphs(&mut self, index: usize, g: &Glyphs) -> Result<(), RenderError> {
@@ -434,129 +523,45 @@ impl Encoder {
         if !g.color.to_array().iter().all(|v| v.is_finite()) {
             return Err(invalid(index, "glyph color is not finite"));
         }
+        let Some(prop) = self.property(index, g.transform, g.clip, g.opacity)? else {
+            return Ok(());
+        };
         let color = self.colors.srgb_premul(g.color);
         let lightness = g.color.l.clamp(0.0, 1.0);
-        // Texels map 1:1 to pixels only without rotation or scale; then the
-        // instance covers exactly its rect. Otherwise grow it by a pixel so
-        // the bilinear edge is drawn.
-        let [a, b, c, d, _, _] = g.transform.m;
-        let exact = a == 1.0 && b == 0.0 && c == 0.0 && d == 1.0;
         for sprite in &g.glyphs {
-            let mut inst = [0.0; INSTANCE_FLOATS];
-            let Some(ppu) = self.base(
-                &mut inst,
-                index,
-                sprite.rect,
-                g.transform,
-                g.clip,
-                g.opacity,
-                kind::GLYPH,
-            )?
-            else {
-                return Ok(());
-            };
+            valid_rect(index, sprite.rect)?;
             let [tx, ty, tw, th] = sprite.texels;
             if tw == 0 || th == 0 || sprite.rect.w <= 0.0 || sprite.rect.h <= 0.0 {
                 continue;
             }
-            put(
-                &mut inst,
-                field::GRAD,
-                [tx as f32, ty as f32, tw as f32, th as f32],
-            );
-            put(&mut inst, field::STOPS, color);
-            put(
-                &mut inst,
-                field::BORDER,
-                [lightness, 1.0 / TEXT_GAMMA, 0.0, 0.0],
-            );
-            let local = if exact {
-                sprite.rect
-            } else {
-                sprite.rect.inflate(1.0 / ppu)
+            if sprite.texels.iter().any(|&v| v > u32::from(u16::MAX)) {
+                return Err(invalid(index, "atlas texels are out of range"));
+            }
+            let record = SpriteRecord {
+                rect: [sprite.rect.x, sprite.rect.y, sprite.rect.w, sprite.rect.h],
+                color,
+                texels: [tx | (ty << 16), tw | (th << 16)],
+                prop: prop.index,
+                lightness,
             };
-            if !self.bounds(&mut inst, local, g.transform) {
+            let bounds = shade::sprite_bounds(&record, &prop.data);
+            if !self.visible(bounds, g.transform, &prop) {
                 continue;
             }
             if self.pending_atlas.is_some_and(|p| p != g.atlas) {
                 self.flush();
             }
+            self.push_box(Family::Sprite, record.to_slots());
             self.pending_atlas = Some(g.atlas);
-            self.instances.push(inst);
         }
         Ok(())
-    }
-
-    /// Common setup: transform, clip, opacity. `None` when the instance is
-    /// invisible (singular transform, zero opacity, fully clipped).
-    // The shared fields of every primitive, written into `inst` in place
-    // (an 80-float instance is too big to return by value cheaply).
-    #[allow(clippy::too_many_arguments)]
-    fn base(
-        &self,
-        inst: &mut Instance,
-        index: usize,
-        rect: Rect,
-        transform: Affine,
-        clip: Option<Rect>,
-        opacity: f32,
-        kind_value: f32,
-    ) -> Result<Option<f32>, RenderError> {
-        if !rect.is_valid() {
-            return Err(invalid(index, "rect is not finite or has negative size"));
-        }
-        if !opacity.is_finite() {
-            return Err(invalid(index, "opacity is not finite"));
-        }
-        let opacity = opacity.clamp(0.0, 1.0);
-        if opacity == 0.0 {
-            return Ok(None);
-        }
-        let Some(inv) = transform.inverse() else {
-            return Ok(None);
-        };
-        let s = self.options.scale;
-        let ppu = s * transform.det().abs().sqrt();
-        let clip_px = match clip {
-            Some(c) if !c.is_valid() => return Err(invalid(index, "clip is not finite")),
-            Some(c) => [c.x * s, c.y * s, c.right() * s, c.bottom() * s],
-            None => NO_CLIP,
-        };
-        put(inst, field::RECT, [rect.x, rect.y, rect.w, rect.h]);
-        let [a, b, c, d, e, f] = transform.m;
-        put(inst, field::XFORM, [a, b, c, d]);
-        put(inst, field::XFORM2, [e, f, ppu, kind_value]);
-        let [ia, ib, ic, id, ie, iff] = inv.m;
-        put(inst, field::INV, [ia, ib, ic, id]);
-        put(inst, field::INV2, [ie, iff, opacity, 0.0]);
-        put(inst, field::CLIP, clip_px);
-        Ok(Some(ppu))
-    }
-
-    /// Sets the draw bounds; returns false if they are off screen.
-    fn bounds(&self, inst: &mut Instance, local: Rect, transform: Affine) -> bool {
-        put(
-            inst,
-            field::BOUNDS,
-            [local.x, local.y, local.right(), local.bottom()],
-        );
-        let s = self.options.scale;
-        let b = transform.bounds(local);
-        let c = &inst[field::CLIP..field::CLIP + 4];
-        let (x0, y0) = ((b.x * s).max(c[0]).max(0.0), (b.y * s).max(c[1]).max(0.0));
-        let (x1, y1) = (
-            (b.right() * s).min(c[2]).min(self.viewport.w),
-            (b.bottom() * s).min(c[3]).min(self.viewport.h),
-        );
-        x1 > x0 && y1 > y0
     }
 
     fn shadows(
         &mut self,
         index: usize,
-        base: &Instance,
-        ppu: f32,
-        rect: Rect,
+        shape: &Shape,
+        prop: &Prop,
         transform: Affine,
         shadows: &[Shadow],
     ) -> Result<(), RenderError> {
@@ -568,126 +573,153 @@ impl Encoder {
             if sh.color.alpha <= 0.0 {
                 continue;
             }
-            let mut inst = *base;
-            inst[field::XFORM2 + 3] = kind::SHADOW;
-            inst[field::INV2 + 3] = 1.0;
             // Below about half a physical pixel a Gaussian is a hard edge;
             // keep sigma there so the analytic integral stays smooth.
-            let sigma = (sh.blur * 0.5).max(0.5 / ppu);
-            put(
-                &mut inst,
-                field::SHADOW,
-                [sh.offset[0], sh.offset[1], sh.spread, sigma],
-            );
-            let shadow_color = self.colors.srgb_premul(sh.color);
-            put(&mut inst, field::SHADOW_COLOR, shadow_color);
-            let shape = rect
-                .translate(sh.offset[0], sh.offset[1])
-                .inflate(sh.spread.max(-0.5 * rect.w.min(rect.h)));
-            let local = shape.inflate(3.0 * sigma + 1.0 / ppu);
-            if self.bounds(&mut inst, local, transform) {
-                self.instances.push(inst);
+            let sigma = (sh.blur * 0.5).max(0.5 / prop.data.ppu);
+            let record = ShadowRecord {
+                rect: shape.rect,
+                ext: shape.ext,
+                exps: shape.exps,
+                shadow: [sh.offset[0], sh.offset[1], sh.spread, sigma],
+                color: self.colors.srgb_premul(sh.color),
+                prop: prop.index,
+                pad: [0; 3],
+            };
+            if self.visible(shade::shadow_bounds(&record, &prop.data), transform, prop) {
+                self.push_box(Family::Shadow, record.to_slots());
             }
         }
         Ok(())
     }
 
     fn quad(&mut self, index: usize, q: &Quad) -> Result<(), RenderError> {
-        let mut inst = [0.0; INSTANCE_FLOATS];
-        let Some(ppu) = self.base(
-            &mut inst,
-            index,
-            q.rect,
-            q.transform,
-            q.clip,
-            q.opacity,
-            kind::QUAD,
-        )?
-        else {
+        valid_rect(index, q.rect)?;
+        let Some(prop) = self.property(index, q.transform, q.clip, q.opacity)? else {
             return Ok(());
         };
-        let (ext, exps) = corner_params(q.rect, q.radii, q.corners);
-        put(&mut inst, field::RADII, ext);
-        put(&mut inst, field::EXPS, exps);
-        self.shadows(index, &inst, ppu, q.rect, q.transform, &q.shadows)?;
+        let shape = Shape::new(q.rect, q.radii, q.corners);
+        self.shadows(index, &shape, &prop, q.transform, &q.shadows)?;
 
+        let mut record = QuadRecord {
+            rect: shape.rect,
+            ext: shape.ext,
+            exps: shape.exps,
+            prop: prop.index,
+            ..QuadRecord::default()
+        };
         let r = q.rect;
+        let mut gradient = None;
         match &q.fill {
-            None => inst[field::FILL] = fill_kind::NONE,
+            None => record.flags = fill_kind::NONE,
             Some(Fill::Solid(c)) => {
-                inst[field::FILL] = fill_kind::SOLID;
-                let c = self.colors.srgb_premul(*c);
-                put(&mut inst, field::STOPS, c);
+                record.flags = fill_kind::SOLID;
+                record.fill = self.colors.srgb_premul(*c);
             }
             Some(Fill::Linear { start, end, stops }) => {
-                inst[field::FILL] = fill_kind::LINEAR;
-                put(
-                    &mut inst,
-                    field::GRAD,
-                    [
-                        r.x + start[0] * r.w,
-                        r.y + start[1] * r.h,
-                        r.x + end[0] * r.w,
-                        r.y + end[1] * r.h,
-                    ],
-                );
-                put_stops(index, &mut inst, stops)?;
+                let geometry = [
+                    r.x + start[0] * r.w,
+                    r.y + start[1] * r.h,
+                    r.x + end[0] * r.w,
+                    r.y + end[1] * r.h,
+                ];
+                gradient = Some(gradient_record(index, geometry, stops)?);
+                record.flags = fill_kind::LINEAR | ((stops.len() as u32) << 8);
             }
             Some(Fill::Radial {
                 center,
                 radius,
                 stops,
             }) => {
-                inst[field::FILL] = fill_kind::RADIAL;
-                put(
-                    &mut inst,
-                    field::GRAD,
-                    [
-                        r.x + center[0] * r.w,
-                        r.y + center[1] * r.h,
-                        (radius[0] * r.w).max(1e-6),
-                        (radius[1] * r.h).max(1e-6),
-                    ],
-                );
-                put_stops(index, &mut inst, stops)?;
+                let geometry = [
+                    r.x + center[0] * r.w,
+                    r.y + center[1] * r.h,
+                    (radius[0] * r.w).max(1e-6),
+                    (radius[1] * r.h).max(1e-6),
+                ];
+                gradient = Some(gradient_record(index, geometry, stops)?);
+                record.flags = fill_kind::RADIAL | ((stops.len() as u32) << 8);
             }
         }
-        if inst[field::FILL] >= fill_kind::LINEAR {
-            inst[field::INV2 + 3] = 1.0;
-        }
         if let Some(border) = q.border {
-            let w = match border.width {
-                BorderWidth::Hairline => 1.0 / ppu,
+            record.border_width = match border.width {
+                BorderWidth::Hairline => 1.0 / prop.data.ppu,
                 BorderWidth::Logical(w) if w.is_finite() => w.max(0.0),
                 BorderWidth::Logical(_) => {
                     return Err(invalid(index, "border width is not finite"));
                 }
             };
-            let border_color = self.colors.srgb_premul(border.color);
-            put(&mut inst, field::BORDER_COLOR, border_color);
-            inst[field::BORDER] = w;
+            record.border = self.colors.srgb_premul(border.color);
         }
-        if inst[field::FILL] == fill_kind::NONE && inst[field::BORDER] == 0.0 {
+        if record.flags == fill_kind::NONE && record.border_width == 0.0 {
             return Ok(());
         }
-        if self.bounds(&mut inst, q.rect.inflate(1.0 / ppu), q.transform) {
-            self.instances.push(inst);
+        if self.visible(
+            shade::shape_bounds(record.rect, &prop.data),
+            q.transform,
+            &prop,
+        ) {
+            if let Some(gradient) = gradient {
+                record.effect = self.effect(gradient.to_slots());
+            }
+            self.push_box(Family::Quad, record.to_slots());
+        }
+        Ok(())
+    }
+
+    fn curve(&mut self, index: usize, c: &Curve) -> Result<(), RenderError> {
+        let finite = c.points.iter().flatten().all(|v| v.is_finite()) && c.width.is_finite();
+        if !finite || !c.color.to_array().iter().all(|v| v.is_finite()) {
+            return Err(invalid(index, "curve is not finite"));
+        }
+        let p = c.points;
+        let length: f32 = (0..3)
+            .map(|i| curve::length(p[i + 1][0] - p[i][0], p[i + 1][1] - p[i][1]))
+            .sum();
+        if c.width <= 0.0 || c.color.alpha <= 0.0 || length <= MIN_CURVE_LENGTH {
+            return Ok(());
+        }
+        let Some(prop) = self.property(index, c.transform, c.clip, c.opacity)? else {
+            return Ok(());
+        };
+        // A stroke is at least one physical pixel wide; thinner ones fade.
+        let min_width = 1.0 / prop.data.ppu;
+        let (width, color) = if c.width < min_width {
+            (
+                min_width,
+                c.color.with_alpha(c.color.alpha * (c.width / min_width)),
+            )
+        } else {
+            (c.width, c.color)
+        };
+        let px_per_unit = self.frame.options.scale * curve::max_stretch(c.transform);
+        let half_width = width * 0.5;
+        let segments = curve::segment_count(p, px_per_unit);
+        let record = CurveRecord {
+            p01: [p[0][0], p[0][1], p[1][0], p[1][1]],
+            p23: [p[2][0], p[2][1], p[3][0], p[3][1]],
+            color: self.colors.srgb_premul(color),
+            prop: prop.index,
+            half_width,
+            segments,
+            window: curve::search_window(
+                p,
+                segments,
+                shade::curve_claim(half_width, prop.data.ppu),
+            ),
+        };
+        if self.visible(shade::curve_bounds(&record, &prop.data), c.transform, &prop) {
+            if self.pending_segments == 0 {
+                self.flush();
+            }
+            self.push(Family::Curve, record.to_slots());
+            self.pending_segments = self.pending_segments.max(record.segments);
         }
         Ok(())
     }
 
     fn backdrop(&mut self, index: usize, b: &Backdrop) -> Result<(), RenderError> {
-        let mut inst = [0.0; INSTANCE_FLOATS];
-        let Some(ppu) = self.base(
-            &mut inst,
-            index,
-            b.rect,
-            b.transform,
-            b.clip,
-            b.opacity,
-            kind::BACKDROP,
-        )?
-        else {
+        valid_rect(index, b.rect)?;
+        let Some(prop) = self.property(index, b.transform, b.clip, b.opacity)? else {
             return Ok(());
         };
         let finite = [b.blur, b.saturation, b.grain]
@@ -699,61 +731,49 @@ impl Encoder {
                 "backdrop blur, saturation or grain is not valid",
             ));
         }
-        let (ext, exps) = corner_params(b.rect, b.radii, b.corners);
-        put(&mut inst, field::RADII, ext);
-        put(&mut inst, field::EXPS, exps);
-        let tint = self.colors.srgb_premul(b.tint);
-        put(&mut inst, field::STOPS, tint);
-        inst[field::INV2 + 3] = 1.0;
-        let (hw, hk) = match b.highlight {
-            Some(h) if h.width.is_finite() && h.width > 0.0 && h.color.alpha > 0.0 => {
-                let rim = self.colors.srgb_premul(h.color);
-                put(&mut inst, field::BORDER_COLOR, rim);
-                let k = match h.kind {
-                    HighlightKind::Full => 0.0,
-                    HighlightKind::TopRim => 1.0,
-                };
-                (h.width, k)
-            }
-            _ => (0.0, 0.0),
+        let shape = Shape::new(b.rect, b.radii, b.corners);
+        let mut record = BackdropRecord {
+            rect: shape.rect,
+            ext: shape.ext,
+            exps: shape.exps,
+            tint: self.colors.srgb_premul(b.tint),
+            params: [0.0, 0.0, b.saturation.max(0.0), b.grain.max(0.0)],
+            prop: prop.index,
+            ..BackdropRecord::default()
         };
-        put(
-            &mut inst,
-            field::BORDER,
-            [hw, hk, b.saturation.max(0.0), b.grain.max(0.0)],
-        );
-        let visible = self.bounds(&mut inst, b.rect.inflate(1.0 / ppu), b.transform);
-        if visible {
+        if let Some(h) = b.highlight
+            && h.width.is_finite()
+            && h.width > 0.0
+            && h.color.alpha > 0.0
+        {
+            record.rim = self.colors.srgb_premul(h.color);
+            record.params[0] = h.width;
+            record.params[1] = match h.kind {
+                HighlightKind::Full => 0.0,
+                HighlightKind::TopRim => 1.0,
+            };
+        }
+        if self.visible(
+            shade::shape_bounds(record.rect, &prop.data),
+            b.transform,
+            &prop,
+        ) {
             let blur = self.blur_plan(b);
-            let (w1, h1) = (
-                level_size(self.options.width, 1),
-                level_size(self.options.height, 1),
-            );
-            put(
-                &mut inst,
-                field::GRAD,
-                [
-                    1.0 / (2.0 * w1 as f32),
-                    1.0 / (2.0 * h1 as f32),
-                    if blur.is_some() { 1.0 } else { 0.0 },
-                    0.0,
-                ],
-            );
+            record.has_blur = u32::from(blur.is_some());
             self.flush();
-            let id = self.instances.len() as u32;
-            self.instances.push(inst);
-            self.ops.push(Op::Backdrop { instance: id, blur });
-            self.pending_start = self.instances.len() as u32;
+            let instance = self.frame.instances.len() as u32;
+            self.push(Family::Backdrop, record.to_slots());
+            self.frame.ops.push(Op::Backdrop { instance, blur });
+            self.pending_start = self.frame.instances.len() as u32;
         }
         // Shadows go after the composite (they are clipped out of the shape,
         // so the order does not change the picture, and the blur does not
         // pick up the panel's own shadow).
-        let base = inst;
-        self.shadows(index, &base, ppu, b.rect, b.transform, &b.shadows)
+        self.shadows(index, &shape, &prop, b.transform, &b.shadows)
     }
 
     fn blur_plan(&self, b: &Backdrop) -> Option<BlurPlan> {
-        let s = self.options.scale;
+        let s = self.frame.options.scale;
         let radius_px = b.blur * s * b.transform.det().abs().sqrt();
         if radius_px < 0.5 {
             return None;
@@ -763,8 +783,8 @@ impl Encoder {
         let bb = b.transform.bounds(b.rect);
         let x0 = (bb.x * s - reach).floor().max(0.0);
         let y0 = (bb.y * s - reach).floor().max(0.0);
-        let x1 = (bb.right() * s + reach).ceil().min(self.viewport.w);
-        let y1 = (bb.bottom() * s + reach).ceil().min(self.viewport.h);
+        let x1 = (bb.right() * s + reach).ceil().min(self.viewport[0]);
+        let y1 = (bb.bottom() * s + reach).ceil().min(self.viewport[1]);
         if x1 <= x0 || y1 <= y0 {
             return None;
         }
@@ -776,7 +796,29 @@ impl Encoder {
     }
 }
 
-fn put_stops(index: usize, inst: &mut Instance, stops: &[GradientStop]) -> Result<(), RenderError> {
+/// A rounded rectangle as records hold it.
+struct Shape {
+    rect: [f32; 4],
+    ext: [f32; 4],
+    exps: [f32; 4],
+}
+
+impl Shape {
+    fn new(rect: Rect, radii: Radii, corners: CornerStyle) -> Shape {
+        let (ext, exps) = corner_params(rect, radii, corners);
+        Shape {
+            rect: [rect.x, rect.y, rect.w, rect.h],
+            ext,
+            exps,
+        }
+    }
+}
+
+fn gradient_record(
+    index: usize,
+    geometry: [f32; 4],
+    stops: &[GradientStop],
+) -> Result<GradientRecord, RenderError> {
     if stops.is_empty() || stops.len() > MAX_GRADIENT_STOPS {
         return Err(RenderError::GradientStops {
             index,
@@ -789,17 +831,18 @@ fn put_stops(index: usize, inst: &mut Instance, stops: &[GradientStop]) -> Resul
     if !ok {
         return Err(invalid(index, "gradient stop is not finite"));
     }
-    inst[field::FILL + 1] = stops.len() as f32;
-    let mut offsets = [0.0; 4];
+    let mut record = GradientRecord {
+        geometry,
+        ..GradientRecord::default()
+    };
     let mut prev = f32::MIN;
     for (i, s) in stops.iter().enumerate() {
         // Offsets must not decrease (CSS clamps them the same way).
         prev = prev.max(s.offset);
-        offsets[i] = prev;
-        put(inst, field::STOPS + 4 * i, s.color.to_array());
+        record.offsets[i] = prev;
+        record.stops[i] = s.color.to_array();
     }
-    put(inst, field::STOP_OFFSETS, offsets);
-    Ok(())
+    Ok(record)
 }
 
 #[cfg(test)]
@@ -832,10 +875,13 @@ mod tests {
         let list = sample_list(40);
         let fresh = encode(&list, opts()).unwrap();
         let mut frame = encode(&sample_list(300), opts()).unwrap();
-        let cap = frame.instances.capacity();
+        let cap = (frame.instances.capacity(), frame.records.capacity());
         encode_into(&list, opts(), &mut frame).unwrap();
         assert_eq!(frame, fresh);
-        assert!(frame.instances.capacity() >= cap, "capacity is kept");
+        assert!(
+            frame.instances.capacity() >= cap.0 && frame.records.capacity() >= cap.1,
+            "capacity is kept"
+        );
         // Layer-ordered input takes the no-sort path and gives the same.
         let mut flat = DisplayList::new();
         for it in &list.items {
@@ -852,6 +898,7 @@ mod tests {
         let bad = FrameOptions { width: 0, ..opts() };
         assert!(encode_into(&sample_list(3), bad, &mut frame).is_err());
         assert!(frame.instances.is_empty() && frame.ops.is_empty());
+        assert!(frame.records.is_empty() && frame.properties.is_empty());
     }
 
     #[test]
@@ -924,7 +971,8 @@ mod tests {
             Op::Draw {
                 start: 0,
                 end: 3,
-                atlas: None
+                atlas: None,
+                vertices: 6
             }
         );
         assert!(matches!(
@@ -933,6 +981,181 @@ mod tests {
                 instance: 3,
                 blur: Some(_)
             }
+        ));
+    }
+
+    fn family_order(frame: &Frame) -> Vec<Family> {
+        (0..frame.instances.len())
+            .map(|i| frame.instance(i).unwrap().family)
+            .collect()
+    }
+
+    fn sprites(n: usize) -> Glyphs {
+        let sprite = crate::list::GlyphSprite {
+            rect: Rect::new(1.0, 1.0, 4.0, 4.0),
+            texels: [0, 0, 4, 4],
+        };
+        Glyphs::new(0, vec![sprite; n], Color::WHITE)
+    }
+
+    fn wire(y: f32) -> Curve {
+        Curve::new(
+            [[0.0, y], [40.0, y], [40.0, y + 30.0], [80.0, y + 30.0]],
+            2.0,
+            Color::WHITE,
+        )
+    }
+
+    #[test]
+    fn families_keep_painter_order_and_batch() {
+        let mut list = DisplayList::new();
+        let q = Quad::new(Rect::new(0.0, 0.0, 9.0, 9.0), Color::WHITE);
+        list.add(q.clone().shadows(&[Shadow {
+            offset: [0.0, 1.0],
+            blur: 2.0,
+            spread: 0.0,
+            color: Color::BLACK,
+        }]));
+        list.add(sprites(2));
+        list.add(q.clone());
+        list.add(sprites(1));
+        list.add(wire(1.0));
+        list.add(wire(5.0));
+        list.add(q);
+        let frame = encode(&list, opts()).unwrap();
+        use Family::{Curve as C, Quad as Q, Shadow as S, Sprite as P};
+        assert_eq!(family_order(&frame), [S, Q, P, P, Q, P, C, C, Q]);
+        // Quads, shadows and sprites share a draw; the curves are one.
+        let draws: Vec<_> = frame
+            .ops
+            .iter()
+            .map(|op| match *op {
+                Op::Draw {
+                    start,
+                    end,
+                    atlas,
+                    vertices,
+                } => (start, end, atlas, vertices),
+                Op::Backdrop { .. } => panic!("no backdrops here"),
+            })
+            .collect();
+        let segments = (0..2)
+            .map(|i| {
+                let slot = frame.instance(6 + i).unwrap().slot as usize;
+                CurveRecord::read(&frame.records, slot).unwrap().segments
+            })
+            .max()
+            .unwrap();
+        assert!(segments > 1);
+        assert_eq!(
+            draws,
+            [
+                (0, 6, Some(0), 6),
+                (6, 8, None, 6 * segments),
+                (8, 9, None, 6)
+            ]
+        );
+        // One property entry for all of them.
+        assert_eq!(frame.properties.len(), 1);
+    }
+
+    #[test]
+    fn records_have_their_family_sizes_and_effects_are_extra() {
+        let upload = |list: &DisplayList| {
+            let f = encode(list, opts()).unwrap();
+            f.records.len() * SLOT_BYTES
+        };
+        let mut sprite = DisplayList::new();
+        sprite.add(sprites(1));
+        assert_eq!(upload(&sprite), 48);
+        let q = Quad::new(Rect::new(0.0, 0.0, 9.0, 9.0), Color::WHITE);
+        let mut solid = DisplayList::new();
+        solid.add(q.clone());
+        assert_eq!(upload(&solid), 96);
+        let mut gradient = DisplayList::new();
+        gradient.add(q.fill(Fill::vertical(Color::WHITE, Color::BLACK)));
+        assert_eq!(upload(&gradient), 96 + 96);
+        let mut curve = DisplayList::new();
+        curve.add(wire(1.0));
+        assert_eq!(upload(&curve), 64);
+        // The instance entry and one shared property.
+        let f = encode(&curve, opts()).unwrap();
+        assert_eq!(f.instance_byte_len(), 4 + 64 + 80);
+    }
+
+    #[test]
+    fn properties_are_shared_by_content() {
+        let mut list = DisplayList::new();
+        let q = Quad::new(Rect::new(0.0, 0.0, 9.0, 9.0), Color::WHITE);
+        let moved = Quad {
+            transform: Affine::translate(3.0, 0.0),
+            ..q.clone()
+        };
+        let faded = Quad {
+            opacity: 0.5,
+            ..q.clone()
+        };
+        let clipped = Quad {
+            clip: Some(Rect::new(0.0, 0.0, 5.0, 5.0)),
+            ..q.clone()
+        };
+        for _ in 0..3 {
+            for q in [&q, &moved, &faded, &clipped] {
+                list.add(q.clone());
+            }
+        }
+        let frame = encode(&list, opts()).unwrap();
+        assert_eq!(frame.instances.len(), 12);
+        assert_eq!(frame.properties.len(), 4);
+    }
+
+    #[test]
+    fn a_thin_curve_is_widened_to_a_pixel_and_faded() {
+        let mut list = DisplayList::new();
+        list.add(Curve {
+            width: 0.125,
+            ..wire(1.0)
+        });
+        let frame = encode(&list, opts()).unwrap();
+        let slot = frame.instance(0).unwrap().slot as usize;
+        let record = CurveRecord::read(&frame.records, slot).unwrap();
+        // Scale 2: a physical pixel is 0.5 units, the stroke a quarter of it.
+        assert_eq!(record.half_width, 0.25);
+        assert_eq!(record.color, Color::WHITE.with_alpha(0.25).to_srgb_premul());
+    }
+
+    #[test]
+    fn invisible_and_degenerate_curves_are_dropped_and_bad_ones_refused() {
+        let w = wire(1.0);
+        for c in [
+            Curve { width: 0.0, ..w },
+            Curve { opacity: 0.0, ..w },
+            Curve {
+                color: Color::TRANSPARENT,
+                ..w
+            },
+            Curve {
+                points: [[3.0, 3.0]; 4],
+                ..w
+            },
+            Curve {
+                transform: Affine::translate(1000.0, 0.0),
+                ..w
+            },
+        ] {
+            let mut list = DisplayList::new();
+            list.add(c);
+            let frame = encode(&list, opts()).unwrap();
+            assert!(frame.instances.is_empty() && frame.ops.is_empty(), "{c:?}");
+        }
+        let mut list = DisplayList::new();
+        list.add(Curve {
+            points: [[f32::NAN, 0.0]; 4],
+            ..w
+        });
+        assert!(matches!(
+            encode(&list, opts()),
+            Err(RenderError::InvalidPrimitive { index: 0, .. })
         ));
     }
 }

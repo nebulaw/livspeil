@@ -3,17 +3,22 @@
 
 //! CPU reference rasterizer. Executes an encoded [`Frame`] with the same
 //! per-pixel math as the WGSL shaders (see `shade.rs`), the same pixel
-//! coverage rule (pixel centers inside an instance's bounds), the same
+//! coverage rule (pixel centers inside a record's bounds), the same
 //! dual-Kawase passes and the same 8-bit quantization after every draw, so
 //! its output is deterministic, needs no GPU, and stays within a small
 //! tolerance of the GPU backend. Goldens are rendered with it.
 //!
 //! It is a reference, not a fast path: it is meant for small test scenes.
 
-use crate::atlas::AtlasStore;
-use crate::encode::{BlurPlan, Frame, Instance, Op, field, kind, level_size};
+use crate::atlas::{AtlasStore, R8Texture};
+use crate::curve::{self, MAX_CURVE_SEGMENTS};
+use crate::encode::{BlurPlan, Frame, Op, level_size};
 use crate::image::RgbaImage;
-use crate::shade::{self, v4};
+use crate::record::{
+    BackdropRecord, CurveRecord, Family, GradientRecord, Property, QuadRecord, ShadowRecord,
+    SpriteRecord, fill_kind,
+};
+use crate::shade;
 
 /// A float texture (one blur level).
 #[derive(Debug, Clone)]
@@ -74,35 +79,32 @@ pub fn render_cpu_with(frame: &Frame, atlases: &AtlasStore) -> RgbaImage {
     for px in img.data.as_chunks_mut::<4>().0 {
         *px = clear;
     }
-    let scale = frame.options.scale;
     for op in &frame.ops {
         match op {
-            Op::Draw { start, end, atlas } => {
+            Op::Draw {
+                start, end, atlas, ..
+            } => {
                 let tex = atlas.and_then(|a| atlases.get(a));
-                for inst in frame
-                    .instances
-                    .get(*start as usize..*end as usize)
-                    .unwrap_or(&[])
-                {
-                    if inst[field::XFORM2 + 3] == kind::GLYPH {
-                        let Some(tex) = tex else { continue };
-                        raster(&mut img, inst, scale, |px| {
-                            shade::shade_glyph(inst, px, scale, |x, y| {
-                                f32::from(tex.texel(x, y)) / 255.0
-                            })
-                        });
-                    } else {
-                        raster(&mut img, inst, scale, |px| shade::shade(inst, px, scale));
-                    }
+                for i in *start..*end {
+                    draw(&mut img, frame, i as usize, tex);
                 }
             }
             Op::Backdrop { instance, blur } => {
-                let Some(inst) = frame.instances.get(*instance as usize) else {
+                let Some((record, prop)) = frame
+                    .instance(*instance as usize)
+                    .and_then(|r| BackdropRecord::read(&frame.records, r.slot as usize))
+                    .and_then(|b| Some((b, property(frame, b.prop)?)))
+                else {
                     continue;
                 };
                 let level1 = blur.map(|plan| blur_levels(&img, plan));
-                let uv_scale = [inst[field::GRAD], inst[field::GRAD + 1]];
-                raster(&mut img, inst, scale, |px| {
+                let uv_scale = [
+                    1.0 / (2.0 * level_size(w, 1) as f32),
+                    1.0 / (2.0 * level_size(h, 1) as f32),
+                ];
+                let scale = frame.options.scale;
+                let bounds = shade::shape_bounds(record.rect, &prop);
+                raster(&mut img, &prop, bounds, scale, |px| {
                     let blurred = match &level1 {
                         Some(l) => {
                             let s = l.sample([px[0] * uv_scale[0], px[1] * uv_scale[1]]);
@@ -110,7 +112,7 @@ pub fn render_cpu_with(frame: &Frame, atlases: &AtlasStore) -> RgbaImage {
                         }
                         None => [0.0; 3],
                     };
-                    shade::shade_backdrop(inst, px, scale, blurred)
+                    shade::shade_backdrop(&record, &prop, px, scale, blurred)
                 });
             }
         }
@@ -118,49 +120,169 @@ pub fn render_cpu_with(frame: &Frame, atlases: &AtlasStore) -> RgbaImage {
     img
 }
 
+fn property(frame: &Frame, index: u32) -> Option<Property> {
+    frame
+        .properties
+        .get(index as usize)
+        .and_then(|slots| Property::read(slots, 0))
+}
+
+/// Draws instance `i` (every family but backdrops, which are their own op).
+/// A reference outside the frame's arrays draws nothing.
+fn draw(img: &mut RgbaImage, frame: &Frame, i: usize, tex: Option<&R8Texture>) {
+    let Some(r) = frame.instance(i) else { return };
+    let (records, at) = (&frame.records[..], r.slot as usize);
+    let scale = frame.options.scale;
+    match r.family {
+        Family::Sprite => {
+            let (Some(sprite), Some(tex)) = (SpriteRecord::read(records, at), tex) else {
+                return;
+            };
+            let Some(prop) = property(frame, sprite.prop) else {
+                return;
+            };
+            let bounds = shade::sprite_bounds(&sprite, &prop);
+            raster(img, &prop, bounds, scale, |px| {
+                shade::shade_sprite(&sprite, &prop, px, scale, |x, y| {
+                    f32::from(tex.texel(x, y)) / 255.0
+                })
+            });
+        }
+        Family::Quad => {
+            let Some(quad) = QuadRecord::read(records, at) else {
+                return;
+            };
+            let Some(prop) = property(frame, quad.prop) else {
+                return;
+            };
+            let gradient = (quad.flags & 0xff >= fill_kind::LINEAR)
+                .then(|| GradientRecord::read(records, quad.effect as usize))
+                .flatten();
+            let bounds = shade::shape_bounds(quad.rect, &prop);
+            raster(img, &prop, bounds, scale, |px| {
+                shade::shade_quad(&quad, gradient.as_ref(), &prop, px, scale)
+            });
+        }
+        Family::Shadow => {
+            let Some(shadow) = ShadowRecord::read(records, at) else {
+                return;
+            };
+            let Some(prop) = property(frame, shadow.prop) else {
+                return;
+            };
+            let bounds = shade::shadow_bounds(&shadow, &prop);
+            raster(img, &prop, bounds, scale, |px| {
+                shade::shade_shadow(&shadow, &prop, px, scale)
+            });
+        }
+        Family::Curve => {
+            let Some(curve) = CurveRecord::read(records, at) else {
+                return;
+            };
+            if let Some(prop) = property(frame, curve.prop) {
+                raster_curve(img, &curve, &prop, scale);
+            }
+        }
+        Family::Backdrop => {}
+    }
+}
+
 fn quantize(v: f32) -> u8 {
     (v.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
-/// Shades and blends every pixel whose center lies inside the instance's
-/// (transformed) bounds, like the GPU rasterizer.
-fn raster(
-    img: &mut RgbaImage,
-    inst: &Instance,
-    scale: f32,
-    shade_px: impl Fn([f32; 2]) -> [f32; 4],
-) {
-    let b = v4(inst, field::BOUNDS);
-    let x = v4(inst, field::XFORM);
-    let (e, f) = (inst[field::XFORM2], inst[field::XFORM2 + 1]);
+/// Blends a premultiplied `src` over pixel `(x, y)`.
+fn blend(img: &mut RgbaImage, x: u32, y: u32, src: [f32; 4]) {
+    let i = (y as usize * img.width as usize + x as usize) * 4;
+    let inv = 1.0 - src[3].clamp(0.0, 1.0);
+    for (d, s) in img.data[i..i + 4].iter_mut().zip(src) {
+        *d = quantize(s + f32::from(*d) / 255.0 * inv);
+    }
+}
+
+/// The pixels `[x0, y0, x1, y1)` that the local rectangle `b` may touch:
+/// its transformed bounds within the clip and the image.
+fn pixel_range(img: &RgbaImage, prop: &Property, b: [f32; 4], scale: f32) -> [u32; 4] {
+    let [a, bb, c, d] = prop.linear;
+    let [e, f, _, _] = prop.offset;
     let corners = [[b[0], b[1]], [b[2], b[1]], [b[0], b[3]], [b[2], b[3]]];
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
     for [lx, ly] in corners {
-        let sx = (x[0] * lx + x[2] * ly + e) * scale;
-        let sy = (x[1] * lx + x[3] * ly + f) * scale;
+        let sx = (a * lx + c * ly + e) * scale;
+        let sy = (bb * lx + d * ly + f) * scale;
         x0 = x0.min(sx);
         y0 = y0.min(sy);
         x1 = x1.max(sx);
         y1 = y1.max(sy);
     }
-    let clip = v4(inst, field::CLIP);
-    let ix0 = (x0.max(clip[0]).floor().max(0.0)) as u32;
-    let iy0 = (y0.max(clip[1]).floor().max(0.0)) as u32;
-    let ix1 = (x1.min(clip[2]).ceil().max(0.0) as u32).min(img.width);
-    let iy1 = (y1.min(clip[3]).ceil().max(0.0) as u32).min(img.height);
+    let clip = prop.clip;
+    [
+        (x0.max(clip[0]).floor().max(0.0)) as u32,
+        (y0.max(clip[1]).floor().max(0.0)) as u32,
+        (x1.min(clip[2]).ceil().max(0.0) as u32).min(img.width),
+        (y1.min(clip[3]).ceil().max(0.0) as u32).min(img.height),
+    ]
+}
+
+/// Shades and blends every pixel whose center lies inside the (transformed)
+/// local rectangle `b`, like the GPU rasterizer.
+fn raster(
+    img: &mut RgbaImage,
+    prop: &Property,
+    b: [f32; 4],
+    scale: f32,
+    shade_px: impl Fn([f32; 2]) -> [f32; 4],
+) {
+    let [ix0, iy0, ix1, iy1] = pixel_range(img, prop, b, scale);
     for py in iy0..iy1 {
         for px in ix0..ix1 {
             let c = [px as f32 + 0.5, py as f32 + 0.5];
-            let p = shade::local_pos(inst, c, scale);
+            let p = shade::local_pos(prop, c, scale);
             if p[0] < b[0] || p[0] >= b[2] || p[1] < b[1] || p[1] >= b[3] {
                 continue;
             }
-            let src = shade_px(c);
-            let i = (py as usize * img.width as usize + px as usize) * 4;
-            let inv = 1.0 - src[3].clamp(0.0, 1.0);
-            for (d, s) in img.data[i..i + 4].iter_mut().zip(src) {
-                *d = quantize(s + f32::from(*d) / 255.0 * inv);
+            blend(img, px, py, shade_px(c));
+        }
+    }
+}
+
+/// A curve: the distance of each pixel to the polyline is the smallest over
+/// the segments whose reach it is in, and each pixel is blended once. (The
+/// GPU finds the same distance and lets the nearest segment's box draw the
+/// pixel.)
+fn raster_curve(img: &mut RgbaImage, curve: &CurveRecord, prop: &Property, scale: f32) {
+    let [x0, y0, x1, y1] = pixel_range(img, prop, shade::curve_bounds(curve, prop), scale);
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let width = (x1 - x0) as usize;
+    let mut distance = vec![f32::INFINITY; width * (y1 - y0) as usize];
+    let points = shade::control_points(curve);
+    let reach = shade::curve_reach(curve, prop);
+    let segments = curve.segments.clamp(1, MAX_CURVE_SEGMENTS);
+    for i in 0..segments {
+        let [a, b] = curve::segment(points, i, segments);
+        let around = [
+            a[0].min(b[0]) - reach,
+            a[1].min(b[1]) - reach,
+            a[0].max(b[0]) + reach,
+            a[1].max(b[1]) + reach,
+        ];
+        let [sx0, sy0, sx1, sy1] = pixel_range(img, prop, around, scale);
+        for py in sy0.max(y0)..sy1.min(y1) {
+            for px in sx0.max(x0)..sx1.min(x1) {
+                let p = shade::local_pos(prop, [px as f32 + 0.5, py as f32 + 0.5], scale);
+                let d = curve::segment_distance(p, a, b);
+                let best = &mut distance[(py - y0) as usize * width + (px - x0) as usize];
+                *best = best.min(d);
             }
+        }
+    }
+    for (k, d) in distance.iter().enumerate() {
+        if d.is_finite() {
+            let (px, py) = (x0 + (k % width) as u32, y0 + (k / width) as u32);
+            let c = [px as f32 + 0.5, py as f32 + 0.5];
+            blend(img, px, py, shade::shade_curve(curve, prop, c, *d));
         }
     }
 }
