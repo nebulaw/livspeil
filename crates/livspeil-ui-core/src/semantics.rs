@@ -484,7 +484,8 @@ pub struct SemanticNode<'a> {
     pub semantics: Option<&'a Semantics>,
     /// Text content (text elements).
     pub text: Option<&'a str>,
-    /// Absolute layout bounds in logical pixels (before transforms).
+    /// Where the element is on screen, in logical window pixels
+    /// ([`App::visual_bounds`]).
     pub bounds: Rect,
     /// Whether the element can take focus.
     pub focusable: bool,
@@ -620,7 +621,7 @@ impl App {
             children: &n.children,
             semantics,
             text: n.text.as_ref().map(|t| &*t.text),
-            bounds: n.bounds,
+            bounds: self.visual_bounds(id).unwrap_or(n.bounds),
             focusable: n.tab_index.is_some(),
             actions,
             debug_label: &n.label,
@@ -641,7 +642,8 @@ impl App {
         let node = self
             .semantic_node(id)
             .ok_or(SemanticActionError::UnknownElement(id))?;
-        let (actions, bounds) = (node.actions, node.bounds);
+        let (actions, window) = (node.actions, node.bounds);
+        let bounds = self.bounds(id).unwrap_or(window);
         let mut cur = Some(node);
         while let Some(n) = cur {
             if n.is_hidden() {
@@ -662,7 +664,7 @@ impl App {
         let handled = match request {
             SemanticRequest::Activate => {
                 require(SemanticAction::Activate)?;
-                self.fire_click(id, bounds.center(), Modifiers::NONE, true)
+                self.fire_click(id, window.center(), Modifiers::NONE, true)
                     || self.dispatch_action_at(id, actions::ACTIVATE)
             }
             SemanticRequest::Focus => {

@@ -56,6 +56,7 @@ mod entity;
 mod host;
 mod input;
 mod keymap;
+mod layer;
 mod paint;
 mod platform;
 mod semantics;
@@ -79,6 +80,7 @@ pub use input::{
     NamedKey, PointerEvent, PointerKind, ScrollDelta, VelocityTracker,
 };
 pub use keymap::{Binding, KEYMAP_FILE, Keymap, actions};
+pub use layer::Layer;
 pub use paint::{
     Border, Fill, IconRun, PaintCmd, PaintStats, Painter, Quad, RecordingPainter, Scene, TextRun,
 };

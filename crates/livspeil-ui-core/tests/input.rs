@@ -108,25 +108,43 @@ fn hit_testing_with_transforms_and_clips() {
     assert_eq!(at(500.0, 500.0), None);
 }
 
+/// A canvas: a clip over a culling layer element panned and zoomed.
+struct Panned;
+
+impl Render for Panned {
+    fn render(&mut self, cx: &mut ViewContext<'_, Self>) -> Element {
+        let canvas = Canvas {
+            pan: Vec2::new(-100.0, 0.0),
+            zoom: 2.0,
+            ..Canvas::default()
+        };
+        let world = cx.layer("world");
+        world.set_transform(cx, canvas.transform());
+        div().name("canvas").size(400.0, 400.0).clip().child(
+            div()
+                .name("world")
+                .w_full()
+                .h_full()
+                .hit_test(false)
+                .layer(world)
+                .cull_offscreen()
+                .children((0..10).map(|i| {
+                    div()
+                        .name(format!("n{i}"))
+                        .absolute(Rect::new(i as f32 * 100.0, 10.0, 40.0, 40.0))
+                        .bg(livspeil_ui_theme::Color::WHITE)
+                })),
+        )
+    }
+}
+
 #[test]
-fn canvas_culls_and_hit_tests_through_pan_zoom() {
-    let canvas = Canvas {
-        pan: Vec2::new(-100.0, 0.0),
-        zoom: 2.0,
-        ..Canvas::default()
-    };
-    let h = host(move || {
-        div()
-            .name("canvas")
-            .size(400.0, 400.0)
-            .canvas(canvas)
-            .children((0..10).map(|i| {
-                div()
-                    .name(format!("n{i}"))
-                    .absolute(Rect::new(i as f32 * 100.0, 10.0, 40.0, 40.0))
-                    .bg(livspeil_ui_theme::Color::WHITE)
-            }))
-    });
+fn culling_and_hit_testing_through_pan_zoom() {
+    let mut app = App::new();
+    let v = app.new_view(Panned);
+    app.set_root(v);
+    let mut h = TestHost::new(app, Size::new(400.0, 400.0));
+    h.run_until_idle(20);
     // Visible canvas x range: (0..400 + 100) / 2 = 50..250, so n0 (0..40) is culled.
     let stats = h.last_frame().unwrap().stats.paint;
     assert_eq!(stats.culled, 8, "only n1 and n2 are visible");

@@ -14,8 +14,9 @@ use livspeil_ui_layout::{Corners, Rect, Transform2D, Vec2};
 use livspeil_ui_theme::{Color, Elevation, Material, MaterialRecipe, Shadow, Theme};
 
 use crate::element::{ElementId, SharedString};
+use crate::layer::Layers;
 use crate::text_measure::FontSpec;
-use crate::tree::{Tree, canvas_visible};
+use crate::tree::Tree;
 
 /// A fill.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -268,12 +269,14 @@ impl Scene {
 pub struct PaintStats {
     /// Nodes painted.
     pub painted: usize,
-    /// Canvas children skipped by viewport culling.
+    /// Children of culling elements skipped as outside the visible area.
     pub culled: usize,
 }
 
 pub(crate) struct PaintInput<'a> {
     pub(crate) tree: &'a Tree,
+    pub(crate) layers: &'a Layers,
+    pub(crate) viewport: Rect,
     pub(crate) theme: &'a Theme,
     pub(crate) focus: Option<ElementId>,
     pub(crate) focus_visible: bool,
@@ -284,22 +287,30 @@ pub(crate) fn paint(input: &PaintInput<'_>) -> (Scene, PaintStats) {
     let mut scene = Scene::default();
     let mut stats = PaintStats::default();
     if let Some(root) = input.tree.root {
-        paint_node(input, root, &mut scene, &mut stats);
+        paint_node(input, root, input.viewport, &mut scene, &mut stats);
     }
     (scene, stats)
 }
 
-fn paint_node(input: &PaintInput<'_>, id: ElementId, scene: &mut Scene, stats: &mut PaintStats) {
+/// `visible`: the visible area in the parent's space.
+fn paint_node(
+    input: &PaintInput<'_>,
+    id: ElementId,
+    visible: Rect,
+    scene: &mut Scene,
+    stats: &mut PaintStats,
+) {
     let Some(node) = input.tree.nodes.get(&id) else {
         return;
     };
-    let opacity = node.opacity();
+    let opacity = node.opacity(input.layers);
     if opacity <= 0.001 {
         return;
     }
     stats.painted += 1;
     let cmds = &mut scene.commands;
-    let transform = node.transform();
+    let transform = node.transform(input.layers);
+    let visible = node.clip_inside(transform, visible);
     let transformed = !transform.is_identity();
     if transformed {
         cmds.push(PaintCmd::PushTransform(transform));
@@ -377,14 +388,17 @@ fn paint_node(input: &PaintInput<'_>, id: ElementId, scene: &mut Scene, stats: &
     }
     let o = node.bounds.origin();
     for w in &node.wires {
-        cmds.push(PaintCmd::Wire(crate::wire::Wire {
+        let wire = crate::wire::Wire {
             element: id,
             from: w.from + o,
             c1: w.c1 + o,
             c2: w.c2 + o,
             to: w.to + o,
             ..*w
-        }));
+        };
+        if !node.cull || wire.bounds().intersects(&visible) {
+            cmds.push(PaintCmd::Wire(wire));
+        }
     }
 
     if !node.children.is_empty() {
@@ -394,22 +408,15 @@ fn paint_node(input: &PaintInput<'_>, id: ElementId, scene: &mut Scene, stats: &
                 radii: v.radii,
             });
         }
-        let child_t = node.child_transform();
-        if let Some(t) = child_t {
-            scene.commands.push(PaintCmd::PushTransform(t));
-        }
         for c in &node.children {
-            if node.canvas.is_some()
+            if node.cull
                 && let Some(child) = input.tree.nodes.get(c)
-                && !canvas_visible(node, child)
+                && node.culls(input.layers, child, visible)
             {
                 stats.culled += 1;
                 continue;
             }
-            paint_node(input, *c, scene, stats);
-        }
-        if child_t.is_some() {
-            scene.commands.push(PaintCmd::PopTransform);
+            paint_node(input, *c, visible, scene, stats);
         }
         if v.clip {
             scene.commands.push(PaintCmd::PopClip);

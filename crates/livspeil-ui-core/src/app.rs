@@ -12,7 +12,7 @@ use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::time::Duration;
 
-use livspeil_ui_layout::{Point, Rect, Size, Vec2};
+use livspeil_ui_layout::{Point, Rect, Size, Transform2D, Vec2};
 use livspeil_ui_theme::{ConfigError, ConfigEvent, MotionConfig, Theme};
 
 use crate::element::{ClickHandler, Element, ElementId, ElementKind, Phase, PointerFilter, div};
@@ -22,8 +22,9 @@ use crate::input::{
     VelocityTracker,
 };
 use crate::keymap::{Keymap, actions};
+use crate::layer::{Layers, Task};
 use crate::paint::{PaintInput, PaintStats, Scene, paint};
-use crate::tree::{Started, Targets, Tree, dump, hit_path, reconcile, update_bounds};
+use crate::tree::{Started, Targets, Tree, dump, hit_path, reconcile};
 
 /// Pointer travel (px) before a press becomes a drag.
 pub const DRAG_THRESHOLD: f32 = 3.0;
@@ -95,7 +96,7 @@ pub struct AnimationStats {
 pub struct FrameStats {
     /// Views whose `render` ran.
     pub views_rendered: usize,
-    /// Whether layout was computed.
+    /// Whether any layout algorithm ran (moving a box runs none).
     pub layout: bool,
     /// Nodes in the tree.
     pub nodes: usize,
@@ -143,6 +144,16 @@ pub struct App {
     root_view: Option<AnyView>,
     root_mounted: bool,
     pub(crate) tree: Tree,
+    pub(crate) layers: Layers,
+    pub(crate) tasks: Vec<Task>,
+    /// A layer property changed since the last frame.
+    pub(crate) positions_changed: bool,
+    /// Counter behind the two revisions below.
+    revision: u64,
+    /// Revision of the last reconcile (anything may have changed).
+    content_revision: u64,
+    /// Elements that moved (with their subtrees), and at which revision.
+    moved: HashMap<ElementId, u64>,
     theme: Theme,
     motion: MotionConfig,
     keymap: Keymap,
@@ -152,7 +163,7 @@ pub struct App {
     element_state: HashMap<ElementId, HashMap<TypeId, Box<dyn Any>>>,
     driver: AnimationDriver,
     viewport: Size,
-    paint_dirty: bool,
+    pub(crate) paint_dirty: bool,
     frame_requested: bool,
     frame_dt: f32,
     frame_count: u64,
@@ -201,6 +212,12 @@ impl App {
             root_view: None,
             root_mounted: false,
             tree: Tree::default(),
+            layers: Layers::default(),
+            tasks: Vec::new(),
+            positions_changed: false,
+            revision: 0,
+            content_revision: 0,
+            moved: HashMap::new(),
             theme: Theme::default(),
             motion: MotionConfig::default(),
             keymap: Keymap::defaults(),
@@ -247,6 +264,8 @@ impl App {
         self.views.remove(&id);
         self.dirty_views.remove(&id);
         self.layout_watch.remove(&id);
+        self.layers.release(id);
+        self.tasks.retain(|t| t.owner != id);
         self.subscriptions.remove(&id);
         if let Some(observed) = self.deps.remove(&id) {
             for m in observed {
@@ -256,6 +275,10 @@ impl App {
             }
         }
         self.observers.remove(&id);
+    }
+
+    pub(crate) fn exists(&self, id: EntityId) -> bool {
+        self.entities.contains_key(&id)
     }
 
     pub(crate) fn read_entity<T: 'static>(&self, id: EntityId) -> Option<&T> {
@@ -499,26 +522,30 @@ impl App {
             || !self.pending.is_empty()
             || !self.tree.visual_dirty.is_empty()
             || !self.driver.active.is_empty()
+            || !self.tasks.is_empty()
             || self.paint_dirty
             || self.frame_requested
             || self
                 .tree
                 .root
                 .and_then(|r| self.tree.nodes.get(&r))
-                .is_some_and(|n| self.tree.layout.is_dirty(n.layout).unwrap_or(false))
+                .is_some_and(|n| self.tree.layout.needs_compute(n.layout))
     }
 
-    /// Run one frame: re-render dirty views and diff them into the retained
-    /// tree, lay out dirty subtrees, retarget animations, advance them by
-    /// `dt` seconds and paint.
+    /// Run one frame: run the animation tasks ([`App::animate`]), re-render
+    /// dirty views and diff them into the retained tree, lay out what
+    /// changed, retarget animations, advance them by `dt` seconds and
+    /// paint.
     pub fn draw_frame(&mut self, dt: f32) -> Frame {
         self.flush_effects();
         self.frame_dt = dt;
         self.frame_requested = false;
         self.renders_this_frame = 0;
         self.frame_count += 1;
+        self.run_tasks(dt);
 
         let mut tree = std::mem::take(&mut self.tree);
+        let before = self.reconciled;
         if !self.root_mounted
             && let Some(root) = self.root_view
         {
@@ -530,21 +557,21 @@ impl App {
             self.root_mounted = true;
         }
         self.render_dirty_views(&mut tree);
-
-        let mut layout = false;
-        if let Some(root) = tree.root.and_then(|r| tree.nodes.get(&r)) {
-            let node = root.layout;
-            if tree.layout.is_dirty(node).unwrap_or(true) {
-                let _ = tree.layout.compute(node, self.viewport);
-                update_bounds(&mut tree);
-                layout = true;
-            }
+        if self.reconciled != before || self.renders_this_frame > 0 {
+            self.revision += 1;
+            self.content_revision = self.revision;
         }
-        if layout {
+
+        let (layout, changed) = self.update_layout(&mut tree);
+        if !changed.is_empty() {
             self.notify_layout_watchers(&tree);
         }
         self.tree = tree;
-        if layout {
+        let moved = !changed.is_empty();
+        for id in changed {
+            self.note_moved(id);
+        }
+        if std::mem::take(&mut self.positions_changed) || moved {
             self.refresh_hover();
         }
 
@@ -553,6 +580,8 @@ impl App {
 
         let (scene, paint_stats) = paint(&PaintInput {
             tree: &self.tree,
+            layers: &self.layers,
+            viewport: self.viewport_rect(),
             theme: &self.theme,
             focus: self.focus,
             focus_visible: self.focus_visible,
@@ -570,6 +599,98 @@ impl App {
                 paint: paint_stats,
             },
         }
+    }
+
+    /// Lay out what changed and bring the absolute bounds up to date.
+    /// Returns whether a layout ran and the roots of the subtrees whose
+    /// bounds may have changed.
+    fn update_layout(&mut self, tree: &mut Tree) -> (bool, Vec<ElementId>) {
+        let mut ran = false;
+        let mut changed = Vec::new();
+        if let Some(node) = tree.root.and_then(|r| tree.nodes.get(&r)).map(|n| n.layout)
+            && tree.layout.needs_compute(node)
+            && let Ok(out) = tree.layout.compute(node, self.viewport)
+        {
+            ran = out.ran;
+            changed.extend(out.changed.iter().filter_map(|n| tree.element_of(*n)));
+        }
+        // The subtree of the root covers every other one.
+        if changed.first() == tree.root.as_ref() {
+            changed.truncate(1);
+        }
+        for &id in &changed {
+            tree.update_bounds_from(&self.layers, id);
+        }
+        // Layer changes made while the tree was being reconciled, and
+        // elements that got or lost a layer.
+        for layer in std::mem::take(&mut self.layers.reframed) {
+            tree.relayered.extend_from_slice(tree.layered(layer).to_vec().as_slice());
+        }
+        for id in std::mem::take(&mut tree.relayered) {
+            tree.update_bounds_from(&self.layers, id);
+        }
+        (ran, changed)
+    }
+
+    pub(crate) fn viewport_rect(&self) -> Rect {
+        Rect::from_origin_size(Point::ZERO, self.viewport)
+    }
+
+    /// `id` and its subtree are somewhere else now.
+    pub(crate) fn note_moved(&mut self, id: ElementId) {
+        self.revision += 1;
+        self.moved.insert(id, self.revision);
+    }
+
+    /// Changes whenever [`App::content_revision`] changes or something
+    /// moves.
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// The [`App::revision`] of the last reconcile: until it changes again,
+    /// the elements, their semantics and their text are as they were, and
+    /// only positions can differ (see [`App::moved_since`]).
+    #[must_use]
+    pub fn content_revision(&self) -> u64 {
+        self.content_revision
+    }
+
+    /// Call `f` with the [`App::visual_bounds`] of every element that may
+    /// have moved since `revision` (by a layer, a translation, a scale or
+    /// layout). Elements under two moved subtrees are visited twice.
+    pub fn moved_since(&self, revision: u64, mut f: impl FnMut(ElementId, Rect)) {
+        for (&root, &at) in &self.moved {
+            if at <= revision {
+                continue;
+            }
+            let Some(to_window) = self.to_window(root) else {
+                continue;
+            };
+            let mut stack = vec![(root, to_window)];
+            while let Some((id, outer)) = stack.pop() {
+                let Some(node) = self.tree.nodes.get(&id) else {
+                    continue;
+                };
+                let own = node.layer_transform(&self.layers).then(outer);
+                f(id, own.apply_rect(&node.bounds));
+                let inner = node.transform(&self.layers).then(outer);
+                stack.extend(node.children.iter().map(|c| (*c, inner)));
+            }
+        }
+    }
+
+    /// The transform from the space `id` is placed in (its parent's layout
+    /// space) to the window.
+    fn to_window(&self, id: ElementId) -> Option<Transform2D> {
+        let mut out = Transform2D::IDENTITY;
+        let mut cur = self.tree.nodes.get(&id)?.parent;
+        while let Some(p) = cur.and_then(|p| self.tree.nodes.get(&p)) {
+            out = out.then(p.transform(&self.layers));
+            cur = p.parent;
+        }
+        Some(out)
     }
 
     /// The bounds of `view`'s root element as of the last layout, and
@@ -645,6 +766,7 @@ impl App {
 
     pub(crate) fn forget_element(&mut self, id: ElementId, view: Option<EntityId>) {
         self.element_state.remove(&id);
+        self.moved.remove(&id);
         if self.focus == Some(id) {
             self.focus = None;
         }
@@ -674,7 +796,12 @@ impl App {
                 continue;
             };
             let targets = Targets::resolve(&node.visual, node.hovered, node.pressed, focus_visible);
+            let before = node.anims.placement();
             let started: Started = node.anims.apply(targets, &node.visual, &self.motion);
+            let moved = node.anims.placement() != before;
+            if moved {
+                self.note_moved(id);
+            }
             if started.any {
                 self.activate(id, started.large);
             }
@@ -709,9 +836,20 @@ impl App {
 
     fn tick_animations(&mut self, dt: f32) {
         let nodes = &mut self.tree.nodes;
-        self.driver
-            .active
-            .retain(|id| nodes.get_mut(id).is_some_and(|n| n.anims.step(dt)));
+        let mut moved = Vec::new();
+        self.driver.active.retain(|id| {
+            nodes.get_mut(id).is_some_and(|n| {
+                let before = n.anims.placement();
+                let moving = n.anims.step(dt);
+                if n.anims.placement() != before {
+                    moved.push(*id);
+                }
+                moving
+            })
+        });
+        for id in moved {
+            self.note_moved(id);
+        }
         for slot in &mut self.driver.large {
             if let Some((id, _)) = *slot
                 && !self.driver.active.contains(&id)
@@ -740,22 +878,58 @@ impl App {
         self.tree.nodes.get(&id).map(|n| n.bounds)
     }
 
-    /// Where an element sits on screen: its layout bounds mapped through its
-    /// ancestors' transforms (scrolling, translation, canvas pan and zoom),
-    /// not its own (press feedback). Anchor popups with this.
+    /// Where an element sits on screen: its layout bounds mapped through
+    /// its layer and its ancestors' transforms (layers: scrolling, canvas
+    /// pan and zoom; translation and scale), not its own translation or
+    /// scale (press feedback). Anchor popups with this.
     #[must_use]
     pub fn visual_bounds(&self, id: ElementId) -> Option<Rect> {
         let node = self.tree.nodes.get(&id)?;
-        let mut rect = node.bounds;
-        let mut parent = node.parent;
-        while let Some(p) = parent.and_then(|p| self.tree.nodes.get(&p)) {
-            if let Some(t) = p.child_transform() {
-                rect = t.apply_rect(&rect);
+        let t = node
+            .layer_transform(&self.layers)
+            .then(self.to_window(id)?);
+        Some(t.apply_rect(&node.bounds))
+    }
+
+    /// A window point in the layout space of element `id` (the space of
+    /// [`App::bounds`]): the inverse of [`App::visual_bounds`]. `None` if
+    /// the element is unknown or scaled to nothing.
+    #[must_use]
+    pub fn to_layout(&self, id: ElementId, point: Point) -> Option<Point> {
+        let node = self.tree.nodes.get(&id)?;
+        let t = node
+            .layer_transform(&self.layers)
+            .then(self.to_window(id)?);
+        Some(t.inverse()?.apply(point))
+    }
+
+    /// The box of `id` in the layout space of its ancestor `ancestor`
+    /// (through the transforms in between). `None` if it is not one.
+    #[must_use]
+    pub fn bounds_within(&self, id: ElementId, ancestor: ElementId) -> Option<Rect> {
+        let node = self.tree.nodes.get(&id)?;
+        let mut t = node.layer_transform(&self.layers);
+        let mut cur = node.parent;
+        loop {
+            let p = cur?;
+            if p == ancestor {
+                return Some(t.apply_rect(&node.bounds));
             }
-            rect = p.transform().apply_rect(&rect);
-            parent = p.parent;
+            let n = self.tree.nodes.get(&p)?;
+            t = t.then(n.transform(&self.layers));
+            cur = n.parent;
         }
-        Some(rect)
+    }
+
+    /// The root element of `view`, while it is mounted.
+    #[must_use]
+    pub fn view_element(&self, view: EntityId) -> Option<ElementId> {
+        let slot = *self.view_slots.get(&view)?;
+        self.tree
+            .nodes
+            .get(&slot)
+            .is_some_and(|n| n.view == Some(view))
+            .then_some(slot)
     }
 
     /// The first element (depth-first) whose name or key is `name`.
@@ -800,10 +974,10 @@ impl App {
         self.tree.nodes.get(&id).map(|n| n.anims.scale.value())
     }
 
-    /// Current (animated) opacity of an element.
+    /// Current opacity of an element (animated, times its layer's).
     #[must_use]
     pub fn opacity_of(&self, id: ElementId) -> Option<f32> {
-        self.tree.nodes.get(&id).map(|n| n.anims.opacity.value())
+        self.tree.nodes.get(&id).map(|n| n.opacity(&self.layers))
     }
 
     /// Current (animated) background of an element.
@@ -815,7 +989,11 @@ impl App {
     /// The topmost element under `point`.
     #[must_use]
     pub fn hit_test(&self, point: Point) -> Option<ElementId> {
-        hit_path(&self.tree, point).last().copied()
+        self.hit_path(point).last().copied()
+    }
+
+    fn hit_path(&self, point: Point) -> Vec<ElementId> {
+        hit_path(&self.tree, &self.layers, self.viewport_rect(), point)
     }
 
     /// Whether the pointer is over the element (or a descendant).
@@ -845,7 +1023,7 @@ impl App {
     /// Text dump of the retained tree with absolute bounds.
     #[must_use]
     pub fn dump_tree(&self) -> String {
-        dump(&self.tree)
+        dump(&self.tree, &self.layers)
     }
 
     /// Dump a scene with element labels.
@@ -1013,7 +1191,7 @@ impl App {
 
     fn refresh_hover(&mut self) {
         if let Some(p) = self.input.pointer {
-            let path = hit_path(&self.tree, p);
+            let path = self.hit_path(p);
             self.set_hovered(path);
         }
     }
@@ -1039,7 +1217,7 @@ impl App {
         self.input.modifiers = ev.modifiers;
         match ev.kind {
             PointerKind::Move => {
-                let hit = hit_path(&self.tree, pos);
+                let hit = self.hit_path(pos);
                 self.set_hovered(hit.clone());
                 if let Some(mut d) = self.input.drag {
                     self.input.tracker.push(ev.time, pos);
@@ -1062,7 +1240,7 @@ impl App {
                 self.dispatch_pointer_path(&path, PointerFilter::Move, &ev);
             }
             PointerKind::Down(_) => {
-                let path = hit_path(&self.tree, pos);
+                let path = self.hit_path(pos);
                 let focusable = path
                     .iter()
                     .rev()
@@ -1102,7 +1280,7 @@ impl App {
                     .input
                     .capture
                     .take()
-                    .unwrap_or_else(|| hit_path(&self.tree, pos));
+                    .unwrap_or_else(|| self.hit_path(pos));
                 self.dispatch_pointer_path(&path, PointerFilter::Up, &ev);
                 let drag = self.input.drag.take();
                 if let Some(d) = drag.filter(|d| d.active) {
@@ -1110,7 +1288,7 @@ impl App {
                     let delta = pos - d.last;
                     self.fire_drag(d, DragPhase::End, pos, delta);
                 } else {
-                    let now = hit_path(&self.tree, pos);
+                    let now = self.hit_path(pos);
                     let target = path.iter().rev().find(|id| {
                         now.contains(id)
                             && self
@@ -1126,11 +1304,11 @@ impl App {
                 }
                 let pressed = std::mem::take(&mut self.input.pressed);
                 self.set_flag(&pressed, false, false);
-                let hit = hit_path(&self.tree, pos);
+                let hit = self.hit_path(pos);
                 self.set_hovered(hit);
             }
             PointerKind::Scroll(_) => {
-                let path = hit_path(&self.tree, pos);
+                let path = self.hit_path(pos);
                 self.dispatch_pointer_path(&path, PointerFilter::Scroll, &ev);
             }
         }
@@ -1294,7 +1472,7 @@ impl App {
             }
             actions::ACTIVATE => match self.focus {
                 Some(f) => {
-                    let center = self.bounds(f).map_or(Point::ZERO, |b| b.center());
+                    let center = self.visual_bounds(f).map_or(Point::ZERO, |b| b.center());
                     self.fire_click(f, center, Modifiers::NONE, true)
                 }
                 None => false,
@@ -1430,6 +1608,14 @@ impl<'a> EventCx<'a> {
     #[must_use]
     pub fn bounds(&self) -> Rect {
         self.bounds
+    }
+
+    /// A window position (a pointer position) in the layout space of the
+    /// current element, so it can be compared with [`EventCx::bounds`]
+    /// whatever scrolls, pans or scales the element.
+    #[must_use]
+    pub fn layout_position(&self, window: Point) -> Point {
+        self.app.to_layout(self.current, window).unwrap_or(window)
     }
 
     /// Phase.

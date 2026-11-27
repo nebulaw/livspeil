@@ -17,17 +17,25 @@ const SIZE: Size = Size {
     width: 1274.0,
     height: 1428.0,
 };
-/// Interacting frames measured.
+/// Interacting frames, and how many of the first are not measured.
 const FRAMES: u32 = 90;
+const SETTLE: u32 = 2;
 
-/// The most work any measured frame did.
+/// The work of the measured frames.
 #[derive(Debug, Default, Clone, Copy)]
 struct Work {
+    /// Frames in which some view rendered.
+    rendered: u32,
+    /// Frames in which a layout ran.
+    layouts: u32,
+    /// Most views rendered and elements reconciled in one frame.
     views: usize,
     reconciled: usize,
-    layouts: u32,
+    /// Most instances and instance bytes in one frame.
     instances: usize,
     upload_bytes: usize,
+    /// Frames that drew something else than the frame before.
+    changed: u32,
 }
 
 fn measure(scenario: Scenario) -> Work {
@@ -50,11 +58,13 @@ fn measure(scenario: Scenario) -> Work {
         ops: Vec::new(),
     };
     let mut work = Work::default();
+    let mut last = None;
     for frame in 0..Scenario::WARMUP + FRAMES {
         scenario.step(&mut host.app, &mounted, frame);
         let out = host.app.draw_frame(1.0 / 144.0);
         // The first interacting frames still settle (gesture starts).
-        if frame < Scenario::WARMUP + 2 {
+        if frame < Scenario::WARMUP + SETTLE {
+            last = Some(out.scene);
             continue;
         }
         list.items.clear();
@@ -62,26 +72,29 @@ fn measure(scenario: Scenario) -> Work {
             .paint_scene(&out.scene, 1.0, &mut list)
             .expect("paint");
         encode_into(&list, options, &mut gpu).expect("encode");
+        work.rendered += u32::from(out.stats.views_rendered > 0);
+        work.layouts += u32::from(out.stats.layout);
         work.views = work.views.max(out.stats.views_rendered);
         work.reconciled = work.reconciled.max(out.stats.reconciled);
-        work.layouts += u32::from(out.stats.layout);
         work.instances = work.instances.max(gpu.instances.len());
         work.upload_bytes = work.upload_bytes.max(gpu.instance_byte_len());
+        work.changed += u32::from(last.as_ref() != Some(&out.scene));
+        last = Some(out.scene);
     }
     work
 }
 
-/// Today's work, the ceiling for tomorrow's:
-/// (views rendered, elements reconciled, frames with layout out of 88,
-/// instances, bytes uploaded).
-fn budget(scenario: Scenario) -> (usize, usize, u32, usize, usize) {
+/// Today's work, the ceiling for tomorrow's, over 88 measured frames:
+/// (frames that rendered, frames that ran layout, views in a frame,
+/// elements reconciled in a frame, instances, bytes uploaded).
+fn budget(scenario: Scenario) -> (u32, u32, usize, usize, usize, usize) {
     match scenario {
-        Scenario::PanSample => (1, 80, 88, 579, 185_280),
-        Scenario::PanStress => (1, 1827, 88, 17_894, 5_726_080),
-        Scenario::PanStressFit => (1, 507, 88, 15_477, 4_952_640),
-        Scenario::ZoomStress => (1, 1827, 88, 18_137, 5_803_840),
-        Scenario::DragStress => (2, 2328, 88, 18_089, 5_788_480),
-        Scenario::ScrollList => (1, 388, 0, 1777, 568_640),
+        Scenario::PanSample => (0, 0, 0, 0, 579, 185_280),
+        Scenario::PanStress => (0, 0, 0, 0, 17_894, 5_726_080),
+        Scenario::PanStressFit => (0, 0, 0, 0, 15_477, 4_952_640),
+        Scenario::ZoomStress => (0, 0, 0, 0, 18_137, 5_803_840),
+        Scenario::DragStress => (88, 88, 2, 2328, 18_089, 5_788_480),
+        Scenario::ScrollList => (10, 10, 1, 388, 1777, 568_640),
     }
 }
 
@@ -95,12 +108,17 @@ fn every_scenario_stays_within_its_budget() {
     let mut over = Vec::new();
     for s in Scenario::ALL {
         let work = measure(s);
-        let (views, reconciled, layouts, instances, bytes) = budget(s);
+        eprintln!("{}: {work:?}", s.slug());
+        let (rendered, layouts, views, reconciled, instances, bytes) = budget(s);
         // A scenario that stops interacting would pass trivially.
-        assert!(work.views > 0 && work.instances > 0, "{s:?} did nothing");
-        if work.views > views
-            || work.reconciled > with_headroom(reconciled)
+        assert!(
+            work.changed >= s.changing_frames() && work.instances > 0,
+            "{s:?} did nothing: {work:?}"
+        );
+        if work.rendered > rendered
             || work.layouts > layouts
+            || work.views > views
+            || work.reconciled > with_headroom(reconciled)
             || work.instances > with_headroom(instances)
             || work.upload_bytes > with_headroom(bytes)
         {

@@ -12,13 +12,14 @@ use livspeil_ui_layout::style::{
     AlignItems, Dimension, FlexDirection, JustifyContent, LengthPercentage, LengthPercentageAuto,
     Position, length,
 };
-use livspeil_ui_layout::{Canvas, Corners, Rect, Style, Transform2D, Vec2, taffy};
+use livspeil_ui_layout::{Corners, Rect, Style, Transform2D, Vec2, taffy};
 use livspeil_ui_theme::{Color, Elevation, Material, MotionClass};
 
 use crate::anim::Easing;
 use crate::app::EventCx;
 use crate::entity::{AnyView, Render, View};
 use crate::input::{ClickEvent, DragEvent, ImeEvent, KeyEvent, PointerEvent};
+use crate::layer::Layer;
 use crate::text_measure::{FontFeature, FontSpec};
 
 /// Cheaply clonable string.
@@ -279,7 +280,8 @@ pub struct Element {
     pub(crate) tab_index: Option<i32>,
     pub(crate) focus_scope: bool,
     pub(crate) key_context: Option<SharedString>,
-    pub(crate) canvas: Option<Canvas>,
+    pub(crate) layer: Option<Layer>,
+    pub(crate) cull: bool,
     pub(crate) hit_test: bool,
     pub(crate) semantics: Option<Box<crate::semantics::Semantics>>,
     pub(crate) wires: Vec<crate::wire::Wire>,
@@ -347,7 +349,8 @@ impl Element {
             tab_index: None,
             focus_scope: false,
             key_context: None,
-            canvas: None,
+            layer: None,
+            cull: false,
             hit_test: true,
             semantics: None,
             wires: Vec::new(),
@@ -698,12 +701,22 @@ impl Element {
 
     // ---- behavior ----
 
-    /// Children are laid out in canvas space and drawn through `canvas`'s
-    /// pan/zoom, culled to the visible area.
+    /// Apply `layer`'s properties to this element and its subtree (see
+    /// [`Layer`]).
     #[must_use]
-    pub fn canvas(mut self, canvas: Canvas) -> Self {
-        self.canvas = Some(canvas);
-        self.visual.clip = true;
+    pub fn layer(mut self, layer: Layer) -> Self {
+        self.layer = Some(layer);
+        self
+    }
+
+    /// Neither paint nor hit the children (and own wires) outside the
+    /// visible area: the clips above this element mapped into its space.
+    /// For large content moving under a clip (a canvas, a long list).
+    /// Children are tested by their own box, so they must not draw far
+    /// outside it.
+    #[must_use]
+    pub fn cull_offscreen(mut self) -> Self {
+        self.cull = true;
         self
     }
 

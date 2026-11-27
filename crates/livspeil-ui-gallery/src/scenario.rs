@@ -66,6 +66,13 @@ impl Scenario {
         Scenario::ALL.into_iter().find(|s| s.slug() == slug)
     }
 
+    /// How many of 88 consecutive interacting frames at least draw
+    /// something new (so a scenario that stops working is noticed).
+    #[must_use]
+    pub fn changing_frames(self) -> u32 {
+        80
+    }
+
     /// The gallery page to mount.
     #[must_use]
     pub fn page(self) -> Page {
@@ -99,13 +106,12 @@ impl Scenario {
             Scenario::PanSample | Scenario::PanStress | Scenario::PanStressFit => {
                 NodeCanvas::pan_by(canvas, app, Vec2::new(3.0 * sign, 0.0));
             }
-            Scenario::ZoomStress => canvas.update(app, |s, cx| {
-                let mut c = s.canvas();
+            Scenario::ZoomStress => {
+                let mut c = canvas.read(app).canvas();
                 let factor = if forward { 1.01 } else { 1.0 / 1.01 };
                 c.zoom_at(Point::new(400.0, 400.0), factor);
-                s.set_canvas(c);
-                cx.notify();
-            }),
+                NodeCanvas::set_canvas(canvas, app, c);
+            }
             Scenario::DragStress => {
                 let graph = canvas.read(app).model();
                 graph.update(app, |g, cx| {

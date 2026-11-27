@@ -15,9 +15,9 @@ use std::fmt;
 use std::rc::Rc;
 
 use livspeil_ui_core::{
-    Animated, App, CursorShape, DragEvent, DragPhase, Element, Key, Model, MouseButton, NamedKey,
-    Phase, PointerEvent, PointerFilter, PointerKind, Render, Role as CoreRole, ScrollDelta,
-    SharedString, View, ViewContext, Wire, actions as core, div, text,
+    Animated, App, CursorShape, DragEvent, DragPhase, Element, EventCx, Key, Model, MouseButton,
+    NamedKey, Phase, PointerEvent, PointerFilter, PointerKind, Render, Role as CoreRole,
+    ScrollDelta, SharedString, View, ViewContext, Wire, actions as core, div, text,
 };
 use livspeil_ui_layout::style::{Dimension, LengthPercentageAuto, Position};
 use livspeil_ui_layout::{Canvas, Point, Rect, Size, Vec2};
@@ -49,8 +49,15 @@ pub const MINIMAP: Size = Size {
     width: 200.0,
     height: 130.0,
 };
-/// Extra area (view px) around the viewport that is built.
-const OVERSCAN: f32 = 96.0;
+/// The built region reaches past the view on each side by this fraction of
+/// the view, and at least by [`MIN_MARGIN`] view pixels.
+const MARGIN: f32 = 0.25;
+const MIN_MARGIN: f32 = 96.0;
+/// The built region is rebuilt smaller once it is this many times wider or
+/// taller than a new one would be.
+const SHRINK: f32 = 2.0;
+/// Key of the zoom spring's frame task.
+const ZOOM_TASK: &str = "zoom";
 /// Zoom factor per wheel line.
 const WHEEL_ZOOM: f32 = 1.15;
 /// Zoom exponent per pixel of a ctrl/pinch scroll.
@@ -89,10 +96,11 @@ pub struct CanvasStats {
     pub nodes: usize,
     /// Links in the model.
     pub links: usize,
-    /// Nodes built (intersecting the viewport plus overscan).
-    pub visible_nodes: usize,
+    /// Nodes built: those intersecting the built region (the view and a
+    /// margin around it).
+    pub built_nodes: usize,
     /// Wires built.
-    pub visible_wires: usize,
+    pub built_wires: usize,
     /// Detail level.
     pub lod: Lod,
 }
@@ -122,6 +130,52 @@ struct ZoomAnim {
     /// The canvas point under it.
     anchor_canvas: Point,
     zoom: Animated<f32>,
+}
+
+/// What a render built: the part of the canvas, and in how much detail. It
+/// stays good while the view stays inside it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Built {
+    /// Canvas space.
+    area: Rect,
+    lod: Lod,
+    /// The view size it was built for.
+    size: Size,
+}
+
+impl Built {
+    /// What to build for `canvas` seen in a view of `size`.
+    fn around(canvas: &Canvas, size: Size) -> Built {
+        let view = canvas.visible_rect(size);
+        let margin = |len: f32| (len * MARGIN).max(MIN_MARGIN) / canvas.zoom;
+        let (x, y) = (margin(size.width), margin(size.height));
+        Built {
+            area: Rect::new(
+                view.x - x,
+                view.y - y,
+                view.width + 2.0 * x,
+                view.height + 2.0 * y,
+            ),
+            lod: Lod::for_zoom(canvas.zoom),
+            size,
+        }
+    }
+
+    /// Whether it still serves: same detail and view size, the whole view
+    /// inside, and not far larger than what the view needs now (zoomed in a lot).
+    fn covers(&self, canvas: &Canvas, size: Size) -> bool {
+        let view = canvas.visible_rect(size);
+        let wanted = Built::around(canvas, size);
+        let a = self.area;
+        self.lod == wanted.lod
+            && self.size == size
+            && a.x <= view.x
+            && a.y <= view.y
+            && a.right() >= view.right()
+            && a.bottom() >= view.bottom()
+            && a.width <= SHRINK * wanted.area.width
+            && a.height <= SHRINK * wanted.area.height
+    }
 }
 
 /// Minimap content: one rect per node, rebuilt per model revision only.
@@ -190,10 +244,15 @@ pub fn minimap_mapping(bounds: Rect, size: Size, pad: f32) -> (f32, Vec2) {
 ///   on a snapped port connects.
 /// - **Parameters**: numbers are `NumberField`s (scrub or type), flags
 ///   `Toggle`s; edits go to [`NodeGraphModel::set_param`].
-/// - **Virtualization**: only nodes and wires intersecting the viewport
-///   (plus overscan) are built, through a spatial index cached per model
-///   revision; cards lose detail when zoomed out ([`Lod`]). The minimap
-///   (bottom right, Glass) is a separate view rebuilt per revision.
+/// - **Virtualization**: only nodes and wires intersecting the built
+///   region (the viewport and a margin) are built, through a spatial index
+///   cached per model revision; cards lose detail when zoomed out
+///   ([`Lod`]). The minimap (bottom right, Glass) is a separate view
+///   rebuilt per revision.
+/// - **Layers**: pan and zoom set the transform of one layer holding the
+///   wires and cards, and move the minimap's viewport frame. The canvas
+///   renders again only when the view leaves the built region, the level of
+///   detail changes, or the content changes.
 pub struct NodeCanvas<M: NodeGraphModel> {
     env: Env,
     model: Model<M>,
@@ -206,11 +265,14 @@ pub struct NodeCanvas<M: NodeGraphModel> {
     button: Option<MouseButton>,
     shift: bool,
     press: Option<(NodeId, bool)>,
+    /// Layout box of the canvas as of the last render.
     origin: Point,
     size: Size,
+    built: Option<Built>,
     cache: Option<Rc<GraphCache>>,
     fields: HashMap<(NodeId, usize), View<NumberField>>,
-    minimap: Option<(View<MinimapNodes>, u64, usize)>,
+    /// The minimap's view and the revision and selection it shows.
+    minimap: Option<(View<MinimapNodes>, u64, BTreeSet<NodeId>)>,
     show_minimap: bool,
     stats: CanvasStats,
     name: SharedString,
@@ -245,6 +307,7 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
             press: None,
             origin: Point::ZERO,
             size: Size::new(0.0, 0.0),
+            built: None,
             cache: None,
             fields: HashMap::new(),
             minimap: None,
@@ -271,12 +334,11 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
     /// Start at this pan/zoom.
     #[must_use]
     pub fn with_canvas(mut self, canvas: Canvas) -> Self {
-        self.set_canvas(canvas);
+        self.jump(canvas);
         self
     }
 
-    /// Jump to a pan/zoom (cancels a zoom animation).
-    pub fn set_canvas(&mut self, canvas: Canvas) {
+    fn jump(&mut self, canvas: Canvas) {
         self.canvas = canvas;
         self.zoom_target = canvas.zoom;
         self.zoom = None;
@@ -347,11 +409,21 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
         self.cache.as_deref()
     }
 
-    /// The canvas element's window origin and size (from the last layout
-    /// or pointer event; the window size before either).
+    /// The canvas element's layout origin and size as of the last render
+    /// (zero before it was laid out).
     #[must_use]
     pub fn frame(&self) -> (Point, Size) {
         (self.origin, self.size)
+    }
+
+    /// Jump to a pan/zoom (cancels a zoom animation). Like panning and
+    /// zooming, this renders the canvas only if the built region no longer
+    /// serves.
+    pub fn set_canvas(view: View<Self>, app: &mut App, canvas: Canvas) {
+        view.update(app, |s, cx| {
+            s.jump(canvas);
+            s.camera_changed(cx);
+        });
     }
 
     /// Zoom by `factor` about `anchor` (window coordinates), animated.
@@ -361,10 +433,10 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
             MotionClass::Standard,
             PropertyKind::Movement,
         );
-        view.update(app, |s, cx| {
+        let local = view_point(view, app, anchor);
+        let animate = view.update(app, |s, cx| {
             let target = (s.zoom_target * factor).clamp(s.canvas.min_zoom, s.canvas.max_zoom);
             s.zoom_target = target;
-            let local = anchor - s.origin;
             let mut za = s.zoom.unwrap_or(ZoomAnim {
                 anchor: local,
                 anchor_canvas: Point::ZERO,
@@ -374,24 +446,49 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
             za.anchor_canvas = s.canvas.to_canvas(local);
             if za.zoom.animate_to(target, spec) {
                 s.zoom = Some(za);
+                true
             } else {
                 s.zoom = None;
                 s.canvas.zoom = target;
                 s.canvas.pan = local - za.anchor_canvas * target;
+                s.camera_changed(cx);
+                false
             }
-            cx.notify();
         });
+        if animate {
+            app.animate(view.id(), ZOOM_TASK, move |app, dt| {
+                view.update(app, |s, cx| s.step_zoom(dt, cx))
+            });
+        }
+    }
+
+    /// Advance the zoom spring (the anchor stays put). Returns whether it
+    /// is still moving.
+    fn step_zoom(&mut self, dt: f32, cx: &mut ViewContext<'_, Self>) -> bool {
+        let Some(mut za) = self.zoom else {
+            return false;
+        };
+        let moving = za.zoom.step(dt);
+        self.canvas.zoom = za.zoom.value();
+        self.canvas.pan = za.anchor - za.anchor_canvas * self.canvas.zoom;
+        self.zoom = moving.then_some(za);
+        self.camera_changed(cx);
+        moving
     }
 
     /// Pan by a view-space delta.
     pub fn pan_by(view: View<Self>, app: &mut App, delta: Vec2) {
         view.update(app, |s, cx| {
-            s.canvas.pan_by(delta);
-            if let Some(za) = &mut s.zoom {
-                za.anchor_canvas = s.canvas.to_canvas(za.anchor);
-            }
-            cx.notify();
+            s.pan(delta);
+            s.camera_changed(cx);
         });
+    }
+
+    fn pan(&mut self, delta: Vec2) {
+        self.canvas.pan_by(delta);
+        if let Some(za) = &mut self.zoom {
+            za.anchor_canvas = self.canvas.to_canvas(za.anchor);
+        }
     }
 
     /// Zoom and pan so the whole graph fits with a margin.
@@ -400,25 +497,58 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
         let model = view.read(app).model;
         let bounds = graph_bounds(&GraphCache::build(model.read(app), metrics));
         let vp = app.viewport();
-        view.update(app, |s, cx| {
-            let size = if s.size.width > 0.0 { s.size } else { vp };
-            let m = 40.0;
-            let z = ((size.width - 2.0 * m) / bounds.width.max(1.0))
-                .min((size.height - 2.0 * m) / bounds.height.max(1.0))
-                .clamp(s.canvas.min_zoom, s.canvas.max_zoom.min(1.0));
-            let c = bounds.center();
-            let canvas = Canvas {
-                zoom: z,
-                pan: Vec2::new(size.width / 2.0, size.height / 2.0) - c * z,
-                ..s.canvas
-            };
-            s.set_canvas(canvas);
-            cx.notify();
-        });
+        let s = view.read(app);
+        let size = if s.size.width > 0.0 { s.size } else { vp };
+        let m = 40.0;
+        let z = ((size.width - 2.0 * m) / bounds.width.max(1.0))
+            .min((size.height - 2.0 * m) / bounds.height.max(1.0))
+            .clamp(s.canvas.min_zoom, s.canvas.max_zoom.min(1.0));
+        let canvas = Canvas {
+            zoom: z,
+            pan: Vec2::new(size.width / 2.0, size.height / 2.0) - bounds.center() * z,
+            ..s.canvas
+        };
+        Self::set_canvas(view, app, canvas);
     }
 
-    fn to_canvas(&self, window: Point) -> Point {
-        self.canvas.to_canvas(window - self.origin)
+    /// The view size: the canvas's own once laid out, else the window.
+    fn view_size(&self, app: &App) -> Size {
+        if self.size.width > 0.0 {
+            self.size
+        } else {
+            app.viewport()
+        }
+    }
+
+    /// The canvas moved: set the layers, and render only if what is built
+    /// no longer serves.
+    fn camera_changed(&mut self, cx: &mut ViewContext<'_, Self>) {
+        self.place(cx);
+        let size = self.view_size(cx);
+        // The rubber band is drawn in view coordinates.
+        if matches!(self.gesture, Gesture::Rubber { .. })
+            || !self.built.is_some_and(|b| b.covers(&self.canvas, size))
+        {
+            cx.notify();
+        }
+    }
+
+    /// Put the world and the minimap's viewport frame where the canvas is.
+    fn place(&mut self, cx: &mut ViewContext<'_, Self>) {
+        let world = cx.layer("world");
+        world.set_transform(cx, self.canvas.transform());
+        let frame = self.cache.as_ref().map(|cache| {
+            let (k, off) = minimap_mapping(minimap_bounds(cache), MINIMAP, 8.0);
+            let seen = self.canvas.visible_rect(self.view_size(cx));
+            Rect::new(
+                seen.x * k + off.x,
+                seen.y * k + off.y,
+                seen.width * k,
+                seen.height * k,
+            )
+        });
+        let viewport = cx.layer("minimap-viewport");
+        viewport.set_frame(cx, frame);
     }
 
     fn model_ok(&self, app: &App, from: PortRef, to: PortRef) -> bool {
@@ -426,14 +556,17 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
     }
 }
 
-fn track_frame<M: NodeGraphModel>(view: View<NodeCanvas<M>>, cx: &mut App, bounds: Rect) {
-    view.update(cx, |s, _| {
-        s.origin = bounds.origin();
-        s.size = bounds.size();
-    });
+/// A window position relative to the canvas's top left (view space), under
+/// whatever transforms the canvas itself.
+fn view_point<M: NodeGraphModel>(view: View<NodeCanvas<M>>, app: &App, window: Point) -> Point {
+    let root = app.view_element(view.id());
+    match root.and_then(|r| Some((app.to_layout(r, window)?, app.bounds(r)?))) {
+        Some((p, b)) => p - b.origin(),
+        None => window,
+    }
 }
 
-fn on_scroll<M: NodeGraphModel>(view: View<NodeCanvas<M>>, ev: &PointerEvent, cx: &mut App) {
+fn on_scroll<M: NodeGraphModel>(view: View<NodeCanvas<M>>, ev: &PointerEvent, cx: &mut EventCx<'_>) {
     let PointerKind::Scroll(delta) = ev.kind else {
         return;
     };
@@ -455,12 +588,14 @@ fn panning<M: NodeGraphModel>(s: &NodeCanvas<M>) -> bool {
 }
 
 fn background_drag<M: NodeGraphModel>(view: View<NodeCanvas<M>>, ev: &DragEvent, cx: &mut App) {
+    let start_at = view_point(view, cx, ev.start);
+    let now_at = view_point(view, cx, ev.position);
     view.update(cx, |s, vcx| {
         if ev.phase == DragPhase::Start {
             s.gesture = if panning(s) {
                 Gesture::Pan
             } else {
-                let start = s.to_canvas(ev.start);
+                let start = s.canvas.to_canvas(start_at);
                 let base = if s.shift {
                     s.selection.clone()
                 } else {
@@ -473,15 +608,11 @@ fn background_drag<M: NodeGraphModel>(view: View<NodeCanvas<M>>, ev: &DragEvent,
                 }
             };
         }
-        let to_canvas = |p| s.canvas.to_canvas(p - s.origin);
-        let now_c = to_canvas(ev.position);
+        let now_c = s.canvas.to_canvas(now_at);
+        let mut changed = false;
+        let mut panned = false;
         match &mut s.gesture {
-            Gesture::Pan => {
-                s.canvas.pan_by(ev.delta);
-                if let Some(za) = &mut s.zoom {
-                    za.anchor_canvas = s.canvas.to_canvas(za.anchor);
-                }
-            }
+            Gesture::Pan => panned = true,
             Gesture::Rubber { start, now, base } => {
                 *now = now_c;
                 if let Some(cache) = &s.cache {
@@ -489,13 +620,20 @@ fn background_drag<M: NodeGraphModel>(view: View<NodeCanvas<M>>, ev: &DragEvent,
                     sel.extend(rubber_select(cache, *start, *now));
                     s.selection = sel;
                 }
+                changed = true;
             }
             _ => {}
+        }
+        if panned {
+            s.pan(ev.delta);
+            s.camera_changed(vcx);
         }
         if ev.phase == DragPhase::End {
             s.gesture = Gesture::None;
         }
-        vcx.notify();
+        if changed {
+            vcx.notify();
+        }
     });
 }
 
@@ -549,20 +687,21 @@ fn node_drag<M: NodeGraphModel>(view: View<NodeCanvas<M>>, ev: &DragEvent, cx: &
             s.press = None;
         }
         let out = match &s.gesture {
-            Gesture::Pan => {
-                s.canvas.pan_by(ev.delta);
-                vcx.notify();
-                Vec::new()
-            }
             Gesture::Move(starts) => {
                 let d = ev.total() * (1.0 / s.canvas.zoom);
                 starts.iter().map(|(id, p)| (*id, *p + d)).collect()
             }
             _ => Vec::new(),
         };
+        if matches!(s.gesture, Gesture::Pan) {
+            s.pan(ev.delta);
+            s.camera_changed(vcx);
+        }
         if ev.phase == DragPhase::End {
+            if matches!(s.gesture, Gesture::Move(_)) {
+                vcx.notify();
+            }
             s.gesture = Gesture::None;
-            vcx.notify();
         }
         out
     });
@@ -587,17 +726,18 @@ fn port_drag<M: NodeGraphModel>(
     }
     if matches!(view.read(cx).gesture, Gesture::Pan) {
         view.update(cx, |s, vcx| {
-            s.canvas.pan_by(ev.delta);
+            s.pan(ev.delta);
+            s.camera_changed(vcx);
             if ev.phase == DragPhase::End {
                 s.gesture = Gesture::None;
             }
-            vcx.notify();
         });
         return;
     }
+    let at = view_point(view, cx, ev.position);
     let (pointer, snap) = {
         let s = view.read(cx);
-        let pointer = s.to_canvas(ev.position);
+        let pointer = s.canvas.to_canvas(at);
         let snap = s.cache.as_ref().and_then(|cache| {
             find_snap(cache, port, pointer, SNAP_RADIUS / s.canvas.zoom, |o, i| {
                 s.model_ok(cx, o, i)
@@ -630,16 +770,18 @@ fn port_drag<M: NodeGraphModel>(
     });
 }
 
-fn minimap_jump<M: NodeGraphModel>(view: View<NodeCanvas<M>>, cx: &mut App, at: Point, mini: Rect) {
+/// Centre the view on the pressed point of the minimap.
+fn minimap_jump<M: NodeGraphModel>(view: View<NodeCanvas<M>>, cx: &mut EventCx<'_>, window: Point) {
+    let local = cx.layout_position(window) - cx.bounds().origin();
     view.update(cx, |s, vcx| {
         let Some(cache) = &s.cache else { return };
         let (k, off) = minimap_mapping(minimap_bounds(cache), MINIMAP, 8.0);
-        let local = at - mini.origin();
         let c = (local - off) * (1.0 / k);
-        s.canvas.pan = Vec2::new(s.size.width / 2.0, s.size.height / 2.0) - c * s.canvas.zoom;
-        s.zoom = None;
-        s.zoom_target = s.canvas.zoom;
-        vcx.notify();
+        let size = s.view_size(vcx);
+        let mut canvas = s.canvas;
+        canvas.pan = Vec2::new(size.width / 2.0, size.height / 2.0) - c * canvas.zoom;
+        s.jump(canvas);
+        s.camera_changed(vcx);
     });
 }
 
@@ -940,19 +1082,6 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
             return div();
         };
 
-        // Zoom animation: the anchor stays put.
-        if let Some(mut za) = self.zoom {
-            let moving = za.zoom.step(cx.frame_delta());
-            self.canvas.zoom = za.zoom.value();
-            self.canvas.pan = za.anchor - za.anchor_canvas * self.canvas.zoom;
-            if moving {
-                self.zoom = Some(za);
-                cx.notify();
-            } else {
-                self.zoom = None;
-            }
-        }
-
         // The canvas's own size from the last layout (re-rendered when it
         // changes), so culling and the minimap are right before any
         // pointer event.
@@ -960,29 +1089,22 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
             self.origin = b.origin();
             self.size = b.size();
         }
-        let size = if self.size.width > 0.0 {
-            self.size
-        } else {
-            cx.viewport()
-        };
+        let size = self.view_size(cx);
         let zoom = self.canvas.zoom;
-        let lod = Lod::for_zoom(zoom);
-        let visible = self.canvas.visible_rect(size).inflate(OVERSCAN / zoom);
+        let built = match self.built {
+            Some(b) if b.covers(&self.canvas, size) => b,
+            _ => Built::around(&self.canvas, size),
+        };
+        self.built = Some(built);
+        let (lod, area) = (built.lod, built.area);
         let pending = self.pending_wire();
+        self.place(cx);
 
-        // Nodes.
-        let shown = cache.nodes_in(&visible);
-        let mut canvas = div()
-            .key("canvas")
-            .hit_test(false)
-            .style(fill)
-            .canvas(self.canvas);
-
-        // Wires below the cards, relative to the wire layer's origin.
-        let origin = visible.origin();
+        // Wires below the cards, in canvas coordinates.
+        let shown = cache.nodes_in(&area);
         let mut wires = Vec::with_capacity(shown.len() * 2);
         for (l, b) in &cache.links {
-            if !b.intersects(&visible) {
+            if !b.intersects(&area) {
                 continue;
             }
             let hot = self.selection.contains(&l.from.node) || self.selection.contains(&l.to.node);
@@ -991,21 +1113,18 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
                 if hot {
                     w.width = WIRE_WIDTH * 1.5;
                 }
-                w.from -= origin;
-                w.c1 -= origin;
-                w.c2 -= origin;
-                w.to -= origin;
                 wires.push(w);
             }
         }
         let n_wires = wires.len();
-        canvas = canvas.child(
-            div()
-                .key("wires")
-                .absolute(visible)
-                .hit_test(false)
-                .wires(wires),
-        );
+        // The world: one layer panned and zoomed over the canvas.
+        let mut canvas = div()
+            .key("canvas")
+            .hit_test(false)
+            .style(fill)
+            .layer(cx.layer("world"))
+            .cull_offscreen()
+            .wires(wires);
         // The cards are read straight from the cache (no copies).
         for i in &shown {
             let n = &cache.nodes[*i];
@@ -1053,8 +1172,8 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
         self.stats = CanvasStats {
             nodes: cache.nodes.len(),
             links: cache.links.len(),
-            visible_nodes: shown.len(),
-            visible_wires: n_wires,
+            built_nodes: shown.len(),
+            built_wires: n_wires,
             lod,
         };
 
@@ -1086,7 +1205,6 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
         if self.show_minimap && !cache.nodes.is_empty() {
             let bounds = minimap_bounds(&cache);
             let (k, off) = minimap_mapping(bounds, MINIMAP, 8.0);
-            let sel_count = self.selection.len();
             // One rect per node: rebuilt only when the model or the
             // selection changed, not on every pan or zoom frame.
             let content = || {
@@ -1109,10 +1227,10 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
                         .collect::<Vec<(Rect, bool)>>(),
                 )
             };
-            let mini_view = match self.minimap {
-                Some((v, rev, sel)) if rev == revision && sel == sel_count => v,
+            let mini_view = match &self.minimap {
+                Some((v, rev, sel)) if *rev == revision && *sel == self.selection => *v,
                 Some((v, _, _)) => {
-                    let rects = content();
+                    let (v, rects) = (*v, content());
                     v.update(cx, |mm, mcx| {
                         mm.rects = rects;
                         mcx.notify();
@@ -1125,14 +1243,7 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
                     selected: theme.accent(),
                 }),
             };
-            self.minimap = Some((mini_view, revision, sel_count));
-            let vis = self.canvas.visible_rect(size);
-            let vr = Rect::new(
-                vis.x * k + off.x,
-                vis.y * k + off.y,
-                vis.width * k,
-                vis.height * k,
-            );
+            self.minimap = Some((mini_view, revision, self.selection.clone()));
             let minimap = div()
                 .key("minimap")
                 .name("minimap")
@@ -1148,32 +1259,28 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
                 })
                 .child(Element::view(&mini_view))
                 .child(
+                    // Placed by its layer's frame (`NodeCanvas::place`).
                     div()
                         .key("viewport")
                         .name("minimap-viewport")
-                        .absolute(vr)
+                        .absolute(Rect::ZERO)
+                        .layer(cx.layer("minimap-viewport"))
                         .rounded(2.0)
                         .bg(Color::WHITE.with_alpha(0.06))
                         .border(1.0, Color::WHITE.with_alpha(0.7))
                         .hit_test(false),
                 )
                 .on_pointer_down(move |ev, cx| {
-                    let b = cx.bounds();
-                    minimap_jump(view, cx, ev.position, b);
+                    minimap_jump(view, cx, ev.position);
                     cx.stop_propagation();
                 })
-                .on_drag(move |ev, cx| {
-                    let b = cx.bounds();
-                    minimap_jump(view, cx, ev.position, b);
-                });
+                .on_drag(move |ev, cx| minimap_jump(view, cx, ev.position));
             root = root.child(minimap);
         }
 
         let sem = Semantics::new(Role::NodeCanvas).label("Node graph");
         let root = sem.apply(root);
         root.on_pointer(PointerFilter::Down, Phase::Capture, move |ev, cx| {
-            let b = cx.bounds();
-            track_frame(view, cx, b);
             let button = match ev.kind {
                 PointerKind::Down(b) => Some(b),
                 _ => None,
@@ -1183,14 +1290,6 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
                 s.button = button;
                 s.shift = shift;
             });
-        })
-        .on_pointer(PointerFilter::Move, Phase::Capture, move |_, cx| {
-            let b = cx.bounds();
-            track_frame(view, cx, b);
-        })
-        .on_pointer(PointerFilter::Scroll, Phase::Capture, move |_, cx| {
-            let b = cx.bounds();
-            track_frame(view, cx, b);
         })
         .on_scroll(move |ev, cx| {
             on_scroll(view, ev, cx);
