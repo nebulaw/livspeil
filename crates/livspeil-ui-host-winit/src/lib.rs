@@ -53,8 +53,8 @@ pub use hud::HudOptions;
 pub use livspeil_ui_render::{BlurPath, BlurSupport};
 pub use options::FrameDriver;
 pub use options::{
-    ActionHook, FRAME_LATENCY_ENV, HostOptions, PRESENT_MODE_ENV, SurfaceOptions, Titlebar,
-    WindowOptions, parse_present_mode, pick_format, surface_config,
+    ActionHook, CloseHook, FRAME_LATENCY_ENV, HostOptions, PRESENT_MODE_ENV, SurfaceOptions,
+    Titlebar, WindowOptions, parse_present_mode, pick_format, surface_config,
 };
 #[cfg(feature = "widgets")]
 pub use paint_renderer::{PaintRenderer, clear_color, widen_text_runs, without_backdrops};

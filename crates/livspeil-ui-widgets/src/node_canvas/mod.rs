@@ -190,6 +190,8 @@ impl Built {
 ///   space clears, drag on empty space draws a rubber band (Shift adds),
 ///   Ctrl/Cmd+A selects all, Escape clears.
 /// - **Move**: drag a node; every selected node moves with it.
+/// - **Disconnect**: drag from a linked input: its link comes off and
+///   follows the pointer; drop it elsewhere, or nowhere to remove it.
 /// - **Connect**: drag from a port: a pending wire follows the pointer and
 ///   snaps to the nearest compatible port within [`SNAP_RADIUS`] px
 ///   ([`NodeGraphModel::can_connect`]); incompatible ports dim; releasing
@@ -857,10 +859,14 @@ fn node_drag<M: NodeGraphModel>(view: View<NodeCanvas<M>>, ev: &DragEvent, cx: &
         }
         out
     });
+    let ended = ev.phase == DragPhase::End;
     if !moves.is_empty() {
         model.update(cx, |g, mcx| {
             for (id, p) in moves {
                 g.set_position(id, p);
+            }
+            if ended {
+                g.end_gesture();
             }
             mcx.notify();
         });
@@ -887,6 +893,35 @@ fn port_drag<M: NodeGraphModel>(
         return;
     }
     view.update(cx, |s, vcx| s.catch_up(vcx));
+    // Dragging from a linked input takes its link off and carries it: the
+    // wire then starts at the output it came from.
+    if ev.phase == DragPhase::Start && port.side == PortSide::Input {
+        let link = view
+            .read(cx)
+            .cache
+            .as_ref()
+            .and_then(|c| c.links.iter().map(|(l, _)| *l).find(|l| l.to == port));
+        if let Some(link) = link {
+            view.update(cx, |s, _| {
+                s.gesture = Gesture::Wire {
+                    from: link.from,
+                    pointer: Point::ZERO,
+                    snap: None,
+                };
+            });
+            let model = view.read(cx).model;
+            model.update(cx, |g, mcx| {
+                g.disconnect(link);
+                mcx.notify();
+            });
+            view.update(cx, |s, vcx| s.catch_up(vcx));
+        }
+    }
+    // Where the wire being dragged starts.
+    let port = match view.read(cx).gesture {
+        Gesture::Wire { from, .. } => from,
+        _ => port,
+    };
     let at = view_point(view, cx, ev.position);
     let (pointer, snap) = {
         let s = view.read(cx);
@@ -903,14 +938,15 @@ fn port_drag<M: NodeGraphModel>(
             s.gesture = Gesture::None;
             vcx.notify();
         });
-        if let Some(target) = snap {
-            let (from, to) = oriented(port, target);
-            let model = view.read(cx).model;
-            model.update(cx, |g, mcx| {
+        let model = view.read(cx).model;
+        model.update(cx, |g, mcx| {
+            if let Some(target) = snap {
+                let (from, to) = oriented(port, target);
                 g.connect(Link { from, to });
-                mcx.notify();
-            });
-        }
+            }
+            g.end_gesture();
+            mcx.notify();
+        });
         return;
     }
     view.update(cx, |s, vcx| {

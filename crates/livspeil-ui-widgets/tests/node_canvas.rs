@@ -314,14 +314,14 @@ fn wires_snap_to_compatible_ports_only() {
     f.h.drag(noise_out, blur_image, 6);
     f.h.run_until_idle(50);
     assert_eq!(f.graph.read(&f.h.app).links.len(), before);
-    // From an input backward to an output.
-    let ramp_in = f.port("port:4:in:0");
+    // From a free input backward to an output.
+    let seed_in = f.port("port:2:in:0");
     let time_out = f.port("port:1:out:0");
-    f.h.drag(ramp_in, time_out + Vec2::new(-5.0, 5.0), 6);
+    f.h.drag(seed_in, time_out + Vec2::new(-5.0, 5.0), 6);
     f.h.run_until_idle(50);
     assert!(f.graph.read(&f.h.app).links.contains(&Link {
         from: PortRef::output(1, 0),
-        to: PortRef::input(4, 0),
+        to: PortRef::input(2, 0),
     }));
 }
 
@@ -1031,4 +1031,37 @@ fn a_node_with_a_problem_is_marked() {
     h.run_until_idle(100);
     assert!(h.app.find("problem:Mix").is_some());
     assert!(h.app.find("problem:Time").is_none());
+}
+
+#[test]
+fn dragging_off_a_linked_input_disconnects_or_moves_the_link() {
+    let mut f = fixture();
+    // Mix has `A` from Time (node 1) and `B` from Noise (node 2).
+    let a = f.port("port:3:in:0");
+    let links = |f: &Fx| f.graph.read(&f.h.app).links.clone();
+    let before = links(&f).len();
+    let drag = |f: &mut Fx, from: Point, to: Point| {
+        f.h.pointer_move(from.x, from.y);
+        f.h.pointer_down(from.x, from.y);
+        for i in 1..=4 {
+            f.h.step();
+            let p = from + (to - from) * (i as f32 / 4.0);
+            f.h.pointer_move(p.x, p.y);
+        }
+        f.h.pointer_up(to.x, to.y);
+        f.h.run_until_idle(100);
+    };
+    // Dropped on nothing: gone.
+    drag(&mut f, a, Point::new(450.0, 560.0));
+    assert_eq!(links(&f).len(), before - 1);
+    assert!(!links(&f).iter().any(|l| l.to == PortRef::input(3, 0)));
+    // The link of `B`, dropped on `A`: moved.
+    let (b, a) = (f.port("port:3:in:1"), f.port("port:3:in:0"));
+    drag(&mut f, b, a);
+    let now = links(&f);
+    assert_eq!(now.len(), before - 1);
+    assert!(now.contains(&Link {
+        from: PortRef::output(2, 0),
+        to: PortRef::input(3, 0)
+    }));
 }

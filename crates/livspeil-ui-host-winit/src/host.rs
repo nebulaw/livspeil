@@ -26,7 +26,7 @@ use crate::hud::{HudOptions, banner_commands, hud_commands};
 use crate::input::{InputTranslator, KeyInput};
 use crate::options::FrameDriver;
 use crate::options::{
-    ActionHook, HostOptions, SurfaceOptions, Titlebar, WindowOptions, surface_config,
+    ActionHook, CloseHook, HostOptions, SurfaceOptions, Titlebar, WindowOptions, surface_config,
 };
 use crate::pacing::{FrameTimes, Pacer, Wake};
 use crate::platform::{
@@ -150,6 +150,7 @@ pub struct Host<R> {
     base_keymap: Keymap,
     hud: Option<Hud>,
     driver: Option<FrameDriver>,
+    close_requested: Option<CloseHook>,
     /// The driver finished: exit at the end of the event batch.
     quit: bool,
     /// Length of the scene before the HUD overlay was appended to it.
@@ -265,6 +266,7 @@ impl<R: SceneRenderer> Host<R> {
             base_keymap,
             hud: options.frame_hud.map(Hud::new),
             driver: options.driver,
+            close_requested: options.close_requested,
             quit: false,
             overlay_from: None,
         }
@@ -826,6 +828,7 @@ impl<R: SceneRenderer> Host<R> {
                 },
                 WindowAction::SetMaximized(on) => gfx.window.set_maximized(on),
                 WindowAction::Minimize => gfx.window.set_minimized(true),
+                WindowAction::Close => self.quit = true,
             }
         }
         if dragged {
@@ -940,7 +943,18 @@ impl<R: SceneRenderer> ApplicationHandler<HostEvent> for Host<R> {
         let out = &mut self.events;
         let t = &mut self.translator;
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                let close = match &mut self.close_requested {
+                    Some(hook) => (hook.0)(&mut self.app),
+                    None => true,
+                };
+                if close {
+                    event_loop.exit();
+                } else {
+                    // The app has something to show first.
+                    self.request_redraw();
+                }
+            }
             WindowEvent::Resized(size) => self.resize(size),
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 t.set_scale(scale_factor);

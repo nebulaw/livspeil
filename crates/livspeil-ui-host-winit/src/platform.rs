@@ -44,6 +44,8 @@ pub enum WindowAction {
     SetMaximized(bool),
     /// `Window::set_minimized(true)`.
     Minimize,
+    /// End the event loop.
+    Close,
 }
 
 /// The action for `request` on a window that is `maximized` or not (zoom
@@ -54,6 +56,7 @@ pub fn window_action(request: WindowRequest, maximized: bool) -> WindowAction {
         WindowRequest::Drag => WindowAction::Drag,
         WindowRequest::Zoom => WindowAction::SetMaximized(!maximized),
         WindowRequest::Minimize => WindowAction::Minimize,
+        WindowRequest::Close => WindowAction::Close,
     }
 }
 

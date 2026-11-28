@@ -447,7 +447,10 @@ it. Without it every change reads the whole graph again.
 - Wires: links are cubic Béziers with horizontal tangents (`Wire::link`).
   Dragging from a port draws a pending wire that snaps to the nearest
   compatible port within 24 view px; incompatible ports dim; release on a
-  snapped port connects (from inputs too, backward).
+  snapped port connects (from inputs too, backward). Dragging from a linked
+  input takes its link off and carries it: drop it on another input to move
+  it, or on nothing to remove it. `end_gesture` tells the model a move or a
+  wire drag ended.
 - Cards: header, port rows with colored dots, `NumberField` and `Toggle`
   parameter rows (named by the parameter for assistive technology). The
   selection ring is drawn above the header and rows, below the port dots. Level of detail: full from zoom 0.6, header and dots from
