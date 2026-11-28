@@ -150,6 +150,17 @@ impl std::fmt::Debug for ActionHook {
     }
 }
 
+/// Called when the user asks to close the window. Returning `false` keeps
+/// it open: the app then asks the user (unsaved changes) and closes it with
+/// `WindowRequest::Close`.
+pub struct CloseHook(pub Box<dyn FnMut(&mut livspeil_ui_core::App) -> bool>);
+
+impl std::fmt::Debug for CloseHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CloseHook")
+    }
+}
+
 /// Drives the app from the host's frame loop, for scripted measurements:
 /// called before each frame with the time since the host started, it changes
 /// whatever it likes and returns `false` to close the app. While a driver is
@@ -202,6 +213,8 @@ pub struct HostOptions {
     pub frame_hud: Option<HudOptions>,
     /// See [`FrameDriver`].
     pub driver: Option<FrameDriver>,
+    /// See [`CloseHook`]; `None` closes when asked.
+    pub close_requested: Option<CloseHook>,
 }
 
 impl Default for HostOptions {
@@ -216,6 +229,7 @@ impl Default for HostOptions {
             after_accessibility_action: None,
             frame_hud: None,
             driver: None,
+            close_requested: None,
         }
     }
 }
@@ -263,6 +277,16 @@ impl HostOptions {
         f: impl FnMut(&mut livspeil_ui_core::App) + 'static,
     ) -> Self {
         self.after_accessibility_action = Some(ActionHook(Box::new(f)));
+        self
+    }
+
+    /// Ask `f` before closing (see [`CloseHook`]).
+    #[must_use]
+    pub fn on_close_requested(
+        mut self,
+        f: impl FnMut(&mut livspeil_ui_core::App) -> bool + 'static,
+    ) -> Self {
+        self.close_requested = Some(CloseHook(Box::new(f)));
         self
     }
 

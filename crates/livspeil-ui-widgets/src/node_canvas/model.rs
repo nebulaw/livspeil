@@ -250,6 +250,9 @@ pub trait NodeGraphModel: 'static {
     fn connect(&mut self, link: Link);
     /// Remove a link.
     fn disconnect(&mut self, _link: Link) {}
+    /// A drag that moved nodes, or made or removed a link, ended: the edits
+    /// since it started belong together (one undo step).
+    fn end_gesture(&mut self) {}
     /// Set a parameter.
     fn set_param(&mut self, _node: NodeId, _index: usize, _value: ParamValue) {}
 }

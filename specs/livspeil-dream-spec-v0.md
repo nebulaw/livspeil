@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-4.0
 # Livspeil Dream Mode app, first slice (v0)
 
 Status: **accepted** (2026-11-28, D69). The kernel's position commands
-(section 3) and DM1 are built. Roadmap P2; D18
+(section 3), DM1 and DM2 are built. Roadmap P2; D18
 (Dream Mode first as an app), D66 (experience before polish).
 
 ## 1. What it is for
@@ -59,6 +59,11 @@ its source but not its current value, which the kernel has no query for yet.
 Done when a room edited and saved by the app passes `livspeil validate` and
 `livspeil diff` reports exactly the edits made.
 
+Built. One field per unlinked input takes a value, `=expression`, or nothing
+for the default, applied with Enter. "Unsaved" is shown in the toolbar (the
+window title does not change yet). Saving refuses to overwrite a file that
+changed on disk.
+
 ### DM3: build
 
 - Add a node from a searchable list of the registered node types.
@@ -83,10 +88,9 @@ depends on kernel and UI crates; neither side learns about the other.
   the node positions), the history, the cooker and the clock. All changes go
   through it as commands, so the canvas, inspector and menus cannot disagree.
   It is plain Rust with no UI dependency, tested headlessly.
-- **Canvas adapter**: implements `NodeGraphModel` over the session. Maps
-  kernel node ids to canvas ids, and turns the `DocChange` events of each
-  command into `changes_since`, so an edit costs what changed (frame pipeline
-  P4).
+- **Editor**: implements `NodeGraphModel` and owns the session, so a canvas
+  edit is a command on the graph at once. It keeps only how the graph looks
+  and records what changed for `changes_since` (frame pipeline P4).
 - **Inspector**: a view of the session's selected node, built from the node's
   spec.
 - **Cooking**: on the UI thread, once per frame while playing, the nodes of
@@ -100,9 +104,9 @@ Needed in existing crates:
 | Crate | Addition |
 |---|---|
 | `livspeil-graph`, `livspeil-cmd`, `livspeil-doc` | node positions as graph data with a `SetPosition` command (built) |
-| `livspeil-graph` | ask whether a link is allowed without making it |
-| `livspeil-doc` | write a changed document keeping the comments of the old text |
-| `livspeil-ui-widgets` | NodeCanvas: marking a failed node (built); disconnect, delete requests |
+| `livspeil-graph` | ask whether a link is allowed without making it (built) |
+| `livspeil-doc` | write a changed document keeping the comments of the old text (built) |
+| `livspeil-ui-widgets` | NodeCanvas: marking a failed node, disconnect, gesture end (built); delete requests |
 | `livspeil-graph` | the current value of an input driven by an expression or animation |
 
 ## 4. Testing

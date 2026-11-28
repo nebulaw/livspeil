@@ -310,8 +310,8 @@ pub use model::{
 };
 pub use package::{
     AddMode, AddedAsset, ROOM_FILE, add_asset, add_asset_with, canonicalize,
-    canonicalize_assets_lock, check_assets, package_dir, read_assets_lock, room_file, scan_assets,
-    sha256_file, split_prolog, write_assets_lock,
+    canonicalize_assets_lock, check_assets, package_dir, read_assets_lock, rewrite, room_file,
+    scan_assets, sha256_file, split_prolog, write_assets_lock,
 };
 pub use parse::parse;
 pub use value_text::parse_value;

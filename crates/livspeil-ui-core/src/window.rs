@@ -37,6 +37,9 @@ pub enum WindowRequest {
     Zoom,
     /// Minimize the window.
     Minimize,
+    /// Close the window now. The app asks for this once it is ready to, so
+    /// a host does not ask it again.
+    Close,
 }
 
 #[derive(Debug, Default)]

@@ -291,8 +291,14 @@ cargo run --release -p livspeil-dream -- examples/sun-and-lamp.room
 
 Press **Play**, select a node (`lamp_color` shows its color change through a
 simulated day), pan with middle drag or two fingers and zoom with Ctrl+scroll.
-`--select=NAME` and `--play` start that way. Nothing can be edited or saved
-yet (`specs/livspeil-dream-spec-v0.md`).
+`--select=NAME` and `--play` start that way.
+
+Edit by dragging nodes and wires (drag off a linked input to remove its
+link), and in the inspector: type a value, `=expression`, or nothing for the
+default, then Enter. Ctrl+Z and Ctrl+Shift+Z undo and redo, Ctrl+S saves into
+the room file. Nodes cannot be added or deleted yet
+(`specs/livspeil-dream-spec-v0.md`). Work on a copy of an example:
+`cp -r examples/sun-and-lamp.room /tmp/mine.room`.
 
 ## Try the gallery
 
