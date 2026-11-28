@@ -425,7 +425,9 @@ them (`docs/ui-host.md`, "Window chrome and window requests").
 dependency): node ids in paint order, titles, positions, typed input and
 output ports, parameter rows, links, `can_connect` (the type check; default
 equal type names on different nodes), `type_color`, and edit requests
-(`set_position`, `connect`, `disconnect`, `set_param`). `DemoGraph` is an
+(`set_position`, `connect`, `disconnect`, `set_param`), and optionally
+`problem(node)`: the card gets a danger-colored ring and the text is its
+accessible value. `DemoGraph` is an
 in-memory model (`sample()`, and `grid(nodes, links)` for benchmarks).
 
 The canvas keeps a copy of what it reads and updates it when `revision()`

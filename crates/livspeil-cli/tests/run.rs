@@ -128,7 +128,7 @@ fn dim_lamps_saves_canonically_and_journals() {
         "prolog kept"
     );
     assert!(after.contains("input \"out_max\" 0.16"), "{after}");
-    assert!(after.contains("node \"sun\" x=600.0 y=0.0"), "meta kept");
+    assert!(after.contains("node \"sun\" x=720.0 y=-60.0"), "meta kept");
     let check = livspeil(&["fmt", "--check", s(&tmp.room)]);
     assert!(check.status.success(), "{}", text(&check.stderr));
 

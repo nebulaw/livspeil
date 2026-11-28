@@ -69,6 +69,12 @@ SPDX-FileCopyrightText = "2026 Livspeil contributors"
 SPDX-License-Identifier = "CC0-1.0"
 
 [[annotations]]
+path = ["crates/livspeil-dream/goldens/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Livspeil contributors"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
 path = ["crates/livspeil-ui-*/goldens/**"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Livspeil contributors"
