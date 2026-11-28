@@ -7,7 +7,7 @@ mod common;
 
 use common::{id, registry};
 use livspeil_doc::{Document, format, parse};
-use livspeil_graph::{GraphSnapshot, NodeId};
+use livspeil_graph::{Graph, GraphSnapshot, NodeId};
 
 const ROOM: &str = r#"room "Layout" format=1 min-tier="T0" {
   network "/" {
@@ -85,4 +85,49 @@ fn hostile_meta_is_refused() {
         doc.meta.positions.insert(path.to_owned(), position);
         assert!(doc.to_graph(registry()).is_err(), "{path}");
     }
+}
+
+fn graph_with(nodes: &[(u128, Option<u128>, &str)]) -> Graph {
+    let mut graph = Graph::new(registry());
+    for &(n, parent, name) in nodes {
+        let kind = if name == "box" {
+            "core.subnet@1"
+        } else {
+            "core.math.add@1"
+        };
+        graph
+            .add_node_in(parent.map(id), id(n), kind, name, None)
+            .unwrap();
+    }
+    graph
+}
+
+/// Save `graph`, read the text back and load it.
+fn reload(graph: &Graph) -> Graph {
+    let text = format(&Document::from_graph(graph, "r").unwrap()).unwrap();
+    parse(&text).unwrap().to_graph(registry()).unwrap()
+}
+
+#[test]
+fn names_with_slashes_keep_their_positions() {
+    let mut graph = graph_with(&[
+        (1, None, "/x"),
+        (2, None, "x"),
+        (3, None, "//y"),
+        (4, None, "box/deep"),
+        (5, None, "box"),
+        (6, Some(5), "deep"),
+    ]);
+    // The root node `box/deep` shares its meta key with the node `deep` in
+    // `box`; placing only the root one is unambiguous.
+    for (n, x) in [(1, 1.0), (2, 2.0), (3, 3.0), (4, 4.0)] {
+        graph.set_position(id(n), Some([x, x])).unwrap();
+    }
+    assert_eq!(reload(&graph).snapshot(), graph.snapshot());
+
+    // The nested node's position cannot be written: say so instead of
+    // dropping it or giving it to the other node.
+    graph.set_position(id(6), Some([6.0, 6.0])).unwrap();
+    let err = Document::from_graph(&graph, "r").unwrap_err().to_string();
+    assert!(err.contains("box/deep"), "{err}");
 }

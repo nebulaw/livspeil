@@ -27,11 +27,11 @@ struct Step {
     group: Option<GroupId>,
     forward: Vec<Command>,
     backward: Vec<Command>,
-    /// While the step only places nodes: the index of each placed node.
-    /// A node placed again then replaces its entry instead of adding one, so
+    /// The entry of each node placed since the last command of another kind.
+    /// A node placed again replaces its entry instead of adding one, so
     /// dragging costs as much to remember as the nodes dragged, not as the
     /// frames it took.
-    layout: Option<BTreeMap<NodeId, usize>>,
+    layout: BTreeMap<NodeId, usize>,
 }
 
 /// The nodes `command` places, if placing nodes is all it does.
@@ -56,14 +56,15 @@ impl Step {
             group,
             forward: Vec::new(),
             backward: Vec::new(),
-            layout: Some(BTreeMap::new()),
+            layout: BTreeMap::new(),
         }
     }
 
     /// Add an applied command and its inverse to the step.
     fn push(&mut self, command: Command, inverse: Command) {
-        let (Some(layout), Some(nodes)) = (&mut self.layout, placed(&command)) else {
-            self.layout = None;
+        let Some(nodes) = placed(&command) else {
+            // Later placements may not merge across this command.
+            self.layout.clear();
             self.forward.push(command);
             self.backward.push(inverse);
             return;
@@ -75,11 +76,11 @@ impl Step {
         }
         for ((node, forward), backward) in nodes.into_iter().zip(command.into_steps()).zip(inverses)
         {
-            match layout.get(&node) {
+            match self.layout.get(&node) {
                 // The first inverse already goes back to before the step.
                 Some(&at) => self.forward[at] = forward,
                 None => {
-                    layout.insert(node, self.forward.len());
+                    self.layout.insert(node, self.forward.len());
                     self.forward.push(forward);
                     self.backward.push(backward);
                 }
@@ -108,7 +109,9 @@ impl History {
         Self::default()
     }
 
-    /// Apply `command` and record it for undo. Clears the redo stack.
+    /// Apply `command` and record it for undo. Clears the redo stack. A
+    /// command that only places nodes where they already are is not recorded
+    /// and changes neither stack.
     ///
     /// When `group` is `Some` and equals the group of the previous command
     /// applied through this history (with no undo, redo or [`seal`] in
@@ -126,13 +129,22 @@ impl History {
         group: Option<GroupId>,
     ) -> Result<Record, CmdError> {
         let applied = command.apply(graph)?;
-        self.undone.clear();
+        // Putting nodes where they already are is not an edit: it keeps redo
+        // (an editor may report a click as a move).
+        let unmoved = applied.changes.is_empty() && placed(&command).is_some_and(|n| !n.is_empty());
         let entry = JournalEntry {
             kind: EntryKind::Do,
             origin,
             group,
             command: command.clone(),
         };
+        if unmoved {
+            return Ok(Record {
+                entry,
+                changes: applied.changes,
+            });
+        }
+        self.undone.clear();
         match self.done.last_mut() {
             Some(step) if group.is_some() && group == self.open_group => {
                 step.push(command, applied.inverse);

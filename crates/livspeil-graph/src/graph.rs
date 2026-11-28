@@ -173,8 +173,8 @@ pub enum GraphError {
     InvalidDefinition { def: String, reason: String },
     /// The node is not a Charm instance.
     NotAnInstance(NodeId),
-    /// A position coordinate is `NaN` or infinite.
-    NonFinitePosition(NodeId),
+    /// A position coordinate is `NaN` or beyond [`crate::MAX_POSITION`].
+    InvalidPosition(NodeId),
     /// The edit would leave type variable `var` of `node` (and the
     /// variables linked to it) without a type: it must be `expected` but
     /// would also need to be `found` (M0.17; see the `types` module).
@@ -283,9 +283,11 @@ impl fmt::Display for GraphError {
                     "node type '{node_type}' has invalid type variables: {reason}"
                 )
             }
-            GraphError::NonFinitePosition(id) => {
-                write!(f, "the position of node {id} must be finite")
-            }
+            GraphError::InvalidPosition(id) => write!(
+                f,
+                "the position of node {id} must be within {}",
+                crate::MAX_POSITION
+            ),
             GraphError::UnpinnedRead { node, port } => write!(
                 f,
                 "port '{port}' of node {node} is polymorphic and not pinned; \

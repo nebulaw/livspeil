@@ -283,9 +283,10 @@ fn print_command(graph: &Graph, command: &Command, depth: usize) {
 
 /// A node's path (without the leading `/`) or, once deleted, its id.
 fn name(graph: &Graph, id: NodeId) -> String {
-    graph
-        .path(id)
-        .map_or_else(|| id.to_string(), |p| p.trim_start_matches('/').to_owned())
+    graph.path(id).map_or_else(
+        || id.to_string(),
+        |p| p.strip_prefix('/').unwrap_or(&p).to_owned(),
+    )
 }
 
 fn describe(graph: &Graph, command: &Command) -> String {

@@ -153,6 +153,7 @@ pub use cook::{
     TickReport,
 };
 pub use graph::{Endpoint, Graph, GraphError, Link, NodeId, PortDirection};
+pub use layout::MAX_POSITION;
 pub use livspeil_params::expr::RefKind;
 pub use network::{CharmMeta, INPUT_TYPE, INTERFACE_PORT, OUTPUT_TYPE, SUBNET_TYPE};
 pub use rewire::{NewPort, RewirePlan};

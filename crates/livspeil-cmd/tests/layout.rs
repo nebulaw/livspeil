@@ -11,7 +11,7 @@ use std::io::Cursor;
 
 use common::{D_NUM, NUM, definition, graph, id};
 use livspeil_cmd::{Command, DocChange, GroupId, History, JournalWriter, Origin, replay};
-use livspeil_graph::{Cooker, Graph, GraphError, NodeId, instance_node_id};
+use livspeil_graph::{Cooker, Graph, GraphError, MAX_POSITION, NodeId, instance_node_id};
 use livspeil_node_api::Value;
 
 fn place(node: NodeId, x: f64, y: f64) -> Command {
@@ -340,4 +340,71 @@ fn the_json_form_requires_the_position_field() {
     ] {
         assert!(serde_json::from_str::<Command>(&bad).is_err(), "{bad}");
     }
+}
+
+#[test]
+fn the_graph_method_keeps_the_instances_place_too() {
+    let mut g = nested();
+    run(&mut g, [Command::DeleteNode { id: id(12) }]);
+    let at = g.position(id(10));
+    g.make_definition(id(10), "made", "1").expect("converts");
+    assert_eq!(g.position(id(10)), at);
+}
+
+#[test]
+fn dragging_a_new_node_remembers_one_placement() {
+    let mut g = graph();
+    let mut history = History::new();
+    let group = Some(GroupId(3));
+    history
+        .apply(&mut g, num(1, "a"), Origin::Ui, group)
+        .expect("creates");
+    for frame in 0..100 {
+        history
+            .apply(
+                &mut g,
+                place(id(1), f64::from(frame), 0.0),
+                Origin::Ui,
+                group,
+            )
+            .expect("places");
+    }
+    let undo = history.undo(&mut g).expect("undoes");
+    let Command::Transaction(commands) = &undo.entry.command else {
+        panic!("{:?}", undo.entry.command);
+    };
+    assert_eq!(commands.len(), 2, "the placement and the creation");
+    assert_eq!(g.node_count(), 0);
+    history.redo(&mut g).expect("redoes");
+    assert_eq!(g.position(id(1)), Some([99.0, 0.0]));
+}
+
+#[test]
+fn a_placement_that_changes_nothing_keeps_redo() {
+    let mut g = graph();
+    let mut history = History::new();
+    for c in [num(1, "a"), place(id(1), 1.0, 1.0), place(id(1), 2.0, 2.0)] {
+        history.apply(&mut g, c, Origin::Ui, None).expect("applies");
+    }
+    history.undo(&mut g).expect("undoes");
+    let steps = history.undo_len();
+    // A click that did not move the node.
+    let record = history
+        .apply(&mut g, place(id(1), 1.0, 1.0), Origin::Ui, None)
+        .expect("applies");
+    assert!(record.changes.is_empty());
+    assert_eq!(history.undo_len(), steps);
+    assert!(history.can_redo());
+}
+
+#[test]
+fn positions_far_outside_any_canvas_are_refused() {
+    let mut g = nested();
+    let before = g.snapshot();
+    for x in [MAX_POSITION * 1.01, -f64::MAX, 1e300] {
+        assert!(place(id(1), x, 0.0).apply(&mut g).is_err(), "{x}");
+        assert!(place(id(1), 0.0, x).apply(&mut g).is_err(), "{x}");
+    }
+    assert_eq!(g.snapshot(), before);
+    run(&mut g, [place(id(1), MAX_POSITION, -MAX_POSITION)]);
 }

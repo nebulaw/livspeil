@@ -56,7 +56,8 @@ interface (`wit/livspeil-node.wit`).
   nodes mark sinks.
 - **Promotion** exposes an inner input as an input of its subnet.
 - **Layout**: a node may have an editor position. It is edited and saved like
-  the rest of the graph but takes no part in evaluation. Nodes inside a Charm
+  the rest of the graph but takes no part in evaluation. Coordinates are
+  within ±10,000,000. Nodes inside a Charm
   instance have none, and definitions carry none.
 - A **Charm** is a subnet with metadata (`CharmMeta`: name, version, icon,
   required capabilities, minimum tier). Metadata does not affect cooking.
@@ -198,7 +199,9 @@ room "Sun and Lamp" format=1 min-tier="T1" {
 - `assets/` + `assets.lock`: content-addressed files with sha256, size, SPDX
   license, source and author.
 - `meta` is the layout: loading places the graph's nodes, saving writes their
-  positions under their paths. An entry naming no node is an error.
+  positions under their paths. An entry naming no node is an error. A root
+  name containing `/` wins over the nested path it spells; saving a nested
+  position hidden that way is an error.
 - `livspeil diff` matches nodes by id.
 - `livspeil cook` sinks (D46): root `core.output` nodes, otherwise nodes
   without outgoing links.

@@ -907,10 +907,12 @@ impl Graph {
         for (node, port, _) in &plan.readers {
             self.clear_expression(*node, port)?;
         }
+        let position = self.position(subnet);
         self.remove_node(subnet)?;
         let def_id = def.id.clone();
         self.add_definition(def)?;
         self.instantiate(plan.parent, subnet, &plan.name, &def_id)?;
+        self.set_position(subnet, position)?;
         for (node, source) in &plan.overrides {
             self.set_expression(*node, INTERFACE_PORT, source)?;
         }

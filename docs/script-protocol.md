@@ -117,7 +117,7 @@ host                                   script
 | `hello` | none | `protocol` (integer, `1`), `client` (string, optional) | `protocol`, `host`, `session`, `capabilities` (tokens), `room` (`{name}`), `limits` (`request_timeout_ms`, `run_timeout_ms`, `max_message_bytes`) |
 | `graph.nodes` | `graph.read` | `network` (subnet path, default root), `recursive` (default `true`) | `nodes`: `[{id, name, path, type, parent, subnet}]`, sorted by path |
 | `graph.node` | `graph.read` | `node` | `{id, name, path, type, summary, parent, subnet, port_type, charm, inputs, outputs}` |
-| `graph.snapshot` | `graph.read` | none | the kernel's `GraphSnapshot` (`nodes`, `links`) plus `paths` (id to path) |
+| `graph.snapshot` | `graph.read` | none | the kernel's `GraphSnapshot` (`nodes`, `links`, `positions`: id to `[x, y]` for placed nodes, left out when none is) plus `paths` (id to path) |
 | `graph.apply` | `graph.write` | `command` (a command, below), `group` (integer, optional) | `changes` (list), `undo_len` |
 | `graph.new_id` | `graph.write` | `count` (1 to 1024, default 1) | `ids`: fresh node ids |
 | `graph.cook` | `graph.cook` | `nodes` (list of node refs), `time`, `frame`, `dt` (optional) | `clock` (`{frame, time, dt}`), `results`: `[{node, id, outputs, error?}]` |
@@ -150,6 +150,7 @@ accepted for a `Float` input.
 
 `{"set_position":{"node":"…","position":[360.0,40.0]}}` places a node in the
 node editor; `"position":null` unplaces it, and the field is required.
+Coordinates are within ±10,000,000.
 
 Commands name nodes by **id** (the SDK resolves paths for you). New nodes
 need ids: take them from `graph.new_id`. The command is applied with
