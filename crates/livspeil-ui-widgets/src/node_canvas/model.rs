@@ -255,6 +255,8 @@ pub trait NodeGraphModel: 'static {
     fn end_gesture(&mut self) {}
     /// Set a parameter.
     fn set_param(&mut self, _node: NodeId, _index: usize, _value: ParamValue) {}
+    /// Delete `nodes` and their links, in one step. The default keeps them.
+    fn remove(&mut self, _nodes: &[NodeId]) {}
 }
 
 /// A stable color for a type name.
@@ -322,7 +324,7 @@ impl DemoGraph {
         outputs: &[(&str, &str)],
         params: Vec<ParamInfo>,
     ) -> NodeId {
-        let id = self.nodes.len() as NodeId + 1;
+        let id = self.nodes.iter().map(|n| n.id).max().unwrap_or(0) + 1;
         let ports = |p: &[(&str, &str)]| p.iter().map(|(n, t)| PortInfo::new(*n, *t)).collect();
         self.nodes.push(DemoNode {
             id,
@@ -548,6 +550,15 @@ impl NodeGraphModel for DemoGraph {
         {
             p.value = value;
             self.log.record(GraphChange::Edited(node));
+        }
+    }
+    fn remove(&mut self, nodes: &[NodeId]) {
+        let before = self.nodes.len();
+        self.nodes.retain(|n| !nodes.contains(&n.id));
+        if self.nodes.len() != before {
+            self.links
+                .retain(|l| !nodes.contains(&l.from.node) && !nodes.contains(&l.to.node));
+            self.log.restructure();
         }
     }
 }

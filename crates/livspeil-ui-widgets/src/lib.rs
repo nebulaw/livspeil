@@ -14,6 +14,7 @@
 //! - Containers and chrome: [`ScrollView`] / [`VirtualList`], [`Panel`],
 //!   [`DockView`], [`Menu`] / [`MenuBar`] / [`ContextMenu`], [`Titlebar`].
 //! - [`NodeCanvas`]: the node editor over any [`NodeGraphModel`].
+//! - [`Picker`]: a searchable list in a dialog.
 //! - [`Env`] holds fonts, the clipboard and focus tracking, and installs the
 //!   widget keymap; [`Env::root`] wraps the content in a [`WidgetRoot`]
 //!   whose overlay layer hosts popups and tooltips.
@@ -70,6 +71,7 @@ mod label;
 mod menu;
 mod node_canvas;
 mod number_field;
+mod picker;
 mod popover;
 mod scroll;
 mod segmented;
@@ -105,6 +107,7 @@ pub use node_canvas::{
     rect_from, rubber_select,
 };
 pub use number_field::{NumberField, Scrub, scrub_precision};
+pub use picker::{Picker, PickerItem, search as search_items};
 pub use popover::{POPOVER_GAP, POPOVER_MARGIN, Placement, Popover, place_popover};
 pub use scroll::{
     OVERSCAN, SCROLL_SCOPE, ScrollAxis, ScrollContent, ScrollInfo, ScrollPhysics, ScrollView,

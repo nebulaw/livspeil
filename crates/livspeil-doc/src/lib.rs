@@ -290,6 +290,7 @@ mod anim;
 pub mod assets;
 mod comments;
 mod convert;
+mod copy;
 pub mod diff;
 mod error;
 mod format;
@@ -301,6 +302,7 @@ mod value;
 mod value_text;
 
 pub use assets::{AssetEntry, AssetIssue, AssetsError, AssetsLock, IssueKind, Severity};
+pub use copy::{PACKAGE_EXTENSION, PackageError, create_package};
 pub use diff::{Change, DocDiff, Op, Subject, diff};
 pub use error::{DocError, Location};
 pub use format::format;

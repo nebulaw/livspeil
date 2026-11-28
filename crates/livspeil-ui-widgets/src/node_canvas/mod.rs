@@ -385,6 +385,30 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
         (self.origin, self.size)
     }
 
+    /// The canvas point in the middle of the view: where something new is
+    /// seen.
+    #[must_use]
+    pub fn view_center(&self, app: &App) -> Point {
+        let size = self.view_size(app);
+        self.canvas
+            .to_canvas(Point::new(size.width / 2.0, size.height / 2.0))
+    }
+
+    /// Ask the model to delete the selected nodes. Nothing happens during a
+    /// drag.
+    pub fn delete_selection(view: View<Self>, app: &mut App) {
+        let s = view.read(app);
+        if !matches!(s.gesture, Gesture::None) || s.selection.is_empty() {
+            return;
+        }
+        let (model, nodes) = (s.model, s.selection.iter().copied().collect::<Vec<_>>());
+        model.update(app, |g, cx| {
+            g.remove(&nodes);
+            cx.notify();
+        });
+        view.update(app, |s, cx| s.catch_up(cx));
+    }
+
     /// Jump to a pan/zoom (cancels a zoom animation). Like panning and
     /// zooming, this renders the canvas only if the built region no longer
     /// serves.
@@ -545,6 +569,9 @@ impl<M: NodeGraphModel> NodeCanvas<M> {
             }
         }
         let cache = cx.untracked(|app| GraphCache::build(model.read(app), metrics));
+        // Nodes that are gone are no longer selected.
+        let there: HashSet<NodeId> = cache.nodes.iter().map(|n| n.id).collect();
+        self.selection.retain(|id| there.contains(id));
         self.shown = Shown::all(&cache);
         self.minimap_stale = true;
         self.cache = Some(Rc::new(cache));
@@ -1204,6 +1231,9 @@ impl<M: NodeGraphModel> Render for NodeCanvas<M> {
                     vcx.notify();
                 }
             });
+        })
+        .on_action(crate::keymap::actions::DELETE_NODES, move |cx| {
+            NodeCanvas::delete_selection(view, cx);
         })
         .on_action(core::CANCEL, move |cx| {
             view.update(cx, |s, vcx| {

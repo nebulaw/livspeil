@@ -188,6 +188,12 @@ impl Dialog {
         self
     }
 
+    /// [`Dialog::content`] for a dialog already made, when the content
+    /// needs the dialog's handle.
+    pub fn set_content(&mut self, height: f32, f: impl Fn(&App) -> Element + 'static) {
+        self.content = Some((height, Rc::new(f)));
+    }
+
     /// Add a button (shown left to right, so the default goes last).
     #[must_use]
     pub fn button(mut self, b: DialogButton) -> Self {
@@ -283,6 +289,27 @@ impl Dialog {
             };
             env.focus(app, target);
         }
+    }
+
+    /// Move the keyboard to the element named `name` in the content, once
+    /// it is on screen. For use right after [`Dialog::open`]: the content is
+    /// not there before the next frame.
+    pub fn focus_content(view: View<Dialog>, app: &mut App, name: impl Into<String>) {
+        let name = name.into();
+        app.animate(view.id(), "dialog-focus", move |app, _| {
+            let dialog = view.read(app);
+            if !dialog.open {
+                return false;
+            }
+            let env = dialog.env.clone();
+            match app.find(&name) {
+                Some(found) => {
+                    env.focus(app, found);
+                    false
+                }
+                None => true,
+            }
+        });
     }
 
     /// Close without pressing any button (fades out, returns focus).

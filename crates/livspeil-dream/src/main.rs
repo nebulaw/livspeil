@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Livspeil contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! `livspeil-dream <room> [--select=NAME] [--play]`: open a room, see its
-//! graph and watch it run.
+//! `livspeil-dream [room] [--select=NAME] [--play]`: build a new room, or
+//! open one, edit its graph and watch it run.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -14,7 +14,7 @@ use livspeil_ui_paint::{FontSystem as PaintFonts, PaintBridge};
 use livspeil_ui_text::FontSystem;
 use livspeil_ui_widgets::Env;
 
-const USAGE: &str = "usage: livspeil-dream <room> [--select=NAME] [--play]";
+const USAGE: &str = "usage: livspeil-dream [room] [--select=NAME] [--play]";
 
 /// Warnings and errors from the host and renderer, on stderr.
 struct StderrLog;
@@ -34,7 +34,7 @@ impl log::Log for StderrLog {
 }
 
 struct Args {
-    room: PathBuf,
+    room: Option<PathBuf>,
     select: Option<String>,
     play: bool,
 }
@@ -52,11 +52,7 @@ fn args(list: impl Iterator<Item = String>) -> Result<Args, String> {
             room = Some(PathBuf::from(arg));
         }
     }
-    Ok(Args {
-        room: room.ok_or("no room given")?,
-        select,
-        play,
-    })
+    Ok(Args { room, select, play })
 }
 
 fn main() -> ExitCode {
@@ -71,7 +67,11 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let mut session = match Session::open(&args.room) {
+    let opened = match &args.room {
+        Some(room) => Session::open(room),
+        None => Session::untitled(),
+    };
+    let mut session = match opened {
         Ok(s) => s,
         Err(e) => {
             eprintln!("livspeil-dream: {e}");

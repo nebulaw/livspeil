@@ -9,8 +9,8 @@ use std::rc::Rc;
 
 use livspeil_testkit::assert_golden;
 use livspeil_ui_core::{
-    App, DragPhase, Element, ImeEvent, Keymap, Keystroke, Phase, PointerFilter, Render, TestHost,
-    ViewContext, actions, div,
+    App, DragPhase, Element, ImeEvent, Key, Keymap, Keystroke, Modifiers, Phase, PointerFilter,
+    Render, TestHost, ViewContext, actions, div,
 };
 use livspeil_ui_layout::{Canvas, Point, Rect, Size, Transform2D, Vec2};
 
@@ -472,4 +472,50 @@ fn scroll_events_carry_precise_deltas() {
     });
     h.scroll(10.0, 10.0, Vec2::new(0.0, -3.5));
     assert_eq!(got.borrow().as_slice(), [Vec2::new(0.0, -3.5)]);
+}
+
+#[test]
+fn a_shortcut_that_moves_focus_does_not_type_into_the_new_target() {
+    let typed = Rc::new(RefCell::new(String::new()));
+    let seen = typed.clone();
+    let mut h = host(move || {
+        let seen = seen.clone();
+        div()
+            .name("root")
+            .size(400.0, 400.0)
+            .child(
+                div()
+                    .name("from")
+                    .size(10.0, 10.0)
+                    .focusable()
+                    .on_action("open", |cx| {
+                        if let Some(field) = cx.find("field") {
+                            cx.focus(field);
+                        }
+                    }),
+            )
+            .child(
+                div()
+                    .name("field")
+                    .size(10.0, 10.0)
+                    .focusable()
+                    .on_text_input(move |t, _| seen.borrow_mut().push_str(t)),
+            )
+    });
+    let mut keymap = Keymap::default();
+    keymap.bind(Keystroke::parse("shift-a").unwrap(), "open", None);
+    h.app.set_keymap(keymap);
+    let from = h.app.find("from").unwrap();
+    h.app.focus(from);
+    // As a window delivers it: the key, its text, then the release.
+    let key = Keystroke::parse("shift-a").unwrap();
+    h.key_event(key.key, key.modifiers, true);
+    h.type_text("A");
+    h.key_event(key.key, key.modifiers, false);
+    assert_eq!(h.app.focused(), h.app.find("field"));
+    assert_eq!(*typed.borrow(), "");
+    // The next keystroke types as usual.
+    h.key_event(Key::Char('b'), Modifiers::NONE, true);
+    h.type_text("b");
+    assert_eq!(*typed.borrow(), "b");
 }

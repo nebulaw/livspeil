@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use livspeil_dream::app::{Mounted, mount};
 use livspeil_dream::session::Session;
 use livspeil_node_api::Value;
-use livspeil_ui_core::{App, ElementId, TestHost, WindowRequest};
+use livspeil_ui_core::{App, ElementId, Keystroke, TestHost, WindowRequest};
 use livspeil_ui_layout::{Point, Size};
 use livspeil_ui_paint::{FontSystem as PaintFonts, PaintBridge};
 use livspeil_ui_render::{AtlasStore, Color, DisplayList, FrameOptions, encode, render_cpu_with};
@@ -33,19 +33,7 @@ fn open(room: &str) -> Fx {
         .join(room);
     // `join` keeps an absolute `room` as it is.
     let session = Session::open(&path).unwrap_or_else(|e| panic!("{e}"));
-    let bridge = PaintBridge::new(PaintFonts::test());
-    let mut app = App::new();
-    app.set_text_measurer(bridge.text.measurer());
-    let env = Env::new(&mut app, FontSystem::test());
-    let m = mount(&mut app, &env, session);
-    let mut h = TestHost::new(app, SIZE);
-    h.run_until_idle(200);
-    Fx {
-        h,
-        bridge,
-        atlases: AtlasStore::new(),
-        m,
-    }
+    mounted(session)
 }
 
 impl Fx {
@@ -181,6 +169,22 @@ fn a_room_with_a_charm_and_events_opens_and_plays() {
     f.golden("charm-demo");
 }
 
+fn mounted(session: Session) -> Fx {
+    let bridge = PaintBridge::new(PaintFonts::test());
+    let mut app = App::new();
+    app.set_text_measurer(bridge.text.measurer());
+    let env = Env::new(&mut app, FontSystem::test());
+    let m = mount(&mut app, &env, session);
+    let mut h = TestHost::new(app, SIZE);
+    h.run_until_idle(200);
+    Fx {
+        h,
+        bridge,
+        atlases: AtlasStore::new(),
+        m,
+    }
+}
+
 /// A copy of an example room, removed afterwards.
 struct Copy(PathBuf);
 
@@ -245,7 +249,8 @@ impl Fx {
     }
 
     fn port(&self, node: &str, side: &str, index: usize) -> Point {
-        let id = self.session().find(node).unwrap() + 1;
+        let at = self.session().find(node).unwrap();
+        let id = self.m.editor.read(&self.h.app).canvas_id(at).unwrap();
         self.center(&format!("port:{id}:{side}:{index}"))
     }
 
@@ -372,4 +377,343 @@ fn closing_with_unsaved_changes_asks() {
         "{}",
         room.text()
     );
+}
+
+/// A directory for one test, removed afterwards.
+struct Dir(PathBuf);
+
+impl Dir {
+    fn new(tag: &str) -> Dir {
+        let dir = std::env::temp_dir().join(format!("dream-ui-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        Dir(dir)
+    }
+}
+
+impl Drop for Dir {
+    fn drop(&mut self) {
+        // A leftover in the temporary directory is harmless.
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn untitled() -> Fx {
+    mounted(Session::untitled().unwrap())
+}
+
+impl Fx {
+    /// As a window delivers Shift+A: the key, its text, the release; then
+    /// type into the list and take the first match.
+    fn add(&mut self, query: &str) {
+        let key = Keystroke::parse("shift-a").unwrap();
+        self.h.key_event(key.key, key.modifiers, true);
+        self.h.type_text("A");
+        self.h.key_event(key.key, key.modifiers, false);
+        self.h.run_until_idle(200);
+        self.h.type_text(query);
+        self.h.run_until_idle(200);
+        self.shortcut("enter");
+    }
+
+    fn card(&self, node: &str) -> Point {
+        let b = self
+            .h
+            .app
+            .visual_bounds(self.find(&format!("node:{node}")))
+            .unwrap();
+        Point::new(b.center().x, b.y + 6.0)
+    }
+
+    /// Drag a node by its header until its header is at `to`.
+    fn place(&mut self, node: &str, to: Point) {
+        let from = self.card(node);
+        self.drag(from, to);
+    }
+
+    /// Put `text` into the field named `field`, replacing what is there.
+    fn type_into(&mut self, field: &str, typed: &str) {
+        self.click(field);
+        self.h.key("ctrl-a");
+        self.h.type_text(typed);
+        self.h.run_until_idle(200);
+    }
+
+    fn connect(&mut self, from: &str, to: &str) {
+        let (from_node, from_port) = from.split_once('.').unwrap();
+        let (to_node, to_port) = to.split_once('.').unwrap();
+        let (out, input) = {
+            let s = self.session();
+            let source = &s.nodes()[s.find(from_node).unwrap()];
+            let target = &s.nodes()[s.find(to_node).unwrap()];
+            (
+                source
+                    .outputs
+                    .iter()
+                    .position(|p| p.name == from_port)
+                    .unwrap(),
+                target
+                    .inputs
+                    .iter()
+                    .position(|p| p.name == to_port)
+                    .unwrap(),
+            )
+        };
+        let a = self.port(from_node, "out", out);
+        let b = self.port(to_node, "in", input);
+        self.drag(a, b);
+        assert_eq!(
+            self.linked(to_node, to_port).as_deref(),
+            Some(from),
+            "{from} -> {to}"
+        );
+    }
+}
+
+#[test]
+fn adding_deleting_and_undoing_nodes() {
+    let mut f = untitled();
+    assert!(f.text().contains("Press Shift+A"), "{}", f.text());
+    f.add("time.clock");
+    assert!(f.session().find("clock").is_some());
+    let selected = |f: &Fx| f.session().inspection().map(|i| i.name.clone());
+    assert_eq!(selected(&f).as_deref(), Some("clock"));
+
+    // Another of the same type gets a name of its own, beside the first.
+    f.add("time.clock");
+    assert_eq!(selected(&f).as_deref(), Some("clock2"));
+    assert_ne!(f.card("clock"), f.card("clock2"));
+
+    // Delete is for the selection; one undo brings it back.
+    f.shortcut("delete");
+    assert!(f.session().find("clock2").is_none());
+    assert_eq!(selected(&f), None);
+    f.shortcut("ctrl-z");
+    assert!(f.session().find("clock2").is_some());
+    // Undoing the add removes the node again; the keyboard still works.
+    f.click("node:clock2");
+    f.shortcut("ctrl-z");
+    assert!(f.session().find("clock2").is_none());
+    f.shortcut("ctrl-z");
+    assert!(f.session().find("clock").is_none());
+    f.shortcut("ctrl-shift-z");
+    assert!(f.session().find("clock").is_some());
+
+    // The button opens the same list; Escape adds nothing.
+    f.click("button:Add");
+    f.find("add-query");
+    f.h.type_text("mix");
+    f.h.run_until_idle(200);
+    f.golden("add-list");
+    f.shortcut("escape");
+    assert!(f.h.app.find("add-query").is_none());
+    assert_eq!(f.session().nodes().len(), 1);
+}
+
+#[test]
+fn a_node_read_by_an_expression_is_not_deleted_alone() {
+    let mut f = untitled();
+    f.add("math.add");
+    f.add("math.mul");
+    f.place("mul", Point::new(600.0, 500.0));
+    f.click("node:mul");
+    f.enter("field:a", "=ch(\"add/a\")");
+    f.click("node:add");
+    f.shortcut("delete");
+    assert!(f.session().find("add").is_some());
+    assert!(f.text().contains("`add` cannot be deleted"), "{}", f.text());
+    // Together with what reads it, it goes.
+    f.shortcut("ctrl-a");
+    f.shortcut("delete");
+    assert!(f.session().nodes().is_empty());
+}
+
+/// Name, type, values and links of every node: what a room does, apart
+/// from ids and layout.
+fn meaning(session: &Session) -> Vec<String> {
+    let graph = session.graph();
+    let mut out = Vec::new();
+    for node in session.nodes() {
+        let type_id = graph.node_type(node.id).unwrap();
+        out.push(format!("{} is {type_id}", node.name));
+        for port in &node.inputs {
+            if let Some(v) = graph.input_value(port.node, &port.port).unwrap() {
+                out.push(format!("{}.{} = {v:?}", node.name, port.name));
+            }
+            if let Some((from, from_port)) = graph.link_source(port.node, &port.port).unwrap() {
+                let from = graph.node_name(from).unwrap();
+                out.push(format!("{}.{} <- {from}.{from_port}", node.name, port.name));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+#[test]
+fn sun_and_lamp_can_be_rebuilt_from_an_empty_room() {
+    let dir = Dir::new("rebuild");
+    let mut f = untitled();
+    // (type searched for, name, where its header goes)
+    let nodes = [
+        ("time.clock", "clock", (110.0, 300.0)),
+        ("math.mul", "day_seconds", (340.0, 300.0)),
+        ("time.timeofday", "time_of_day", (570.0, 300.0)),
+        ("sky.sun_direction", "sun", (800.0, 90.0)),
+        ("math.smoothstep", "sunrise", (800.0, 270.0)),
+        ("math.smoothstep", "sunset", (800.0, 470.0)),
+        ("math.sub", "daylight", (110.0, 480.0)),
+        ("color.gradient", "lamp_color", (340.0, 480.0)),
+        ("math.remap", "lamp_intensity", (570.0, 480.0)),
+    ];
+    for (query, name, (x, y)) in nodes {
+        f.add(query);
+        f.enter("field:name", name);
+        assert!(f.session().find(name).is_some(), "{query} as {name}");
+        // Naming left the keyboard in the field: move, which does not.
+        f.place(name, Point::new(x, y));
+    }
+    let values: &[(&str, &[(&str, &str)])] = &[
+        ("day_seconds", &[("b", "8640")]),
+        ("time_of_day", &[("offset", "6")]),
+        ("sun", &[("day_of_year", "172"), ("latitude", "41.7")]),
+        ("sunrise", &[("edge0", "5"), ("edge1", "8")]),
+        ("sunset", &[("edge0", "17"), ("edge1", "20")]),
+        (
+            "lamp_color",
+            &[
+                ("c0", "0.35 0.08 260 1"),
+                ("c1", "0.78 0.14 60 1"),
+                ("c2", "0.95 0.03 95 1"),
+                ("p1", "0.4"),
+            ],
+        ),
+        ("lamp_intensity", &[("out_max", "0.2"), ("out_min", "1")]),
+    ];
+    for (node, inputs) in values {
+        f.click(&format!("node:{node}"));
+        for (input, typed) in *inputs {
+            f.enter(&format!("field:{input}"), typed);
+        }
+    }
+    f.click("node:lamp_intensity");
+    f.click("toggle");
+    for (from, to) in [
+        ("clock.time", "day_seconds.a"),
+        ("day_seconds.out", "time_of_day.seconds"),
+        ("time_of_day.hour", "sun.solar_hour"),
+        ("time_of_day.hour", "sunrise.x"),
+        ("time_of_day.hour", "sunset.x"),
+        ("sunrise.out", "daylight.a"),
+        ("sunset.out", "daylight.b"),
+        ("daylight.out", "lamp_color.t"),
+        ("daylight.out", "lamp_intensity.x"),
+    ] {
+        f.connect(from, to);
+    }
+
+    // The room has no file yet, so saving asks where.
+    f.shortcut("ctrl-s");
+    let room = dir.0.join("rebuilt.room");
+    f.type_into("save-as-path", room.to_str().unwrap());
+    f.shortcut("enter");
+    assert!(!f.session().dirty(), "{}", f.text());
+    assert_eq!(f.session().name(), "rebuilt");
+
+    let original =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/sun-and-lamp.room");
+    let original = Session::open(&original).unwrap();
+    let saved = Session::open(&room).unwrap();
+    assert_eq!(meaning(&saved), meaning(&original));
+}
+
+#[test]
+fn new_and_save_as_keep_what_there_is() {
+    let dir = Dir::new("save-as");
+    let room = Copy::of("save-as");
+    let original = room.text();
+    std::fs::create_dir_all(room.0.join("assets")).unwrap();
+    std::fs::write(room.0.join("assets/picture"), "pixels").unwrap();
+    let mut f = open(room.0.to_str().unwrap());
+    f.click("node:time_of_day");
+    f.enter("field:offset", "9");
+
+    // New asks about the unsaved change first.
+    f.shortcut("ctrl-n");
+    f.find("dialog");
+    f.click("button:Cancel");
+    assert!(f.session().dirty() && !f.session().nodes().is_empty());
+
+    // Save as refuses what is there, says why and keeps asking.
+    f.shortcut("ctrl-shift-s");
+    f.type_into("save-as-path", room.0.parent().unwrap().to_str().unwrap());
+    let taken = dir.0.join("taken.room");
+    std::fs::create_dir_all(&taken).unwrap();
+    f.type_into("save-as-path", taken.to_str().unwrap());
+    f.shortcut("enter");
+    assert!(f.text().contains("already exists"), "{}", f.text());
+    assert!(f.session().dirty());
+
+    // `.room` is added; assets come along; the original is untouched.
+    f.type_into("save-as-path", dir.0.join("copy").to_str().unwrap());
+    f.shortcut("enter");
+    assert!(!f.session().dirty(), "{}", f.text());
+    let copy = dir.0.join("copy.room");
+    assert_eq!(f.session().path(), Some(copy.join("room.kdl").as_path()));
+    assert_eq!(f.session().name(), "Sun and Lamp");
+    let saved = std::fs::read_to_string(copy.join("room.kdl")).unwrap();
+    assert!(saved.contains("input \"offset\" 9.0"), "{saved}");
+    assert!(saved.contains("// The Phase 0 acceptance scene"));
+    assert_eq!(
+        std::fs::read_to_string(copy.join("assets/picture")).unwrap(),
+        "pixels"
+    );
+    assert_eq!(room.text(), original);
+
+    // With nothing unsaved, New just starts over.
+    f.click("button:New");
+    assert!(f.session().nodes().is_empty());
+    assert_eq!(f.session().path(), None);
+    assert_eq!(f.session().name(), "Untitled");
+    f.add("math.add");
+    assert_eq!(f.session().nodes().len(), 1);
+}
+
+#[test]
+fn a_new_room_shows_nothing_of_the_old_one() {
+    let dir = Dir::new("old-cards");
+    let mut f = untitled();
+    f.add("time.clock");
+    f.shortcut("ctrl-s");
+    f.type_into("save-as-path", dir.0.join("one").to_str().unwrap());
+    f.shortcut("enter");
+    f.shortcut("ctrl-n");
+    assert!(f.h.app.find("node:clock").is_none(), "{}", f.text());
+    assert!(f.session().nodes().is_empty());
+}
+
+#[test]
+fn closing_a_room_without_a_file_asks_where_to_save_it() {
+    let dir = Dir::new("close-untitled");
+    let mut f = untitled();
+    f.add("math.add");
+    assert!(!f.m.may_close(&mut f.h.app));
+    f.h.run_until_idle(200);
+    f.shortcut("enter");
+    // Not closed yet: it needs a place first.
+    assert!(f.h.app.take_window_requests().is_empty());
+    f.find("save-as-path");
+    // Giving up on that keeps the window.
+    f.shortcut("escape");
+    assert!(f.h.app.take_window_requests().is_empty());
+    assert!(f.session().dirty());
+
+    assert!(!f.m.may_close(&mut f.h.app));
+    f.h.run_until_idle(200);
+    // Enter is the dialog's Save; the toolbar's is behind it.
+    f.shortcut("enter");
+    f.type_into("save-as-path", dir.0.join("kept").to_str().unwrap());
+    f.shortcut("enter");
+    assert_eq!(f.h.app.take_window_requests(), [WindowRequest::Close]);
+    assert!(dir.0.join("kept.room/room.kdl").is_file());
 }

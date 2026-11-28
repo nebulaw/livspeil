@@ -315,6 +315,7 @@ impl Render for Inspector {
         let editor = self.editor.read(cx);
         let session = editor.session();
         let message = editor.message().map(str::to_owned);
+        let empty = session.nodes().is_empty();
         let selected = session.selected().and_then(|i| session.nodes().get(i));
         let selected = selected.cloned().zip(session.inspection().cloned());
         self.follow(cx, selected.as_ref().map(|(node, _)| node.id));
@@ -335,7 +336,11 @@ impl Render for Inspector {
                 root.child(self.panel(cx, &theme, &node.inputs, node.id, &inspection))
             }
             None => root.child(div().key("none").p(PADDING).child(line(
-                "Select a node to inspect it.".to_owned(),
+                if empty {
+                    "Press Shift+A to add a node.".to_owned()
+                } else {
+                    "Select a node to inspect it.".to_owned()
+                },
                 13.0,
                 colors.text_secondary,
             ))),

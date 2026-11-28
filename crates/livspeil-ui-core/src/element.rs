@@ -331,6 +331,13 @@ impl<V: Render> From<View<V>> for Element {
 }
 
 impl Element {
+    /// Whether this element stands for a view ([`Element::view`]). Such an
+    /// element takes a key; its style and layer are the view's own root's.
+    #[must_use]
+    pub fn is_view(&self) -> bool {
+        matches!(self.kind, ElementKind::View(_))
+    }
+
     fn new(kind: ElementKind) -> Self {
         Element {
             key: None,

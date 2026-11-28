@@ -4,21 +4,22 @@
 //! The open room: its graph, what it currently computes, the frame clock
 //! and the selection. Everything the views show comes from here.
 
+mod edits;
+mod files;
+
 use std::fmt;
-use std::io::Write as _;
-use std::path::{Path, PathBuf};
+use std::io;
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::{fs, io};
 
-use livspeil_cmd::{Command, GroupId, History, Origin};
-use livspeil_doc::{DocError, Document, Tier, package_dir, parse, rewrite, room_file};
+use livspeil_cmd::{GroupId, History};
+use livspeil_doc::{DocError, Tier};
 use livspeil_graph::{Cooker, Graph, GraphSnapshot, NodeId};
-use livspeil_node_api::{CookContext, NodeRegistry, RegistryError, SystemHost, Value};
-use livspeil_nodes_core::{StdFs, register_all};
+use livspeil_node_api::{CookContext, RegistryError, SystemHost, Value};
 
-use crate::edit::Entry;
+use self::files::File;
 use crate::inspect::{Inspection, inspect, output};
-use crate::shown::{Port, Shown, ShownLink, links, root_nodes};
+use crate::shown::{Shown, ShownLink, links, root_nodes};
 
 /// Frames of the clock per second, as `livspeil cook` has by default.
 pub const FPS: f64 = 60.0;
@@ -57,14 +58,6 @@ pub struct NodeResult {
     pub problem: Option<String>,
 }
 
-/// The file a session was opened from.
-#[derive(Debug)]
-struct File {
-    path: PathBuf,
-    /// Its text when last read or written.
-    text: String,
-}
-
 /// An open room.
 #[derive(Debug)]
 pub struct Session {
@@ -92,54 +85,7 @@ pub struct Session {
     dirty: bool,
 }
 
-fn registry() -> Result<Arc<NodeRegistry>, OpenError> {
-    let mut registry = NodeRegistry::new();
-    register_all(&mut registry).map_err(OpenError::Registry)?;
-    Ok(Arc::new(registry))
-}
-
-/// Write `text` to `path` without ever leaving a part of it there: write a
-/// neighbor, then rename it over.
-fn replace(path: &Path, text: &str) -> io::Result<()> {
-    let mut name = path.file_name().unwrap_or_default().to_owned();
-    name.push(".saving");
-    let temporary = path.with_file_name(name);
-    let written = fs::File::create(&temporary).and_then(|mut f| {
-        f.write_all(text.as_bytes())?;
-        f.sync_all()
-    });
-    let result = written
-        .and_then(|()| fs::set_permissions(&temporary, fs::metadata(path)?.permissions()))
-        .and_then(|()| fs::rename(&temporary, path));
-    if result.is_err() {
-        // Nothing to do if even removing it fails.
-        let _ = fs::remove_file(&temporary);
-    }
-    result
-}
-
 impl Session {
-    /// Open `path`: a `Name.room/` package or a `room.kdl` file.
-    ///
-    /// # Errors
-    /// [`OpenError`] when it cannot be read or is not a valid room.
-    pub fn open(path: &Path) -> Result<Session, OpenError> {
-        let file = room_file(path);
-        let text = fs::read_to_string(&file).map_err(|e| OpenError::Read(file.clone(), e))?;
-        let invalid = |e| OpenError::Document(file.clone(), Box::new(e));
-        let doc = parse(&text).map_err(invalid)?;
-        let graph = doc.to_graph(registry()?).map_err(invalid)?;
-        // File nodes read inside the package, as `livspeil cook` has them.
-        // Without a directory they report the lack themselves.
-        let system = StdFs::new(package_dir(&file))
-            .ok()
-            .map(|fs| Arc::new(fs) as Arc<dyn SystemHost>);
-        let mut session = Session::new(doc.name, graph, system);
-        session.min_tier = doc.min_tier;
-        session.file = Some(File { path: file, text });
-        Ok(session)
-    }
-
     /// A session over `graph`, at frame 0.
     #[must_use]
     pub fn new(name: String, graph: Graph, system: Option<Arc<dyn SystemHost>>) -> Session {
@@ -263,227 +209,6 @@ impl Session {
     #[must_use]
     pub fn can_redo(&self) -> bool {
         self.history.can_redo()
-    }
-
-    /// Apply a command as part of the gesture under way, or on its own.
-    fn run(&mut self, command: Command, in_gesture: bool) -> Result<(), String> {
-        let group = if in_gesture {
-            let groups = &mut self.groups;
-            Some(*self.gesture.get_or_insert_with(|| {
-                *groups += 1;
-                GroupId(*groups)
-            }))
-        } else {
-            self.end_gesture();
-            None
-        };
-        self.history
-            .apply(&mut self.graph, command, Origin::Ui, group)
-            .map(|_| ())
-            .map_err(|e| e.to_string())
-    }
-
-    /// The gesture under way ended: later edits are a new undo step.
-    pub fn end_gesture(&mut self) {
-        if self.gesture.take().is_some() {
-            self.history.seal();
-            self.dirty = self.graph.snapshot() != self.saved;
-        }
-    }
-
-    /// Place a node, as part of a drag. Positions change nothing the nodes
-    /// compute, so nothing else is brought up to date.
-    ///
-    /// # Errors
-    /// Why the node cannot be placed there.
-    pub fn move_node(&mut self, node: NodeId, position: [f64; 2]) -> Result<(), String> {
-        let command = Command::SetPosition {
-            node,
-            position: Some(position),
-        };
-        self.run(command, true)?;
-        // Settled when the gesture ends.
-        self.dirty = true;
-        Ok(())
-    }
-
-    /// Whether output `from` may feed input `to`, replacing its link.
-    #[must_use]
-    pub fn can_connect(&self, from: &Port, to: &Port) -> bool {
-        self.graph
-            .check_link(from.node, &from.port, to.node, &to.port)
-            .is_ok()
-    }
-
-    fn linked(&self, to: &Port) -> bool {
-        matches!(self.graph.link_source(to.node, &to.port), Ok(Some(_)))
-    }
-
-    fn unlink(to: &Port) -> Command {
-        Command::Unlink {
-            to: to.node,
-            to_port: to.port.clone(),
-        }
-    }
-
-    /// Link output `from` to input `to`, replacing what fed it. Part of a
-    /// wire drag.
-    ///
-    /// # Errors
-    /// Why the link is not allowed.
-    pub fn connect(&mut self, from: &Port, to: &Port) -> Result<(), String> {
-        let link = Command::Link {
-            from: from.node,
-            from_port: from.port.clone(),
-            to: to.node,
-            to_port: to.port.clone(),
-        };
-        let command = if self.linked(to) {
-            Command::Transaction(vec![Self::unlink(to), link])
-        } else {
-            link
-        };
-        self.run(command, true)?;
-        self.refresh();
-        Ok(())
-    }
-
-    /// Remove the link of input `to`. Part of a wire drag.
-    ///
-    /// # Errors
-    /// Why it cannot be removed.
-    pub fn disconnect(&mut self, to: &Port) -> Result<(), String> {
-        self.run(Self::unlink(to), true)?;
-        self.refresh();
-        Ok(())
-    }
-
-    /// Give input `port` what a field asked for. One undo step.
-    ///
-    /// # Errors
-    /// The kernel's reason for refusing it; nothing changes.
-    pub fn enter(&mut self, port: &Port, entry: Entry) -> Result<(), String> {
-        let (node, name) = (port.node, port.port.clone());
-        let has_expression = matches!(self.graph.expression(node, &name), Ok(Some(_)));
-        let has_value = matches!(self.graph.input_value(node, &name), Ok(Some(_)));
-        let clear_expression = || Command::ClearExpression {
-            node,
-            port: name.clone(),
-        };
-        let clear_value = || Command::ClearInput {
-            node,
-            port: name.clone(),
-        };
-        let mut steps = Vec::new();
-        match entry {
-            Entry::Clear => {
-                steps.extend(has_expression.then(clear_expression));
-                steps.extend(has_value.then(clear_value));
-            }
-            Entry::Expression(source) => {
-                if self.graph.expression(node, &name).ok().flatten() != Some(source.as_str()) {
-                    steps.push(Command::SetExpression {
-                        node,
-                        port: name.clone(),
-                        source,
-                    });
-                }
-            }
-            Entry::Value(value) => {
-                // An expression would keep winning over the value.
-                steps.extend(has_expression.then(clear_expression));
-                if self.graph.input_value(node, &name).ok().flatten() != Some(&value) {
-                    steps.push(Command::SetInput {
-                        node,
-                        port: name.clone(),
-                        value,
-                    });
-                }
-            }
-        }
-        if steps.is_empty() {
-            return Ok(());
-        }
-        self.run(Command::Transaction(steps), false)?;
-        self.refresh();
-        Ok(())
-    }
-
-    /// Rename a node. One undo step.
-    ///
-    /// # Errors
-    /// Why the name is refused.
-    pub fn rename(&mut self, node: NodeId, name: &str) -> Result<(), String> {
-        if self.graph.node_name(node) == Some(name) {
-            return Ok(());
-        }
-        let command = Command::Rename {
-            node,
-            name: name.to_owned(),
-        };
-        self.run(command, false)?;
-        self.refresh();
-        Ok(())
-    }
-
-    /// Undo the latest edit.
-    ///
-    /// # Errors
-    /// When there is none.
-    pub fn undo(&mut self) -> Result<(), String> {
-        self.end_gesture();
-        self.history
-            .undo(&mut self.graph)
-            .map_err(|e| e.to_string())?;
-        self.refresh();
-        Ok(())
-    }
-
-    /// Redo the latest undone edit.
-    ///
-    /// # Errors
-    /// When there is none.
-    pub fn redo(&mut self) -> Result<(), String> {
-        self.end_gesture();
-        self.history
-            .redo(&mut self.graph)
-            .map_err(|e| e.to_string())?;
-        self.refresh();
-        Ok(())
-    }
-
-    /// Write the room back to its file, keeping its comments.
-    ///
-    /// # Errors
-    /// When there is no file, it changed on disk since it was read, or it
-    /// cannot be written. The file is then left as it was.
-    pub fn save(&mut self) -> Result<(), String> {
-        self.end_gesture();
-        let Some(file) = &mut self.file else {
-            return Err("this room has no file".to_owned());
-        };
-        let shown = file.path.display().to_string();
-        let on_disk = fs::read_to_string(&file.path).map_err(|e| format!("{shown}: {e}"))?;
-        if on_disk != file.text {
-            return Err(format!("{shown} changed on disk; not overwriting it"));
-        }
-        let mut doc =
-            Document::from_graph(&self.graph, self.name.clone()).map_err(|e| e.to_string())?;
-        doc.min_tier = self.min_tier;
-        let text = rewrite(&file.text, &doc).map_err(|e| e.to_string())?;
-        replace(&file.path, &text).map_err(|e| format!("{shown}: {e}"))?;
-        file.text = text;
-        self.saved = self.graph.snapshot();
-        self.dirty = false;
-        Ok(())
-    }
-
-    /// Bring everything derived from the graph up to date after an edit.
-    fn refresh(&mut self) {
-        self.nodes = root_nodes(&self.graph);
-        self.links = links(&self.graph, &self.nodes);
-        self.dirty = self.graph.snapshot() != self.saved;
-        self.cook();
     }
 
     /// Start or stop the clock.

@@ -1,25 +1,31 @@
 // SPDX-FileCopyrightText: 2026 Livspeil contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The window: a bar of transport and file buttons, the node canvas and the
-//! inspector.
+//! The window: a bar of transport, edit and file buttons, the node canvas
+//! and the inspector.
 
+mod add;
+mod files;
 mod inspector;
 
 use livspeil_ui_core::{
-    App, Element, Keymap, Keystroke, Model, Render, View, ViewContext, WindowRequest, div, text,
+    App, Element, Keymap, Keystroke, Model, Render, View, ViewContext, div, text,
 };
 use livspeil_ui_layout::style::{Dimension, LengthPercentageAuto};
-use livspeil_ui_widgets::{Button, CardMetrics, Dialog, DialogButton, Env, NodeCanvas, ScrollView};
+use livspeil_ui_widgets::{Button, CardMetrics, Env, NodeCanvas, Picker, ScrollView};
 
-use crate::canvas::{Editor, node_index};
+use crate::canvas::Editor;
 use crate::session::Session;
+use files::{Files, Then};
 use inspector::Inspector;
 
 /// Width of the inspector.
 pub const INSPECTOR_WIDTH: f32 = 340.0;
 const TOOLBAR_HEIGHT: f32 = 44.0;
+const ADD: &str = "dream.add";
+const NEW: &str = "dream.new";
 const SAVE: &str = "dream.save";
+const SAVE_AS: &str = "dream.save_as";
 const UNDO: &str = "edit.undo";
 const REDO: &str = "edit.redo";
 const PLAY: &str = "play";
@@ -33,19 +39,14 @@ pub struct Mounted {
     pub editor: Model<Editor>,
     /// The node canvas.
     pub canvas: View<NodeCanvas<Editor>>,
-    /// Asks what to do with unsaved changes.
-    close: View<Dialog>,
+    files: Files,
 }
 
 impl Mounted {
     /// Whether the window may close now. With unsaved changes it may not:
     /// a dialog asks, and closes the window itself if so answered.
     pub fn may_close(&self, app: &mut App) -> bool {
-        if !self.editor.read(app).session().dirty() {
-            return true;
-        }
-        Dialog::open(self.close, app, None);
-        false
+        self.files.may_leave(app, Then::Close)
     }
 }
 
@@ -55,9 +56,18 @@ pub fn keymap() -> Keymap {
     let mut km = Keymap::default();
     // The widget keymap binds undo and redo only inside text fields, which
     // keep their own: these reach the window from everywhere else.
+    // Shift+A types an A elsewhere: only the canvas takes it. Space, held,
+    // pans there.
+    if let Ok(k) = Keystroke::parse("shift-a") {
+        km.bind(k, ADD, Some("NodeCanvas"));
+    }
     for (keys, action) in [
+        ("ctrl-n", NEW),
+        ("cmd-n", NEW),
         ("ctrl-s", SAVE),
         ("cmd-s", SAVE),
+        ("ctrl-shift-s", SAVE_AS),
+        ("cmd-shift-s", SAVE_AS),
         ("ctrl-z", UNDO),
         ("cmd-z", UNDO),
         ("ctrl-shift-z", REDO),
@@ -94,12 +104,11 @@ fn redo(editor: Model<Editor>, app: &mut App) {
     });
 }
 
-fn save(editor: Model<Editor>, app: &mut App) -> bool {
-    editor.update(app, |e, cx| {
-        let saved = e.edit(Session::save);
-        cx.notify();
-        saved
-    })
+/// Give the canvas the keyboard, so its shortcuts work.
+fn focus_canvas(env: &Env, app: &mut App) {
+    if let Some(canvas) = app.find("node-canvas") {
+        env.focus(app, canvas);
+    }
 }
 
 /// Start the clock, or stop it.
@@ -120,13 +129,16 @@ pub fn set_playing(editor: Model<Editor>, app: &mut App, playing: bool) {
 /// The bar of buttons and the clock.
 struct Toolbar {
     editor: Model<Editor>,
+    picker: Picker,
+    files: Files,
 }
 
 impl Render for Toolbar {
     fn render(&mut self, cx: &mut ViewContext<'_, Self>) -> Element {
         let theme = cx.theme().clone();
-        let editor = self.editor;
+        let (editor, picker, files) = (self.editor, self.picker, self.files);
         let session = editor.read(cx).session();
+        let has_file = session.path().is_some();
         let (playing, frame, time) = (session.playing(), session.frame(), session.time());
         let (dirty, can_undo, can_redo) = (session.dirty(), session.can_undo(), session.can_redo());
         let name = if dirty {
@@ -171,6 +183,12 @@ impl Render for Toolbar {
                     .key("rewind"),
             )
             .child(muted(format!("frame {frame}   {time:.2} s"), "clock"))
+            .child(
+                button("Add")
+                    .on_click(move |_, cx| picker.open(cx))
+                    .render(&theme)
+                    .key("add"),
+            )
             .child(div().key("space").grow())
             .child(muted(name, "room"))
             .child(
@@ -188,19 +206,31 @@ impl Render for Toolbar {
                     .key("redo"),
             )
             .child(
+                button("New")
+                    .on_click(move |_, cx| files.new_room(cx))
+                    .render(&theme)
+                    .key("new"),
+            )
+            .child(
                 button("Save")
-                    .disabled(!dirty)
-                    .on_click(move |_, cx| {
-                        save(editor, cx);
-                    })
+                    .disabled(!dirty && has_file)
+                    .on_click(move |_, cx| files.save(cx, Then::Stay))
                     .render(&theme)
                     .key("save"),
+            )
+            .child(
+                button("Save as")
+                    .on_click(move |_, cx| files.save_as(cx))
+                    .render(&theme)
+                    .key("save-as"),
             )
     }
 }
 
 struct Window {
     editor: Model<Editor>,
+    picker: Picker,
+    files: Files,
     toolbar: View<Toolbar>,
     canvas: View<NodeCanvas<Editor>>,
     inspector: View<ScrollView>,
@@ -209,7 +239,7 @@ struct Window {
 impl Render for Window {
     fn render(&mut self, cx: &mut ViewContext<'_, Self>) -> Element {
         let colors = cx.theme().colors();
-        let editor = self.editor;
+        let (editor, picker, files) = (self.editor, self.picker, self.files);
         div()
             .name("dream")
             .w_full()
@@ -220,9 +250,10 @@ impl Render for Window {
             .focusable()
             .on_action(UNDO, move |cx| undo(editor, cx))
             .on_action(REDO, move |cx| redo(editor, cx))
-            .on_action(SAVE, move |cx| {
-                save(editor, cx);
-            })
+            .on_action(ADD, move |cx| picker.open(cx))
+            .on_action(NEW, move |cx| files.new_room(cx))
+            .on_action(SAVE, move |cx| files.save(cx, Then::Stay))
+            .on_action(SAVE_AS, move |cx| files.save_as(cx))
             .child(Element::view(&self.toolbar).key("toolbar"))
             .child(
                 div()
@@ -254,27 +285,6 @@ impl Render for Window {
     }
 }
 
-fn close_dialog(env: &Env, editor: Model<Editor>) -> Dialog {
-    Dialog::new(env, "Unsaved changes")
-        .message("Save the changes to this room before closing?")
-        .button(DialogButton::new("Cancel").cancel())
-        .button(
-            DialogButton::new("Discard")
-                .destructive()
-                .on_press(|app| app.request_window(WindowRequest::Close)),
-        )
-        .button(
-            DialogButton::new("Save")
-                .default_button()
-                .on_press(move |app| {
-                    // A failed save keeps the window open and says why.
-                    if save(editor, app) {
-                        app.request_window(WindowRequest::Close);
-                    }
-                }),
-        )
-}
-
 /// Build the window over `session`, make it the app's root and install the
 /// shortcuts.
 pub fn mount(app: &mut App, env: &Env, session: Session) -> Mounted {
@@ -286,9 +296,9 @@ pub fn mount(app: &mut App, env: &Env, session: Session) -> Mounted {
     let selected = session.selected();
     let editor = app.new_model(Editor::new(session, metrics));
     let canvas = app.new_view(NodeCanvas::new(env, editor));
-    if let Some(i) = selected {
+    if let Some(key) = selected.and_then(|i| editor.read(app).canvas_id(i)) {
         canvas.update(app, |c, cx| {
-            c.set_selection([i as u64 + 1]);
+            c.set_selection([key]);
             cx.notify();
         });
     }
@@ -300,7 +310,7 @@ pub fn mount(app: &mut App, env: &Env, session: Session) -> Mounted {
             let one = (selection.len() == 1)
                 .then(|| selection.iter().next().copied())
                 .flatten()
-                .and_then(node_index);
+                .and_then(|key| editor.read(app).index_of(key));
             if editor.read(app).session().selected() != one {
                 change(editor, app, |e| e.change(|s| s.select(one)));
             }
@@ -308,7 +318,13 @@ pub fn mount(app: &mut App, env: &Env, session: Session) -> Mounted {
         });
     });
 
-    let toolbar = app.new_view(Toolbar { editor });
+    let picker = add::picker(app, env, editor, canvas);
+    let files = Files::new(app, env, editor, canvas);
+    let toolbar = app.new_view(Toolbar {
+        editor,
+        picker,
+        files,
+    });
     let inspected = app.new_view(Inspector::new(env, editor));
     let inspector = app.new_view(
         ScrollView::new(env, move |_, _| Element::view(&inspected))
@@ -318,13 +334,15 @@ pub fn mount(app: &mut App, env: &Env, session: Session) -> Mounted {
     );
     let window = app.new_view(Window {
         editor,
+        picker,
+        files,
         toolbar,
         canvas,
         inspector,
     });
     let root = env.root(app, window);
     app.set_root(root);
-    let close = app.new_view(close_dialog(env, editor));
+    let focus = env.clone();
     // Once laid out: show the whole graph, and take the keyboard so the
     // shortcuts work before anything is clicked.
     app.animate(canvas.id(), START, move |app, _| {
@@ -332,16 +350,14 @@ pub fn mount(app: &mut App, env: &Env, session: Session) -> Mounted {
             return true;
         }
         NodeCanvas::fit(canvas, app);
-        if app.focused().is_none()
-            && let Some(window) = app.find("dream")
-        {
-            app.focus(window);
+        if app.focused().is_none() {
+            focus_canvas(&focus, app);
         }
         false
     });
     Mounted {
         editor,
         canvas,
-        close,
+        files,
     }
 }

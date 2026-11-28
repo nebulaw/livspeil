@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-4.0
 # Livspeil Dream Mode app, first slice (v0)
 
 Status: **accepted** (2026-11-28, D69). The kernel's position commands
-(section 3), DM1 and DM2 are built. Roadmap P2; D18
+(section 3), DM1, DM2 and DM3 are built. Roadmap P2; D18
 (Dream Mode first as an app), D66 (experience before polish).
 
 ## 1. What it is for
@@ -72,6 +72,23 @@ changed on disk.
 
 Done when `sun-and-lamp.room` can be rebuilt from an empty room in the app.
 
+Built; a test rebuilds it through the window.
+
+- **Add**: the toolbar's button, or Shift+A on the canvas (Space, held,
+  pans there). The latest version of every type that can be in the root
+  network, except Charm instances and empty subnets. The node goes to the
+  middle of the view, named after its type (`add`, `add2`), selected.
+- **Delete**: Delete or Backspace on the canvas; one undo step. Nodes that
+  read each other in expressions go together; a node that a remaining one
+  reads is kept, and the app says by which.
+- **New** (Ctrl+N), also by starting without a room. Unsaved changes are
+  asked about first.
+- **Save as** (Ctrl+Shift+S), and Save for a room without a file: a typed
+  path, `.room` added. It always writes a new room package and never over
+  anything. The whole package comes along (for a lone room file, only
+  `assets/` and `assets.lock`). A room that had no file takes the folder's
+  name.
+
 ### Not in these slices
 
 Entering subnets and making Charms; the 3D viewport (Bevy); timeline and
@@ -106,7 +123,9 @@ Needed in existing crates:
 | `livspeil-graph`, `livspeil-cmd`, `livspeil-doc` | node positions as graph data with a `SetPosition` command (built) |
 | `livspeil-graph` | ask whether a link is allowed without making it (built) |
 | `livspeil-doc` | write a changed document keeping the comments of the old text (built) |
-| `livspeil-ui-widgets` | NodeCanvas: marking a failed node, disconnect, gesture end (built); delete requests |
+| `livspeil-ui-widgets` | NodeCanvas: marking a failed node, disconnect, gesture end, delete; a searchable Picker (built) |
+| `livspeil-cmd` | delete several nodes as one edit (built) |
+| `livspeil-doc` | create a room package (built) |
 | `livspeil-graph` | the current value of an input driven by an expression or animation |
 
 ## 4. Testing
