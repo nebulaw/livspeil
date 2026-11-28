@@ -16,6 +16,7 @@ use crate::assets::{
 };
 use crate::error::DocError;
 use crate::format::format;
+use crate::model::Document;
 use crate::parse::parse;
 
 /// File name of the document inside a `Name.room/` package.
@@ -64,6 +65,23 @@ pub fn canonicalize(text: &str) -> Result<String, DocError> {
     let mut out = canonical_prolog(prolog);
     out.push_str(&format(&doc)?);
     Ok(crate::comments::carry(text, &out))
+}
+
+/// The text of `room.kdl` after `doc` was changed: canonical, with the
+/// prolog and item comments of `previous`, the text the document was read
+/// from, carried over as [`canonicalize`] does. Comments on items that are
+/// gone or renamed are lost.
+///
+/// # Errors
+/// Any error of [`format()`], or of [`parse`] if the result would not be a
+/// valid document (it is then not written).
+pub fn rewrite(previous: &str, doc: &Document) -> Result<String, DocError> {
+    let (prolog, _) = split_prolog(previous);
+    let mut out = canonical_prolog(prolog);
+    out.push_str(&format(doc)?);
+    let out = crate::comments::carry(previous, &out);
+    parse(&out)?;
+    Ok(out)
 }
 
 /// The canonical form of a whole `assets.lock` file: the prolog comment

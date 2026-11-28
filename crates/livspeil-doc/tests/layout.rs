@@ -6,7 +6,7 @@
 mod common;
 
 use common::{id, registry};
-use livspeil_doc::{Document, format, parse};
+use livspeil_doc::{Document, format, parse, rewrite};
 use livspeil_graph::{Graph, GraphSnapshot, NodeId};
 
 const ROOM: &str = r#"room "Layout" format=1 min-tier="T0" {
@@ -130,4 +130,29 @@ fn names_with_slashes_keep_their_positions() {
     graph.set_position(id(6), Some([6.0, 6.0])).unwrap();
     let err = Document::from_graph(&graph, "r").unwrap_err().to_string();
     assert!(err.contains("box/deep"), "{err}");
+}
+
+#[test]
+fn rewriting_a_changed_document_keeps_its_comments() {
+    let text = format!(
+        "// The header.\n\n{}",
+        ROOM.replace(
+            "    node \"a\" type",
+            "    // Why a is here.\n    node \"a\" type"
+        )
+    );
+    let doc = parse(&text).unwrap();
+    let mut graph = doc.to_graph(registry()).unwrap();
+    graph.set_position(id(1), Some([7.0, 8.0])).unwrap();
+    graph.rename(id(2), "crate").unwrap();
+    let saved = Document::from_graph(&graph, doc.name.clone()).unwrap();
+    let out = rewrite(&text, &saved).unwrap();
+    assert!(out.starts_with("// The header.\n\n"), "{out}");
+    assert!(out.contains("// Why a is here."), "{out}");
+    assert!(out.contains("node \"a\" x=7.0 y=8.0"), "{out}");
+    assert!(out.contains("\"crate\""), "{out}");
+    let again = parse(&out).unwrap().to_graph(registry()).unwrap();
+    assert_eq!(again.snapshot(), graph.snapshot());
+    // Writing it again changes nothing.
+    assert_eq!(rewrite(&out, &saved).unwrap(), out);
 }
