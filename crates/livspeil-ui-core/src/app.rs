@@ -166,6 +166,14 @@ pub struct App {
     input: InputState,
     focus: Option<ElementId>,
     focus_visible: bool,
+    /// The focused element's ancestors, nearest first, as of the last frame:
+    /// where focus goes if the element is removed.
+    focus_ancestors: (Option<ElementId>, Vec<ElementId>),
+    /// The focused element was removed since the last frame.
+    focus_removed: bool,
+    /// The last key press moved focus, so the text it produces belongs to
+    /// the element that had focus before.
+    stale_text: bool,
     element_state: HashMap<ElementId, HashMap<TypeId, Box<dyn Any>>>,
     driver: AnimationDriver,
     viewport: Size,
@@ -234,6 +242,9 @@ impl App {
             input: InputState::default(),
             focus: None,
             focus_visible: false,
+            focus_ancestors: (None, Vec::new()),
+            focus_removed: false,
+            stale_text: false,
             element_state: HashMap::new(),
             driver: AnimationDriver::default(),
             viewport: Size::new(800.0, 600.0),
@@ -648,6 +659,7 @@ impl App {
             self.notify_layout_watchers(&tree);
         }
         self.tree = tree;
+        self.settle_focus();
         let moved = !changed.is_empty();
         for id in changed {
             self.note_moved(id);
@@ -852,6 +864,7 @@ impl App {
         self.moved.remove(&id);
         if self.focus == Some(id) {
             self.focus = None;
+            self.focus_removed = true;
         }
         self.input.hovered.retain(|e| *e != id);
         self.input.pressed.retain(|e| *e != id);
@@ -1152,6 +1165,29 @@ impl App {
         self.set_focus(Some(id), false);
     }
 
+    /// After the tree changed: if the focused element went away, focus its
+    /// nearest focusable ancestor that is left, so keys keep reaching the
+    /// handlers around it. Then remember where the focused element is.
+    fn settle_focus(&mut self) {
+        if std::mem::take(&mut self.focus_removed) && self.focus.is_none() {
+            let heir = self.focus_ancestors.1.iter().copied().find(|id| {
+                self.tree
+                    .nodes
+                    .get(id)
+                    .is_some_and(|n| n.tab_index.is_some())
+            });
+            self.set_focus(heir, false);
+        }
+        let mut ancestors = Vec::new();
+        let mut cur = self.focus.and_then(|f| self.tree.nodes.get(&f)?.parent);
+        while let Some(id) = cur {
+            ancestors.push(id);
+            cur = self.tree.nodes.get(&id).and_then(|n| n.parent);
+        }
+        // An element focused before it is mounted keeps nothing yet.
+        self.focus_ancestors = (self.focus, ancestors);
+    }
+
     /// Clear focus.
     pub fn blur(&mut self) {
         self.set_focus(None, false);
@@ -1165,6 +1201,7 @@ impl App {
             self.tree.visual_dirty.push(e);
         }
         self.focus = id;
+        self.focus_removed = false;
         self.focus_visible = visible && id.is_some();
         self.paint_dirty = true;
     }
@@ -1275,15 +1312,25 @@ impl App {
     }
 
     /// Route an input event.
+    ///
+    /// A key press that moves focus takes the text it produces with it: a
+    /// shortcut that opens a text field does not type its letter into it.
     pub fn dispatch(&mut self, event: InputEvent) {
+        let stale = std::mem::take(&mut self.stale_text);
         match event {
             InputEvent::Pointer(e) => self.dispatch_pointer(e),
             InputEvent::PointerLeft => {
                 self.input.pointer = None;
                 self.set_hovered(Vec::new());
             }
-            InputEvent::Key(e) => self.dispatch_key(e),
-            InputEvent::Text(t) => self.dispatch_text(&t),
+            InputEvent::Key(e) => {
+                let (before, pressed) = (self.focus, e.pressed);
+                self.dispatch_key(e);
+                self.flush_effects();
+                self.stale_text = pressed && self.focus != before;
+            }
+            InputEvent::Text(t) if !stale => self.dispatch_text(&t),
+            InputEvent::Text(_) => {}
             InputEvent::Ime(e) => self.dispatch_ime(&e),
         }
         self.flush_effects();

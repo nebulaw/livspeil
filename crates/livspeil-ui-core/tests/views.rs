@@ -242,6 +242,52 @@ fn keyed_ids_survive_reorder() {
 }
 
 #[test]
+fn removing_the_focused_element_focuses_what_surrounds_it() {
+    let mut app = App::new();
+    let model = app.new_model(vec!["a", "b"]);
+    let list = app.new_view(Panel { items: model });
+    app.set_root(list);
+    let mut host = TestHost::new(app, Size::new(200.0, 200.0));
+    host.run_until_idle(10);
+    let (panel, b) = (host.app.find("panel").unwrap(), host.app.find("b").unwrap());
+    host.app.focus(b);
+    host.run_until_idle(10);
+
+    model.update(&mut host.app, |v, cx| {
+        v.retain(|n| *n != "b");
+        cx.notify();
+    });
+    host.run_until_idle(10);
+    assert_eq!(host.app.focused(), Some(panel));
+
+    // Removed before a frame saw it focused: there is nothing to go by.
+    let a = host.app.find("a").unwrap();
+    host.app.focus(a);
+    model.update(&mut host.app, |v, cx| {
+        v.clear();
+        cx.notify();
+    });
+    host.run_until_idle(10);
+    assert_eq!(host.app.focused(), None);
+}
+
+/// A focusable list, itself named `panel`.
+struct Panel {
+    items: Model<Vec<&'static str>>,
+}
+
+impl Render for Panel {
+    fn render(&mut self, cx: &mut ViewContext<'_, Self>) -> Element {
+        let items = self.items.read(cx).clone();
+        div().name("panel").focusable().flex_col().children(
+            items
+                .into_iter()
+                .map(|name| div().name(name).key(name).h(20.0).focusable()),
+        )
+    }
+}
+
+#[test]
 fn positional_ids_follow_position() {
     let (mut host, items) = list_host(false);
     let first = host.app.find("a").unwrap();
