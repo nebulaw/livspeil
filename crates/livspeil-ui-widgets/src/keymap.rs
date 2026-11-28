@@ -27,6 +27,8 @@ pub mod actions {
     pub const FOCUS_MENUBAR: &str = "menu.focus_bar";
     /// Open the focused element's context menu (Shift+F10).
     pub const CONTEXT_MENU: &str = "menu.context";
+    /// Delete the selected nodes (Delete, Backspace in a node canvas).
+    pub const DELETE_NODES: &str = "canvas.delete";
     /// Close the selected tab (Delete, Backspace in a closable tab bar).
     pub const CLOSE_TAB: &str = "tabs.close";
     /// Fine step up (number field, ×0.1).
@@ -101,6 +103,8 @@ pub const WIDGET_KEYMAP: &str = r#"
 "left" = "menu.left"
 
 [contexts.NodeCanvas]
+"delete" = "canvas.delete"
+"backspace" = "canvas.delete"
 "ctrl-a" = "edit.select_all"
 "cmd-a" = "edit.select_all"
 

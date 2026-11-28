@@ -1065,3 +1065,43 @@ fn dragging_off_a_linked_input_disconnects_or_moves_the_link() {
         to: PortRef::input(3, 0)
     }));
 }
+
+#[test]
+fn delete_removes_the_selected_nodes_and_their_links() {
+    let mut f = fixture();
+    let titles = |f: &Fx| -> Vec<String> {
+        f.graph
+            .read(&f.h.app)
+            .nodes
+            .iter()
+            .map(|n| n.title.to_string())
+            .collect()
+    };
+    // Nothing selected: nothing to delete.
+    let at = f.node("Mix");
+    f.click_mod(at, Modifiers::NONE);
+    f.h.key("escape");
+    f.h.key("delete");
+    f.h.run_until_idle(100);
+    assert_eq!(titles(&f).len(), 6);
+
+    f.click_mod(at, Modifiers::NONE);
+    let other = f.node("Blur");
+    f.click_mod(other, SHIFT);
+    assert_eq!(f.sel().len(), 2);
+    f.h.key("delete");
+    f.h.run_until_idle(100);
+    assert_eq!(titles(&f), ["Time", "Noise", "Color Ramp", "Output"]);
+    assert!(f.sel().is_empty());
+    assert!(f.h.app.find("node:Mix").is_none());
+    // Only Color Ramp to Output is left.
+    assert_eq!(f.graph.read(&f.h.app).links.len(), 1);
+
+    // The keyboard stays with the canvas: another shortcut still reaches it.
+    f.h.key("ctrl-a");
+    f.h.run_until_idle(100);
+    assert_eq!(f.sel().len(), 4);
+    f.h.key("backspace");
+    f.h.run_until_idle(100);
+    assert!(titles(&f).is_empty());
+}
