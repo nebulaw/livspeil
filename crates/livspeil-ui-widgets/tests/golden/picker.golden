@@ -8,26 +8,48 @@ clip 106,76 428x32 r=6
 pop
 clip 106,116 428x360 r=0
   text label 114,119 412x17 "item1" size=13 color=oklch(0.97 0 0 / 0.92)
-  text detail 114,136 412x14 "number 1" size=11 color=oklch(0.97 0 0 / 0.62)
+  clip 114,136 412x15 r=0
+    text detail 114,136 48x15 "number 1" size=11 color=oklch(0.97 0 0 / 0.62)
+  pop
   quad pick:item10 106,156 428x40 r=6 fill=oklch(0.25 0 0 / 1)
   text label 114,159 412x17 "item10" size=13 color=oklch(0.97 0 0 / 0.92)
-  text detail 114,176 412x14 "number 10" size=11 color=oklch(0.97 0 0 / 0.62)
+  clip 114,176 412x15 r=0
+    text detail 114,176 54x15 "number 10" size=11 color=oklch(0.97 0 0 / 0.62)
+  pop
   text label 114,199 412x17 "item11" size=13 color=oklch(0.97 0 0 / 0.92)
-  text detail 114,216 412x14 "number 11" size=11 color=oklch(0.97 0 0 / 0.62)
+  clip 114,216 412x15 r=0
+    text detail 114,216 54x15 "number 11" size=11 color=oklch(0.97 0 0 / 0.62)
+  pop
   text label 114,239 412x17 "item12" size=13 color=oklch(0.97 0 0 / 0.92)
-  text detail 114,256 412x14 "number 12" size=11 color=oklch(0.97 0 0 / 0.62)
+  clip 114,256 412x15 r=0
+    text detail 114,256 54x15 "number 12" size=11 color=oklch(0.97 0 0 / 0.62)
+  pop
   text label 114,279 412x17 "item13" size=13 color=oklch(0.97 0 0 / 0.92)
-  text detail 114,296 412x14 "number 13" size=11 color=oklch(0.97 0 0 / 0.62)
+  clip 114,296 412x15 r=0
+    text detail 114,296 54x15 "number 13" size=11 color=oklch(0.97 0 0 / 0.62)
+  pop
   text label 114,319 412x17 "item14" size=13 color=oklch(0.97 0 0 / 0.92)
-  text detail 114,336 412x14 "number 14" size=11 color=oklch(0.97 0 0 / 0.62)
+  clip 114,336 412x15 r=0
+    text detail 114,336 54x15 "number 14" size=11 color=oklch(0.97 0 0 / 0.62)
+  pop
   text label 114,359 412x17 "item15" size=13 color=oklch(0.97 0 0 / 0.92)
-  text detail 114,376 412x14 "number 15" size=11 color=oklch(0.97 0 0 / 0.62)
+  clip 114,376 412x15 r=0
+    text detail 114,376 54x15 "number 15" size=11 color=oklch(0.97 0 0 / 0.62)
+  pop
   text label 114,399 412x17 "item16" size=13 color=oklch(0.97 0 0 / 0.92)
-  text detail 114,416 412x14 "number 16" size=11 color=oklch(0.97 0 0 / 0.62)
+  clip 114,416 412x15 r=0
+    text detail 114,416 54x15 "number 16" size=11 color=oklch(0.97 0 0 / 0.62)
+  pop
   text label 114,439 412x17 "item17" size=13 color=oklch(0.97 0 0 / 0.92)
-  text detail 114,456 412x14 "number 17" size=11 color=oklch(0.97 0 0 / 0.62)
+  clip 114,456 412x15 r=0
+    text detail 114,456 54x15 "number 17" size=11 color=oklch(0.97 0 0 / 0.62)
+  pop
   text label 114,479 412x17 "item18" size=13 color=oklch(0.97 0 0 / 0.92)
-  text detail 114,496 412x14 "number 18" size=11 color=oklch(0.97 0 0 / 0.62)
+  clip 114,496 412x15 r=0
+    text detail 114,496 54x15 "number 18" size=11 color=oklch(0.97 0 0 / 0.62)
+  pop
   text label 114,519 412x17 "item19" size=13 color=oklch(0.97 0 0 / 0.92)
-  text detail 114,536 412x14 "number 19" size=11 color=oklch(0.97 0 0 / 0.62)
+  clip 114,536 412x15 r=0
+    text detail 114,536 54x15 "number 19" size=11 color=oklch(0.97 0 0 / 0.62)
+  pop
 pop

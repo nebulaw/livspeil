@@ -26,6 +26,10 @@ Livspeil UI (UI spec §9). Every widget is headless and tested with the core's
 - **Focus.** Tab / Shift+Tab move through focusable widgets; the core draws
   the focus ring when focus came from the keyboard. Text and number fields
   also show an accent border and caret whenever they are focused.
+  Removing the focused element focuses its nearest focusable ancestor, so
+  keys keep reaching the handlers around it. A key press that moves focus
+  takes the text it produces with it: a shortcut that opens a field does not
+  type its letter there.
 - **Semantics.** Each widget has `semantics()` returning a
   `livspeil_ui_widgets::Semantics` (role, label, value, numeric range,
   toggled/selected/expanded state, placeholder, text selection, disabled,
@@ -116,6 +120,7 @@ lays out only its own subtree when something inside changes. One placed by
 | `Tabs` | view, `Model<usize>` | TabList with Tab parts (TabList / Tab) | one tab stop; Left/Right (no wrap), Home/End; Delete/Backspace close |
 | `Popover` | view | Popover group named by its label (Group); trigger reports expanded | Escape closes; Tab stays inside |
 | `Dialog` (also sheet) | view | Dialog named by the title, described by the message (Dialog) | Tab trapped; Enter default, Escape cancel |
+| `Picker` | handle to a model and views | Dialog with a TextInput and a ListBox of ListBoxOptions | Up/Down, Page Up/Down move the highlight; Enter chooses; Escape closes |
 | `Toasts` | view, `Toast` values | each toast a live region: Status (polite) or Alert (danger) (Status / Alert) | Escape in a toast dismisses |
 | `Toggle` | builder | Switch, toggled (Switch) | Space/Enter flip |
 | `Checkbox` | builder | CheckBox, toggled incl. mixed (CheckBox) | Space/Enter: mixed/unchecked → checked → unchecked |
@@ -134,7 +139,7 @@ lays out only its own subtree when something inside changes. One placed by
 | `Menu` / `ContextMenu` | data + `MenuPopup` view | Menu with MenuItem / MenuItemCheckBox / Separator parts | context `Menu`, see below; Shift+F10 opens a context menu |
 | `MenuBar` | view | MenuBar with MenuItem titles (MenuBar; MenuItem, expanded) | F10 focuses, Left/Right, Down/Enter open; Alt+letter |
 | `Titlebar` | builder | Titlebar (Toolbar) | — |
-| `NodeCanvas` | view over a `NodeGraphModel` | NodeCanvas (Group); cards Node (Group, selected) | context `NodeCanvas`: Ctrl/Cmd+A, Escape, Space (pan) |
+| `NodeCanvas` | view over a `NodeGraphModel` | NodeCanvas (Group); cards Node (Group, selected) | context `NodeCanvas`: Ctrl/Cmd+A, Escape, Delete/Backspace, Space (pan) |
 
 Builders render with `render(&theme)` and report changes through callbacks
 (`on_click`, `on_change`, `on_select`); the caller owns the state. Views own
@@ -232,7 +237,21 @@ one), Escape presses the cancel button (or just closes). Any button closes
 and then runs its callback; focus returns to the opener. Dialogs fade in and
 slide 8 px; sheets slide down from above the window with the Large class;
 neither scales; both fade out. Height is measured from the wrapped title and
-message plus `content(height, ..)`.
+message plus `content(height, ..)`; `set_content` gives it to a dialog
+whose content needs its handle. `Dialog::focus_content(view, app, name)`
+after `open` moves the keyboard to an element of the content once it is on
+screen.
+
+### Picker
+
+`Picker::new(app, env, name, title, items, on_pick)` is a modal list of
+`PickerItem`s (label and one line of detail) narrowed by typing; `open`
+shows it with an empty query and the keyboard in the query field. Every
+word of the query must be in the label or the detail, whatever the case;
+labels rank before details (`search_items`). Enter or a click closes the
+picker, returns focus and calls `on_pick` with the item's index. The query
+field is named `<name>-query`, rows `<name>:<label>`. Releasing its dialog
+releases the whole picker.
 
 ### Toasts
 
@@ -291,7 +310,7 @@ Single line, backed by `livspeil_ui_text::Editor` and laid out with
 | Ctrl/Cmd+C, X, V | copy, cut, paste (`edit.*` actions, through `Env`'s clipboard; pasted line breaks become spaces) |
 | Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl+Y | undo, redo (typing is grouped, broken at spaces and moves) |
 | Enter | submit (`on_submit`) |
-| Escape | cancel an IME composition |
+| Escape | cancel an IME composition; otherwise it goes on to what surrounds the field (a dialog closes) |
 
 Mouse: click places the caret, Shift+click and drag extend the selection,
 double-click selects a word, triple-click selects all. The field scrolls
@@ -331,8 +350,11 @@ quarter of it, at least `overscan` px, in content coordinates); only then
 does the view render again, and only when scrolling leaves that region (or
 the view's size changes). `info.viewport()` is the viewport size. The
 builder is not told the offset. The content element's layer belongs to the
-scroll view. `ScrollView::jump_to(view, app, offset)` and `scroll_to`
-(animated) scroll from code; both clamp to the measured content. Physics
+scroll view; content that is a view moves inside a box of the scroll view's
+own. `ScrollView::jump_to(view, app, offset)` and `scroll_to`
+(animated) scroll from code; both clamp to the measured content.
+`jump_into_view(view, app, rect)` scrolls just far enough to show `rect`
+(content coordinates). Physics
 live in `Scroller` (pure, testable):
 
 - Trackpad pixel deltas move the content 1:1. Past an end they are resisted
@@ -451,6 +473,10 @@ it. Without it every change reads the whole graph again.
   input takes its link off and carries it: drop it on another input to move
   it, or on nothing to remove it. `end_gesture` tells the model a move or a
   wire drag ended.
+- Deleting: Delete or Backspace asks the model to `remove` the selected
+  nodes (`NodeCanvas::delete_selection`); nodes that are gone leave the
+  selection. `NodeCanvas::view_center` is the canvas point in the middle of
+  the view, where something new is seen.
 - Cards: header, port rows with colored dots, `NumberField` and `Toggle`
   parameter rows (named by the parameter for assistive technology). The
   selection ring is drawn above the header and rows, below the port dots. Level of detail: full from zoom 0.6, header and dots from
@@ -530,8 +556,6 @@ The renderer draws a curve as one instance (64 bytes):
 - Scroll release is inferred from a 60 ms pause in pixel deltas (no touch
   phases from hosts yet); Alt alone does not focus the menu bar (no
   modifier-only key events), use F10.
-- NodeCanvas: no link removal by dragging off an input, no deleting nodes,
-  no keyboard navigation between nodes; dragging a node still renders the
-  canvas and rebuilds its geometry cache (frame pipeline stage P4).
+- NodeCanvas: no keyboard navigation between nodes.
 - Overlapping wire segments double up under partial opacity (wires are
   drawn opaque).

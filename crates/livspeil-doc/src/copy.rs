@@ -78,6 +78,12 @@ pub fn create_package(dest: &Path, room: &str, source: Option<&Path>) -> Result<
         Some(p) if !p.as_os_str().is_empty() => p,
         _ => Path::new("."),
     };
+    if !parent.is_dir() {
+        return Err(PackageError::Io(
+            parent.to_path_buf(),
+            io::Error::new(io::ErrorKind::NotFound, "no such directory"),
+        ));
+    }
     let copied = source.map(Copied::of);
     if let Some(Copied::All(from)) = &copied {
         let from = fs::canonicalize(from).map_err(failed(from))?;

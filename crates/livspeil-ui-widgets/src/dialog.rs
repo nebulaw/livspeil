@@ -291,6 +291,27 @@ impl Dialog {
         }
     }
 
+    /// Move the keyboard to the element named `name` in the content, once
+    /// it is on screen. For use right after [`Dialog::open`]: the content is
+    /// not there before the next frame.
+    pub fn focus_content(view: View<Dialog>, app: &mut App, name: impl Into<String>) {
+        let name = name.into();
+        app.animate(view.id(), "dialog-focus", move |app, _| {
+            let dialog = view.read(app);
+            if !dialog.open {
+                return false;
+            }
+            let env = dialog.env.clone();
+            match app.find(&name) {
+                Some(found) => {
+                    env.focus(app, found);
+                    false
+                }
+                None => true,
+            }
+        });
+    }
+
     /// Close without pressing any button (fades out, returns focus).
     pub fn close(view: View<Dialog>, app: &mut App) {
         let (env, restore, was_open) = view.update(app, |d, cx| {

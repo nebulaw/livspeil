@@ -87,7 +87,6 @@ pub fn search(items: &[PickerItem], query: &str) -> Vec<usize> {
 type PickFn = Rc<dyn Fn(usize, &mut App)>;
 
 struct State {
-    env: Env,
     on_pick: PickFn,
     items: Rc<[PickerItem]>,
     matches: Vec<usize>,
@@ -159,7 +158,6 @@ impl Picker {
         let items: Rc<[PickerItem]> = items.into();
         let matches = search(&items, "");
         let state = app.new_model(State {
-            env: env.clone(),
             on_pick: Rc::new(on_pick),
             items,
             matches,
@@ -231,21 +229,7 @@ impl Picker {
         });
         ScrollView::jump_to(list, app, Vec2::ZERO);
         Dialog::open(dialog, app, None);
-        // The field takes focus once the dialog is on screen.
-        let env = state.read(app).env.clone();
-        let name = TextField::element_name(&self.field, app);
-        app.animate(dialog.id(), "picker-focus", move |app, _| {
-            if !self.is_open(app) {
-                return false;
-            }
-            match app.find(&name) {
-                Some(field) => {
-                    env.focus(app, field);
-                    false
-                }
-                None => true,
-            }
-        });
+        Dialog::focus_content(dialog, app, TextField::element_name(&self.field, app));
     }
 
     /// Close without choosing.
@@ -372,12 +356,22 @@ impl Render for Rows {
                 .style(|s| s.padding.top = LengthPercentage::length(3.0))
                 .rounded(theme.tokens.radii.sm)
                 .child(line(item.label.clone(), "label", font, colors.text_primary))
-                .child(line(
-                    item.detail.clone(),
-                    "detail",
-                    font - 2.0,
-                    colors.text_secondary,
-                ))
+                // One line, however long it is: what does not fit is cut off
+                // rather than run into the next row.
+                .child(
+                    div()
+                        .key("about")
+                        .w_full()
+                        .h(((font - 2.0) * 1.35).ceil())
+                        .clip()
+                        .hit_test(false)
+                        .child(line(
+                            item.detail.clone(),
+                            "detail",
+                            font - 2.0,
+                            colors.text_secondary,
+                        )),
+                )
                 .hover(|r| r.bg(colors.surface[1]))
                 .on_click(move |_, cx| picker.parts.choose(cx, at));
             if lit {

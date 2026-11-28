@@ -30,7 +30,7 @@ Status: **Phase 0 (kernel) and Phase 1 (UI toolkit)**. This repository holds the
 | `crates/livspeil-ui-a11y` | Accessibility: incremental AccessKit trees from the UI core and action routing |
 | `crates/livspeil-ui-shot` | Headless screenshots of UI scenes and the golden-image diff harness |
 | `crates/livspeil-ui-host-winit` | Desktop host: winit window, wgpu surface and `PaintRenderer`, frame pacing, input, IME, cursors, clipboard and AccessKit (macOS first) |
-| `crates/livspeil-dream` | Dream Mode app, first slice: open a room, see its graph and watch it run |
+| `crates/livspeil-dream` | Dream Mode app, first slice: build or open a room, edit its graph and watch it run |
 | `crates/livspeil-ui-gallery` | Component gallery: every widget, material, the type scale and motion settings, live (app and headless pages) |
 | `sdk/python` | Python SDK for scripts (MPL-2.0, standard library only) |
 | `xtask` | Project automation (`cargo xtask check`) |
@@ -287,18 +287,21 @@ then not saved.
 
 ```sh
 cargo run --release -p livspeil-dream -- examples/sun-and-lamp.room
+cargo run --release -p livspeil-dream          # a new, empty room
 ```
 
 Press **Play**, select a node (`lamp_color` shows its color change through a
 simulated day), pan with middle drag or two fingers and zoom with Ctrl+scroll.
 `--select=NAME` and `--play` start that way.
 
-Edit by dragging nodes and wires (drag off a linked input to remove its
-link), and in the inspector: type a value, `=expression`, or nothing for the
-default, then Enter. Ctrl+Z and Ctrl+Shift+Z undo and redo, Ctrl+S saves into
-the room file. Nodes cannot be added or deleted yet
-(`specs/livspeil-dream-spec-v0.md`). Work on a copy of an example:
-`cp -r examples/sun-and-lamp.room /tmp/mine.room`.
+**Add** (or Shift+A on the canvas) opens a searchable list of node types;
+Delete removes the selected nodes. Edit by dragging nodes and wires (drag off
+a linked input to remove its link), and in the inspector: type a value,
+`=expression`, or nothing for the default, then Enter. Ctrl+Z and
+Ctrl+Shift+Z undo and redo. Ctrl+S saves into the room file, Ctrl+Shift+S
+saves as a new room folder, Ctrl+N starts a new room
+(`specs/livspeil-dream-spec-v0.md`). Work on a copy of an example, or save it
+under another name first.
 
 ## Try the gallery
 

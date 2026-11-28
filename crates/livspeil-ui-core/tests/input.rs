@@ -509,7 +509,7 @@ fn a_shortcut_that_moves_focus_does_not_type_into_the_new_target() {
     h.app.focus(from);
     // As a window delivers it: the key, its text, then the release.
     let key = Keystroke::parse("shift-a").unwrap();
-    h.key_event(key.key.clone(), key.modifiers, true);
+    h.key_event(key.key, key.modifiers, true);
     h.type_text("A");
     h.key_event(key.key, key.modifiers, false);
     assert_eq!(h.app.focused(), h.app.find("field"));

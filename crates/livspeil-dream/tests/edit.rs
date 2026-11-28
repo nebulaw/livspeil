@@ -8,6 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use livspeil_doc::{diff, parse};
+use livspeil_dream::catalog::{node_types, registry};
 use livspeil_dream::edit::Entry;
 use livspeil_dream::session::Session;
 use livspeil_dream::shown::Port;
@@ -197,12 +198,17 @@ fn random_edits_then_save_and_reopen_give_the_same_graph() {
             .wrapping_add(1);
         usize::try_from((state >> 33) % n as u64).unwrap()
     };
-    for step in 0..600 {
+    let types = node_types(&registry().unwrap());
+    for step in 0..900 {
+        if s.nodes().len() < 2 {
+            s.add(&types[below(types.len())].id, [0.0, 0.0]).unwrap();
+            s.add(&types[below(types.len())].id, [0.0, 0.0]).unwrap();
+        }
         let n = below(s.nodes().len());
         let node = s.nodes()[n].clone();
         let other = s.nodes()[below(s.nodes().len())].clone();
         // Refusals are expected: they must only change nothing.
-        let _ = match below(8) {
+        let _ = match below(10) {
             0 => s.move_node(node.id, [below(900) as f64, below(900) as f64]),
             1 => s.rename(node.id, &format!("n{step}")),
             2 if !node.inputs.is_empty() => {
@@ -220,6 +226,19 @@ fn random_edits_then_save_and_reopen_give_the_same_graph() {
             4 if !node.inputs.is_empty() => s.disconnect(&node.inputs[below(node.inputs.len())]),
             5 => s.undo(),
             6 => s.redo(),
+            7 => s
+                .add(&types[below(types.len())].id, [below(900) as f64, 0.0])
+                .map(|_| ()),
+            8 => {
+                let ids = [node.id, other.id];
+                let before = s.graph().snapshot();
+                let done = s.delete(&ids);
+                match &done {
+                    Ok(()) => assert!(!s.graph().contains(node.id)),
+                    Err(_) => assert_eq!(s.graph().snapshot(), before),
+                }
+                done
+            }
             _ => {
                 s.end_gesture();
                 Ok(())
@@ -234,4 +253,60 @@ fn random_edits_then_save_and_reopen_give_the_same_graph() {
             );
         }
     }
+}
+
+#[test]
+fn every_listed_type_can_be_added_saved_and_reopened() {
+    let types = node_types(&registry().unwrap());
+    assert!(types.len() > 30, "{}", types.len());
+    // One entry per label, and only the latest version.
+    assert!(types.windows(2).all(|w| w[0].label < w[1].label));
+    assert!(types.iter().any(|t| t.id == "core.math.lerp@2"));
+    assert!(!types.iter().any(|t| t.id == "core.math.lerp@1"));
+
+    let mut s = Session::untitled().unwrap();
+    for (i, t) in types.iter().enumerate() {
+        let at = [(i % 8) as f64 * 240.0, (i / 8) as f64 * 200.0];
+        s.add(&t.id, at).unwrap_or_else(|e| panic!("{}: {e}", t.id));
+    }
+    assert_eq!(s.nodes().len(), types.len());
+    s.step();
+
+    let dir = std::env::temp_dir().join(format!("dream-{}-all", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let room = dir.join("all.room");
+    s.save_as(room.to_str().unwrap()).unwrap();
+    let reopened = Session::open(&room);
+    let snapshot = reopened.map(|r| r.graph().snapshot());
+    let _ = fs::remove_dir_all(&dir);
+    assert_eq!(snapshot.unwrap(), s.graph().snapshot());
+}
+
+#[test]
+fn added_nodes_get_free_names_and_deleting_the_selection_clears_it() {
+    let mut s = Session::untitled().unwrap();
+    assert!(!s.dirty());
+    let names: Vec<_> = (0..3)
+        .map(|_| {
+            let id = s.add("core.math.add@1", [0.0, 0.0]).unwrap();
+            s.graph().node_name(id).unwrap().to_owned()
+        })
+        .collect();
+    assert_eq!(names, ["add", "add2", "add3"]);
+    assert!(s.dirty());
+    let second = s.nodes()[1].id;
+    s.select(Some(1));
+    s.delete(&[second]).unwrap();
+    assert_eq!(s.selected(), None);
+    // The freed name is used again.
+    let id = s.add("core.math.add@1", [0.0, 0.0]).unwrap();
+    assert_eq!(s.graph().node_name(id), Some("add2"));
+    for _ in 0..5 {
+        s.undo().unwrap();
+    }
+    assert!(s.nodes().is_empty());
+    assert!(!s.dirty(), "an empty new room has nothing to save");
+    // It has no file to save to.
+    assert!(s.save().is_err());
 }

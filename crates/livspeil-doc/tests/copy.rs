@@ -91,6 +91,15 @@ fn a_lone_room_file_brings_only_its_assets() {
 }
 
 #[test]
+fn the_directory_it_goes_into_must_exist() {
+    let dir = scratch("no-parent");
+    let refused = create_package(&dir.join("missing/a.room"), "r", None).unwrap_err();
+    let said = refused.to_string();
+    assert!(said.ends_with("missing: no such directory"), "{said}");
+    assert!(listing(&dir).is_empty());
+}
+
+#[test]
 fn what_is_there_is_never_overwritten() {
     let dir = scratch("exists");
     write(&dir.join("a.room/room.kdl"), "mine");

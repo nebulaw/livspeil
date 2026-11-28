@@ -24,6 +24,8 @@ use crate::shown::Port;
 /// One node as the canvas shows it.
 #[derive(Debug, Clone, PartialEq)]
 struct Card {
+    /// Its id on the canvas.
+    key: NodeId,
     id: GraphId,
     title: SharedString,
     inputs: Vec<PortInfo>,
@@ -32,11 +34,20 @@ struct Card {
     problem: Option<SharedString>,
 }
 
-/// An open room being edited. Canvas node ids are the node's index in
-/// [`Session::nodes`] plus one.
+/// An open room being edited.
+///
+/// A node keeps its canvas id for as long as the editor lives, also through
+/// deletion and undo, so a selection never comes to mean another node.
 #[derive(Debug)]
 pub struct Editor {
     session: Session,
+    metrics: CardMetrics,
+    /// The canvas id of every node seen.
+    keys: HashMap<GraphId, NodeId>,
+    /// The last canvas id given out.
+    last_key: NodeId,
+    /// Where in [`Session::nodes`] each canvas id shown is.
+    at: HashMap<NodeId, usize>,
     /// Where the nodes the room does not place were put when it was opened.
     /// They stay there.
     arranged: HashMap<GraphId, Point>,
@@ -45,16 +56,6 @@ pub struct Editor {
     log: ChangeLog,
     /// Why the last edit or save was refused.
     message: Option<String>,
-}
-
-fn id(index: usize) -> NodeId {
-    index as NodeId + 1
-}
-
-/// The node index of canvas node `id`.
-#[must_use]
-pub fn node_index(id: NodeId) -> Option<usize> {
-    usize::try_from(id).ok()?.checked_sub(1)
 }
 
 /// The kernel bounds positions well inside `f32`.
@@ -70,31 +71,40 @@ fn ports(ports: &[Port]) -> Vec<PortInfo> {
         .collect()
 }
 
+/// Places for the nodes the room does not place.
+fn arranged(session: &Session, metrics: CardMetrics) -> HashMap<GraphId, Point> {
+    let nodes = session.nodes();
+    let placed: Vec<Option<[f32; 2]>> = nodes
+        .iter()
+        .map(|n| {
+            let p = session.graph().position(n.id).map(point)?;
+            Some([p.x, p.y])
+        })
+        .collect();
+    let heights: Vec<f32> = nodes
+        .iter()
+        .map(|n| metrics.card_size(n.inputs.len(), n.outputs.len(), 0).height)
+        .collect();
+    arrange(nodes, session.links(), &placed, &heights)
+        .into_iter()
+        .zip(nodes)
+        .zip(&placed)
+        .filter(|(_, placed)| placed.is_none())
+        .map(|(([x, y], node), _)| (node.id, Point::new(x, y)))
+        .collect()
+}
+
 impl Editor {
     /// An editor of `session`, with cards sized by `metrics`.
     #[must_use]
     pub fn new(session: Session, metrics: CardMetrics) -> Self {
-        let nodes = session.nodes();
-        let placed: Vec<Option<[f32; 2]>> = nodes
-            .iter()
-            .map(|n| {
-                let p = session.graph().position(n.id).map(point)?;
-                Some([p.x, p.y])
-            })
-            .collect();
-        let heights: Vec<f32> = nodes
-            .iter()
-            .map(|n| metrics.card_size(n.inputs.len(), n.outputs.len(), 0).height)
-            .collect();
-        let arranged = arrange(nodes, session.links(), &placed, &heights)
-            .into_iter()
-            .zip(nodes)
-            .zip(&placed)
-            .filter(|(_, placed)| placed.is_none())
-            .map(|(([x, y], node), _)| (node.id, Point::new(x, y)))
-            .collect();
+        let arranged = arranged(&session, metrics);
         let mut editor = Editor {
             session,
+            metrics,
+            keys: HashMap::new(),
+            last_key: 0,
+            at: HashMap::new(),
             arranged,
             cards: Vec::new(),
             links: Vec::new(),
@@ -103,6 +113,35 @@ impl Editor {
         };
         editor.sync();
         editor
+    }
+
+    /// Edit `session` instead.
+    pub fn open(&mut self, session: Session) {
+        self.arranged = arranged(&session, self.metrics);
+        self.session = session;
+        // Canvas ids are never given twice, even to another room's nodes.
+        self.keys.clear();
+        self.message = None;
+        self.sync();
+        // Whatever it looks like, it is another graph.
+        self.log.restructure();
+    }
+
+    /// The canvas id of the node at `index` of [`Session::nodes`].
+    #[must_use]
+    pub fn canvas_id(&self, index: usize) -> Option<NodeId> {
+        self.cards.get(index).map(|c| c.key)
+    }
+
+    /// Where in [`Session::nodes`] canvas node `id` is.
+    #[must_use]
+    pub fn index_of(&self, id: NodeId) -> Option<usize> {
+        self.at.get(&id).copied()
+    }
+
+    /// Say why something the person asked for did not happen.
+    pub fn report(&mut self, message: Option<String>) {
+        self.message = message;
     }
 
     /// The session.
@@ -132,13 +171,22 @@ impl Editor {
         self.message.is_none()
     }
 
-    fn current(&self) -> Vec<Card> {
+    fn current(&mut self) -> Vec<Card> {
+        for node in self.session.nodes() {
+            let last = &mut self.last_key;
+            self.keys.entry(node.id).or_insert_with(|| {
+                *last += 1;
+                *last
+            });
+        }
         let session = &self.session;
         session
             .nodes()
             .iter()
             .zip(session.results())
             .map(|(node, result)| Card {
+                // Given just above.
+                key: self.keys.get(&node.id).copied().unwrap_or_default(),
                 id: node.id,
                 title: node.name.as_str().into(),
                 inputs: ports(&node.inputs),
@@ -157,13 +205,14 @@ impl Editor {
     /// Bring what the canvas shows up to date and record what changed.
     fn sync(&mut self) {
         let cards = self.current();
+        let key = |index: usize| cards.get(index).map_or(0, |c| c.key);
         let links: Vec<Link> = self
             .session
             .links()
             .iter()
             .map(|l| Link {
-                from: PortRef::output(id(l.from.0), l.from.1),
-                to: PortRef::input(id(l.to.0), l.to.1),
+                from: PortRef::output(key(l.from.0), l.from.1),
+                to: PortRef::input(key(l.to.0), l.to.1),
             })
             .collect();
         let same_shape = links == self.links
@@ -173,27 +222,28 @@ impl Editor {
                 .zip(&self.cards)
                 .all(|(a, b)| a.id == b.id && a.inputs == b.inputs && a.outputs == b.outputs);
         if same_shape {
-            for (i, (new, old)) in cards.iter().zip(&self.cards).enumerate() {
+            for (new, old) in cards.iter().zip(&self.cards) {
                 if new.title != old.title || new.problem != old.problem {
-                    self.log.record(GraphChange::Edited(id(i)));
+                    self.log.record(GraphChange::Edited(new.key));
                 }
                 if new.position != old.position {
-                    self.log.record(GraphChange::Moved(id(i)));
+                    self.log.record(GraphChange::Moved(new.key));
                 }
             }
         } else {
             self.log.restructure();
         }
+        self.at = cards.iter().enumerate().map(|(i, c)| (c.key, i)).collect();
         self.cards = cards;
         self.links = links;
     }
 
     fn card(&self, node: NodeId) -> Option<&Card> {
-        self.cards.get(node_index(node)?)
+        self.cards.get(self.index_of(node)?)
     }
 
     fn port(&self, port: PortRef) -> Option<&Port> {
-        let node = self.session.nodes().get(node_index(port.node)?)?;
+        let node = self.session.nodes().get(self.index_of(port.node)?)?;
         match port.side {
             PortSide::Input => &node.inputs,
             PortSide::Output => &node.outputs,
@@ -214,7 +264,7 @@ impl NodeGraphModel for Editor {
         self.log.since(since)
     }
     fn node_ids(&self) -> Vec<NodeId> {
-        (0..self.cards.len()).map(id).collect()
+        self.cards.iter().map(|c| c.key).collect()
     }
     fn title(&self, node: NodeId) -> SharedString {
         self.card(node)
@@ -244,7 +294,7 @@ impl NodeGraphModel for Editor {
             .is_some_and(|(from, to)| self.session.can_connect(&from, &to))
     }
     fn set_position(&mut self, node: NodeId, position: Point) {
-        let Some(i) = node_index(node) else {
+        let Some(i) = self.index_of(node) else {
             return;
         };
         let Some(card) = self.cards.get_mut(i) else {
@@ -280,4 +330,11 @@ impl NodeGraphModel for Editor {
         self.session.end_gesture();
     }
     fn set_param(&mut self, _node: NodeId, _index: usize, _value: ParamValue) {}
+    fn remove(&mut self, nodes: &[NodeId]) {
+        let ids: Vec<GraphId> = nodes
+            .iter()
+            .filter_map(|&n| self.card(n).map(|c| c.id))
+            .collect();
+        self.edit(|s| s.delete(&ids));
+    }
 }
