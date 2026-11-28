@@ -481,6 +481,18 @@ pub struct Graph {
     pub(crate) instances: BTreeMap<NodeId, String>,
 }
 
+/// What a valid link needs to be made.
+struct LinkPlan {
+    out_index: usize,
+    in_index: usize,
+    from_slot: usize,
+    to_slot: usize,
+    /// An event link, which is not a value dependency.
+    event: bool,
+    /// It touches a polymorphic port.
+    poly: bool,
+}
+
 impl Graph {
     /// An empty graph that instantiates nodes from `registry`.
     #[must_use]
@@ -908,6 +920,80 @@ impl Graph {
         to: NodeId,
         to_port: &str,
     ) -> Result<(), GraphError> {
+        let plan = self.plan_link(from, from_port, to, to_port, false)?;
+        let LinkPlan {
+            out_index,
+            in_index,
+            from_slot,
+            to_slot,
+            event,
+            poly,
+        } = plan;
+        self.links.insert(
+            (to, in_index),
+            Endpoint {
+                node: from,
+                port: out_index,
+            },
+        );
+        self.outgoing.insert((from, to, in_index));
+        if event {
+            self.rev_counter += 1;
+            self.topo_rev += 1;
+            return Ok(());
+        }
+        if let Some(n) = self.node_mut(to) {
+            n.link_in[in_index] = Some((from_slot, out_index));
+        }
+        self.add_dependent(from_slot, to_slot);
+        self.topo_rev += 1;
+        self.bump(to);
+        if poly {
+            self.refresh_types([from, to]);
+        }
+        Ok(())
+    }
+
+    /// Whether [`Graph::link`] would succeed once the input is free: an
+    /// editor offers these, replacing the input's current link. Nothing
+    /// changes.
+    ///
+    /// # Errors
+    /// The error [`Graph::link`] would give, never
+    /// [`GraphError::InputOccupied`].
+    pub fn check_link(
+        &self,
+        from: NodeId,
+        from_port: &str,
+        to: NodeId,
+        to_port: &str,
+    ) -> Result<(), GraphError> {
+        let (in_index, _) = self.input_port(to, to_port)?;
+        let plan = self.plan_link(from, from_port, to, to_port, true);
+        // The link to be replaced may be what pins a polymorphic type: then
+        // only trying it without that link tells.
+        let polymorphic = matches!(
+            plan,
+            Ok(LinkPlan { poly: true, .. }) | Err(GraphError::TypeConflict { .. })
+        );
+        if polymorphic && self.links.contains_key(&(to, in_index)) {
+            let mut copy = self.duplicate();
+            copy.unlink(to, to_port)?;
+            return copy.link(from, from_port, to, to_port);
+        }
+        plan.map(|_| ())
+    }
+
+    /// Everything [`Graph::link`] checks. With `replacing`, an occupied
+    /// input is allowed.
+    fn plan_link(
+        &self,
+        from: NodeId,
+        from_port: &str,
+        to: NodeId,
+        to_port: &str,
+        replacing: bool,
+    ) -> Result<LinkPlan, GraphError> {
         let (out_index, out_ty) = self.output_port(from, from_port)?;
         let (in_index, in_ty) = self.input_port(to, to_port)?;
         self.check_sources_editable(to)?;
@@ -938,7 +1024,7 @@ impl Graph {
         if !siblings && !self.link_visible(from, to, None) {
             return Err(GraphError::CrossNetwork { from, to });
         }
-        if self.links.contains_key(&(to, in_index)) {
+        if !replacing && self.links.contains_key(&(to, in_index)) {
             return Err(GraphError::InputOccupied {
                 node: to,
                 port: to_port.to_owned(),
@@ -950,29 +1036,14 @@ impl Graph {
         if !event && self.depends_on(from, to) {
             return Err(GraphError::WouldCycle);
         }
-        self.links.insert(
-            (to, in_index),
-            Endpoint {
-                node: from,
-                port: out_index,
-            },
-        );
-        self.outgoing.insert((from, to, in_index));
-        if event {
-            self.rev_counter += 1;
-            self.topo_rev += 1;
-            return Ok(());
-        }
-        if let Some(n) = self.node_mut(to) {
-            n.link_in[in_index] = Some((from_slot, out_index));
-        }
-        self.add_dependent(from_slot, to_slot);
-        self.topo_rev += 1;
-        self.bump(to);
-        if poly {
-            self.refresh_types([from, to]);
-        }
-        Ok(())
+        Ok(LinkPlan {
+            out_index,
+            in_index,
+            from_slot,
+            to_slot,
+            event,
+            poly,
+        })
     }
 
     /// Remove the link feeding `to.to_port`, if any. Returns whether a link
