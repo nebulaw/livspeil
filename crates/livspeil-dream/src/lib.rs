@@ -7,6 +7,7 @@
 //! - [`session`]: the open room, its graph, edits, files and frame clock.
 //!   No UI.
 //! - [`catalog`]: the node types, and which can be added. No UI.
+//! - [`rooms`]: the folder rooms are kept in. No UI.
 //! - [`shown`]: what a node of the root network looks like from outside
 //!   (ports, links, input sources), for a plain node, a subnet or a Charm
 //!   instance alike. No UI.
@@ -22,6 +23,7 @@ pub mod canvas;
 pub mod catalog;
 pub mod edit;
 pub mod inspect;
+pub mod rooms;
 pub mod session;
 pub mod shown;
 

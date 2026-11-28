@@ -810,8 +810,8 @@ impl<R: SceneRenderer> Host<R> {
         }
     }
 
-    /// Apply the app's window requests (a custom titlebar's drag region:
-    /// move, zoom, minimize). Called right after dispatching input, while
+    /// Apply the app's window title and requests (a custom titlebar's drag
+    /// region: move, zoom, minimize). Called right after dispatching input, while
     /// the press that asked for a move is still the current event, as
     /// Wayland and X11 require for `drag_window`.
     fn apply_window_requests(&mut self) {
@@ -819,6 +819,9 @@ impl<R: SceneRenderer> Host<R> {
         let Some(gfx) = &self.gfx else {
             return;
         };
+        if let Some(title) = self.app.take_window_title() {
+            gfx.window.set_title(&title);
+        }
         let mut dragged = false;
         for r in requests {
             match window_action(r, gfx.window.is_maximized()) {

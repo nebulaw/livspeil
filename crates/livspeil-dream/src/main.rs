@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use livspeil_dream::{Session, app};
+use livspeil_dream::{Session, app, rooms};
 use livspeil_ui_core::App;
 use livspeil_ui_host_winit::{HostOptions, PaintRenderer, WidgetClipboard, run};
 use livspeil_ui_paint::{FontSystem as PaintFonts, PaintBridge};
@@ -85,13 +85,13 @@ fn main() -> ExitCode {
         };
         session.select(Some(i));
     }
-    let title = format!("{} — Livspeil Dream", session.name());
+    let title = app::title(session.name());
     let mut app = App::new();
     let renderer = PaintRenderer::for_theme(PaintBridge::new(PaintFonts::new()), app.theme());
     renderer.install_measurer(&mut app);
     let env = Env::new(&mut app, FontSystem::new());
     WidgetClipboard::install_system(&env);
-    let mounted = app::mount(&mut app, &env, session);
+    let mounted = app::mount(&mut app, &env, session, rooms::home());
     if args.play {
         app::set_playing(mounted.editor, &mut app, true);
     }
@@ -99,7 +99,7 @@ fn main() -> ExitCode {
     let options = HostOptions::default()
         .title(title)
         .size(1280.0, 800.0)
-        .min_size(800.0, 500.0)
+        .min_size(860.0, 500.0)
         // Accessibility actions can move focus: let text fields know.
         .after_accessibility_action(move |app| focus.sync_focus(app))
         .on_close_requested(move |app| mounted.may_close(app));

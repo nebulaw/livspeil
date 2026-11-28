@@ -244,14 +244,17 @@ screen.
 
 ### Picker
 
-`Picker::new(app, env, name, title, items, on_pick)` is a modal list of
+`Picker::new(app, env, name, title, source, on_pick)` is a modal list of
 `PickerItem`s (label and one line of detail) narrowed by typing; `open`
-shows it with an empty query and the keyboard in the query field. Every
-word of the query must be in the label or the detail, whatever the case;
-labels rank before details (`search_items`). Enter or a click closes the
-picker, returns focus and calls `on_pick` with the item's index. The query
-field is named `<name>-query`, rows `<name>:<label>`. Releasing its dialog
-releases the whole picker.
+shows it with an empty query and the keyboard in the query field. The
+source is asked what to show at every change of the query and at every
+opening. `searching(items)` is the source of a fixed list: every word of
+the query must be in the label or the detail, whatever the case, and labels
+rank before details (`search_items`). Enter or a click closes the picker,
+returns focus and calls `on_pick` with the item. `set_hints` sets what the
+empty field and the empty list say. The query field is named
+`<name>-query`, rows `<name>:<label>`. Releasing its dialog releases the
+whole picker.
 
 ### Toasts
 

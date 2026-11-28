@@ -9,6 +9,9 @@
 //! [`App::take_window_requests`] after dispatching input and applies them
 //! (winit: `drag_window`, `set_maximized`, `set_minimized`).
 //!
+//! The title is state rather than a request: [`App::set_window_title`]
+//! replaces one the host has not yet taken.
+//!
 //! [`Element::window_drag_region`] marks an element as a drag region: a
 //! primary press on it (or on a descendant that does not handle pointer
 //! input itself) asks for [`WindowRequest::Drag`], a double press for
@@ -45,6 +48,7 @@ pub enum WindowRequest {
 #[derive(Debug, Default)]
 struct WindowState {
     requests: Vec<WindowRequest>,
+    title: Option<String>,
 }
 
 /// State slot for the window requests (see `platform.rs`: id 0 never names
@@ -59,6 +63,16 @@ impl App {
         if !s.requests.contains(&request) {
             s.requests.push(request);
         }
+    }
+
+    /// Retitle the window.
+    pub fn set_window_title(&mut self, title: impl Into<String>) {
+        self.element_state_mut::<WindowState>(SLOT).title = Some(title.into());
+    }
+
+    /// The title set since the last call, clearing it (hosts).
+    pub fn take_window_title(&mut self) -> Option<String> {
+        self.element_state_mut::<WindowState>(SLOT).title.take()
     }
 
     /// The pending window requests in order, clearing them (hosts).

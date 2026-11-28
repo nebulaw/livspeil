@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Livspeil contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! New, save, save as and close, with the two questions they ask: what to
-//! do with unsaved changes, and where to save.
+//! New, open, save, save as and close, with the two questions they ask:
+//! what to do with unsaved changes, and where to save.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use livspeil_ui_core::{App, Element, Model, View, WindowRequest, div, text};
 use livspeil_ui_layout::Canvas;
@@ -12,7 +12,8 @@ use livspeil_ui_widgets::{Dialog, DialogButton, Env, NodeCanvas, TextField};
 
 use super::{change, focus_canvas};
 use crate::canvas::Editor;
-use crate::session::Session;
+use crate::rooms;
+use crate::session::{OpenError, Session};
 
 /// Width of the "save as" dialog, and of the space inside it.
 const ASK_WIDTH: f32 = 480.0;
@@ -32,6 +33,8 @@ pub(super) enum Then {
     Close,
     /// Starting a new room.
     New,
+    /// Opening the room chosen.
+    Open,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -46,6 +49,10 @@ struct State {
     env: Env,
     editor: Model<Editor>,
     canvas: View<NodeCanvas<Editor>>,
+    /// The folder rooms are kept in.
+    folder: PathBuf,
+    /// The room [`Then::Open`] opens.
+    chosen: PathBuf,
     then: Then,
     /// Set once the dialogs, whose buttons need this state, are made.
     dialogs: Option<Dialogs>,
@@ -55,39 +62,20 @@ struct State {
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Files(Model<State>);
 
-/// Where "save as" suggests to put the room: beside its file, or in the
-/// directory the app was started in.
-fn suggestion(file: Option<&Path>) -> String {
-    let here = || std::env::current_dir().unwrap_or_default();
-    let suggested: PathBuf = match file {
-        None => here().join("untitled.room"),
-        Some(file) => {
-            let file = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
-            let package = file.parent().filter(|_| file.ends_with("room.kdl"));
-            match package.filter(|p| p.extension().is_some_and(|e| e == "room")) {
-                Some(package) => {
-                    let mut name = package.file_stem().unwrap_or_default().to_owned();
-                    name.push("-copy.room");
-                    package.with_file_name(name)
-                }
-                None => file.with_extension("room"),
-            }
-        }
-    };
-    suggested.display().to_string()
-}
-
 impl Files {
     pub(super) fn new(
         app: &mut App,
         env: &Env,
         editor: Model<Editor>,
         canvas: View<NodeCanvas<Editor>>,
+        folder: PathBuf,
     ) -> Files {
         let state = app.new_model(State {
             env: env.clone(),
             editor,
             canvas,
+            folder,
+            chosen: PathBuf::new(),
             then: Then::Stay,
             dialogs: None,
         });
@@ -124,7 +112,7 @@ impl Files {
         let ask = app.new_view(
             Dialog::new(env, "Save room as")
                 .width(ASK_WIDTH)
-                .message("A room is a folder; everything it needs goes into it.")
+                .message("A room is a folder. A name alone goes into your rooms folder.")
                 .content(ASK_HEIGHT, move |app| {
                     let colors = app.theme().colors();
                     let mut body = div()
@@ -173,6 +161,7 @@ impl Files {
             Then::Stay => {}
             Then::Close => app.request_window(WindowRequest::Close),
             Then::New => self.start_new(app),
+            Then::Open => self.open_chosen(app),
         }
     }
 
@@ -199,17 +188,42 @@ impl Files {
     }
 
     fn start_new(self, app: &mut App) {
+        self.show(app, Session::untitled());
+    }
+
+    /// Open the room at `path`, asking about unsaved changes first.
+    pub(super) fn open(self, app: &mut App, path: PathBuf) {
+        self.0.update(app, |s, _| s.chosen = path);
+        if self.may_leave(app, Then::Open) {
+            self.open_chosen(app);
+        }
+    }
+
+    fn open_chosen(self, app: &mut App) {
+        let session = Session::open(&self.0.read(app).chosen);
+        self.show(app, session);
+    }
+
+    /// Edit `session` instead of the room open. One that failed to open
+    /// leaves that room as it is and says why.
+    fn show(self, app: &mut App, session: Result<Session, OpenError>) {
         let state = self.0.read(app);
         let (env, editor, canvas) = (state.env.clone(), state.editor, state.canvas);
-        match Session::untitled() {
-            Ok(session) => change(editor, app, |e| e.open(session)),
+        match session {
+            Ok(session) => {
+                change(editor, app, |e| e.open(session));
+                canvas.update(app, |c, cx| {
+                    c.set_selection([]);
+                    cx.notify();
+                });
+                if editor.read(app).session().nodes().is_empty() {
+                    NodeCanvas::set_canvas(canvas, app, Canvas::default());
+                } else {
+                    NodeCanvas::fit(canvas, app);
+                }
+            }
             Err(e) => change(editor, app, |editor| editor.report(Some(e.to_string()))),
         }
-        canvas.update(app, |c, cx| {
-            c.set_selection([]);
-            cx.notify();
-        });
-        NodeCanvas::set_canvas(canvas, app, Canvas::default());
         focus_canvas(&env, app);
     }
 
@@ -239,11 +253,12 @@ impl Files {
 
     fn ask_path(self, app: &mut App) {
         let state = self.0.read(app);
-        let (editor, dialogs) = (state.editor, state.dialogs);
+        let (editor, dialogs, folder) = (state.editor, state.dialogs, state.folder.clone());
         let Some(d) = dialogs else {
             return;
         };
-        let suggested = suggestion(editor.read(app).session().path());
+        let file = editor.read(app).session().path();
+        let suggested = rooms::shorten(&rooms::suggestion(file, &folder));
         d.path.update(app, |f, cx| {
             f.set_text(&suggested);
             cx.notify();
@@ -263,13 +278,24 @@ impl Files {
 
     fn save_typed(self, app: &mut App) {
         let state = self.0.read(app);
-        let (editor, dialogs) = (state.editor, state.dialogs);
+        let (editor, dialogs, folder) = (state.editor, state.dialogs, state.folder.clone());
         let Some(d) = dialogs else {
             return;
         };
         let typed = d.path.read(app).text().to_owned();
         let mut saved = false;
-        change(editor, app, |e| saved = e.edit(|s| s.save_as(&typed)));
+        change(editor, app, |e| {
+            saved = e.edit(|s| {
+                let path = rooms::resolve(&typed, &folder)
+                    .ok_or_else(|| "type where to save the room".to_owned())?;
+                // The rooms folder is made when it is first saved into.
+                if path.parent() == Some(folder.as_path()) {
+                    std::fs::create_dir_all(&folder)
+                        .map_err(|e| format!("{}: {e}", folder.display()))?;
+                }
+                s.save_as(&path)
+            });
+        });
         if saved {
             self.proceed(app);
         } else {

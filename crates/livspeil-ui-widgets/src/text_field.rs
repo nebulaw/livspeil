@@ -170,6 +170,11 @@ impl TextField {
         self.tb.scroll
     }
 
+    /// Change what is shown when empty.
+    pub fn set_placeholder(&mut self, p: impl Into<SharedString>) {
+        self.placeholder = Some(p.into());
+    }
+
     /// Replace the text (not undoable).
     pub fn set_text(&mut self, text: &str) {
         self.tb.editor.set_text(&crate::text_box::single_line(text));

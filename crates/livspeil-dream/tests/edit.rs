@@ -276,7 +276,7 @@ fn every_listed_type_can_be_added_saved_and_reopened() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let room = dir.join("all.room");
-    s.save_as(room.to_str().unwrap()).unwrap();
+    s.save_as(&room).unwrap();
     let reopened = Session::open(&room);
     let snapshot = reopened.map(|r| r.graph().snapshot());
     let _ = fs::remove_dir_all(&dir);

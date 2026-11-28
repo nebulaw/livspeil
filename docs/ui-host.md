@@ -223,6 +223,8 @@ no window (tested headlessly):
   (`HostOptions::titlebar`). The gallery uses `Hidden` with its own
   titlebar (`Chrome::native()` picks it on macOS and system chrome
   elsewhere).
+- **Window title**: the same moment, a title from
+  `App::set_window_title` is given to the window.
 - **Window requests**: after dispatching input (and after accessibility
   actions) the host takes `App::take_window_requests()` and applies them
   through `platform::window_action`: `Drag` calls `Window::drag_window`
