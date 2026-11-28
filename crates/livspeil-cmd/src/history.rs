@@ -3,7 +3,9 @@
 
 //! Linear undo and redo over the command bus.
 
-use livspeil_graph::Graph;
+use std::collections::BTreeMap;
+
+use livspeil_graph::{Graph, NodeId};
 
 use crate::{CmdError, Command, DocChange, EntryKind, GroupId, JournalEntry, Origin};
 
@@ -25,6 +27,66 @@ struct Step {
     group: Option<GroupId>,
     forward: Vec<Command>,
     backward: Vec<Command>,
+    /// The entry of each node placed since the last command of another kind.
+    /// A node placed again replaces its entry instead of adding one, so
+    /// dragging costs as much to remember as the nodes dragged, not as the
+    /// frames it took.
+    layout: BTreeMap<NodeId, usize>,
+}
+
+/// The nodes `command` places, if placing nodes is all it does.
+fn placed(command: &Command) -> Option<Vec<NodeId>> {
+    match command {
+        Command::SetPosition { node, .. } => Some(vec![*node]),
+        Command::Transaction(steps) => steps
+            .iter()
+            .map(|step| match step {
+                Command::SetPosition { node, .. } => Some(*node),
+                _ => None,
+            })
+            .collect(),
+        _ => None,
+    }
+}
+
+impl Step {
+    fn new(origin: Origin, group: Option<GroupId>) -> Self {
+        Step {
+            origin,
+            group,
+            forward: Vec::new(),
+            backward: Vec::new(),
+            layout: BTreeMap::new(),
+        }
+    }
+
+    /// Add an applied command and its inverse to the step.
+    fn push(&mut self, command: Command, inverse: Command) {
+        let Some(nodes) = placed(&command) else {
+            // Later placements may not merge across this command.
+            self.layout.clear();
+            self.forward.push(command);
+            self.backward.push(inverse);
+            return;
+        };
+        // A transaction's inverse lists its steps' inverses last to first.
+        let mut inverses = inverse.into_steps();
+        if nodes.len() > 1 {
+            inverses.reverse();
+        }
+        for ((node, forward), backward) in nodes.into_iter().zip(command.into_steps()).zip(inverses)
+        {
+            match self.layout.get(&node) {
+                // The first inverse already goes back to before the step.
+                Some(&at) => self.forward[at] = forward,
+                None => {
+                    self.layout.insert(node, self.forward.len());
+                    self.forward.push(forward);
+                    self.backward.push(backward);
+                }
+            }
+        }
+    }
 }
 
 /// Linear undo/redo history (branching history is out of scope).
@@ -47,7 +109,9 @@ impl History {
         Self::default()
     }
 
-    /// Apply `command` and record it for undo. Clears the redo stack.
+    /// Apply `command` and record it for undo. Clears the redo stack. A
+    /// command that only places nodes where they already are is not recorded
+    /// and changes neither stack.
     ///
     /// When `group` is `Some` and equals the group of the previous command
     /// applied through this history (with no undo, redo or [`seal`] in
@@ -65,24 +129,31 @@ impl History {
         group: Option<GroupId>,
     ) -> Result<Record, CmdError> {
         let applied = command.apply(graph)?;
-        self.undone.clear();
+        // Putting nodes where they already are is not an edit: it keeps redo
+        // (an editor may report a click as a move).
+        let unmoved = applied.changes.is_empty() && placed(&command).is_some_and(|n| !n.is_empty());
         let entry = JournalEntry {
             kind: EntryKind::Do,
             origin,
             group,
             command: command.clone(),
         };
+        if unmoved {
+            return Ok(Record {
+                entry,
+                changes: applied.changes,
+            });
+        }
+        self.undone.clear();
         match self.done.last_mut() {
             Some(step) if group.is_some() && group == self.open_group => {
-                step.forward.push(command);
-                step.backward.push(applied.inverse);
+                step.push(command, applied.inverse);
             }
-            _ => self.done.push(Step {
-                origin,
-                group,
-                forward: vec![command],
-                backward: vec![applied.inverse],
-            }),
+            _ => {
+                let mut step = Step::new(origin, group);
+                step.push(command, applied.inverse);
+                self.done.push(step);
+            }
         }
         self.open_group = group;
         Ok(Record {

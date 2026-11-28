@@ -356,11 +356,11 @@ impl Ord for DocLink {
 ///
 /// Positions are keyed by node *name*, like links and `ch()` paths; nodes
 /// inside subnets by their path from the root without the leading `/`
-/// (`lamp/hour`). A tool
-/// that renames a node must rename its meta entry too (the graph rewrites
-/// its own `ch()` paths on rename, but knows nothing about meta). Keying by
-/// id would survive renames but make hand-edited files much harder to
-/// read; this may change in a later format.
+/// (`lamp/hour`). In a graph they belong to the nodes
+/// (`livspeil_graph::Graph::position`) and so follow renames; these keys are
+/// worked out when the document is written. Keying by id would be sturdier
+/// but make hand-edited files much harder to read; this may change in a
+/// later format.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Meta {
     /// Node editor positions `[x, y]` by node name.

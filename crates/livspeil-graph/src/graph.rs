@@ -173,6 +173,8 @@ pub enum GraphError {
     InvalidDefinition { def: String, reason: String },
     /// The node is not a Charm instance.
     NotAnInstance(NodeId),
+    /// A position coordinate is `NaN` or beyond [`crate::MAX_POSITION`].
+    InvalidPosition(NodeId),
     /// The edit would leave type variable `var` of `node` (and the
     /// variables linked to it) without a type: it must be `expected` but
     /// would also need to be `found` (M0.17; see the `types` module).
@@ -281,6 +283,11 @@ impl fmt::Display for GraphError {
                     "node type '{node_type}' has invalid type variables: {reason}"
                 )
             }
+            GraphError::InvalidPosition(id) => write!(
+                f,
+                "the position of node {id} must be within {}",
+                crate::MAX_POSITION
+            ),
             GraphError::UnpinnedRead { node, port } => write!(
                 f,
                 "port '{port}' of node {node} is polymorphic and not pinned; \
@@ -320,6 +327,9 @@ pub(crate) struct Node {
     pub(crate) link_in: Vec<Option<(usize, usize)>>,
     /// Bumped whenever this node's inputs or links change.
     pub(crate) rev: u64,
+    /// Where the editor shows the node (see the `layout` module). Not read
+    /// by evaluation.
+    pub(crate) position: Option<[f64; 2]>,
 }
 
 impl Node {
@@ -686,6 +696,7 @@ impl Graph {
             anims: vec![None; inputs],
             link_in: vec![None; inputs],
             rev: self.rev_counter,
+            position: None,
         };
         let slot = match self.free.pop() {
             Some(slot) => {
@@ -1137,7 +1148,7 @@ impl Graph {
 
     /// A canonical, comparable copy of the editable state: node ids, names,
     /// types, explicitly set inputs, expressions, animation channels and
-    /// links. Cook revisions and the graph
+    /// links, and the layout. Cook revisions and the graph
     /// instance id are not part of it, so two graphs built by the same
     /// edits have equal snapshots.
     #[must_use]
@@ -1173,6 +1184,7 @@ impl Graph {
             nodes,
             links,
             definitions: self.defs.values().cloned().collect(),
+            positions: self.positions().collect(),
         }
     }
 

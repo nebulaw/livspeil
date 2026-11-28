@@ -21,7 +21,7 @@ use crate::value::is_finite;
 impl Document {
     /// Capture the editable state of `graph` as a document named `name`.
     /// The result is in canonical order, has [`crate::CURRENT_FORMAT`],
-    /// tier `T0` and no meta (graphs carry no editor positions yet).
+    /// tier `T0`, and has the graph's node positions as meta.
     ///
     /// Subnets get a nested network (always `Some`, possibly empty). Each
     /// link is written in the network where both ends are visible: plainly
@@ -35,6 +35,10 @@ impl Document {
     /// written as a `core.charm@1` node with `def="id@version"` and only
     /// the interface input sources that differ from the definition's
     /// defaults (its contents are not written).
+    ///
+    /// Meta is keyed by node path. A root node whose name contains `/` may
+    /// share its key with a nested node; the key then means the root node,
+    /// and a position of the nested one is an error rather than lost.
     pub fn from_graph(graph: &Graph, name: impl Into<String>) -> Result<Document, DocError> {
         let snapshot = graph.snapshot();
         let mut charms = Vec::new();
@@ -60,6 +64,23 @@ impl Document {
         let mut doc = Document::new(name);
         doc.charms = charms;
         doc.network = network;
+        for (&id, &position) in &snapshot.positions {
+            let Some(path) = graph.path(id) else {
+                continue;
+            };
+            // Only the slash `path` adds: a root name may start with one.
+            let key = path.strip_prefix('/').unwrap_or(&path);
+            if graph.parent(id).is_some() && graph.find_in(None, key).is_some() {
+                return Err(DocError::invalid(
+                    None,
+                    format!(
+                        "the position of the node '{key}' inside a subnet cannot be saved: \
+                         a root node has that name; rename one of them"
+                    ),
+                ));
+            }
+            doc.meta.positions.insert(key.to_owned(), position);
+        }
         Ok(doc)
     }
 
@@ -74,7 +95,7 @@ impl Document {
     /// input, network boundaries and no cycles. Expressions come last
     /// because their `ch()` paths name other nodes; a `ch()` reference that
     /// closes a cycle (with links or other expressions) is reported at the
-    /// expression. Meta is not part of the graph.
+    /// expression. Last, the nodes named in `meta` get their positions.
     ///
     /// # Errors
     /// [`DocError::Graph`] naming the node, input, link or expression at
@@ -88,8 +109,35 @@ impl Document {
                 .map_err(|source| graph_err(def.at.0, format!("def '{}'", def.id), source))?;
         }
         load_network(&mut graph, None, &self.network)?;
+        load_layout(&mut graph, self)?;
         Ok(graph)
     }
+}
+
+/// Place the nodes `meta` names.
+fn load_layout(graph: &mut Graph, doc: &Document) -> Result<(), DocError> {
+    if doc.meta.is_empty() {
+        return Ok(());
+    }
+    let mut ids: BTreeMap<String, NodeId> = doc
+        .network
+        .walk()
+        .into_iter()
+        .map(|(path, node)| (path, node.id))
+        .collect();
+    // A root node is found by its whole name first, as `Graph::find_path`
+    // does.
+    ids.extend(doc.network.nodes.iter().map(|n| (n.name.clone(), n.id)));
+    for (path, &position) in &doc.meta.positions {
+        let context = || format!("meta position of '{path}'");
+        let &id = ids.get(path).ok_or_else(|| {
+            DocError::invalid(None, format!("{}: no node with that name", context()))
+        })?;
+        graph
+            .set_position(id, Some(position))
+            .map_err(|source| graph_err(None, context(), source))?;
+    }
+    Ok(())
 }
 
 /// Container of a definition's network while building it.

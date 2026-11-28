@@ -366,6 +366,15 @@ class CommandsTest(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             CreateNode("t@1", "n").to_json(ident)
+        self.assertEqual(
+            livspeil.SetPosition("a", (1, -2.5)).to_json(ident),
+            {"set_position": {"node": "a", "position": [1.0, -2.5]}},
+        )
+        # Unplacing sends the field: the host refuses a command without it.
+        self.assertEqual(
+            livspeil.SetPosition("a", None).to_json(ident),
+            {"set_position": {"node": "a", "position": None}},
+        )
 
     def test_connect_outside_a_host(self) -> None:
         saved = os.environ.pop("LIVSPEIL_PROTOCOL", None)

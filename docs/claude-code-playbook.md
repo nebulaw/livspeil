@@ -55,7 +55,7 @@ in half; delete a worktree's `target/` as soon as its PR is open.
 ## 2. The roles
 
 **You** decide: product direction, open questions, licences, and merging.
-Decisions are numbered (D1…D68 so far) and recorded in the hub doc
+Decisions are numbered (D1…D69 so far) and recorded in the hub doc
 (`docs/livspeil-vision-and-decisions.md`). A session never merges to `main`, never pushes to `main`, and never
 merges from the GitHub web editor (that corrupted `Cargo.lock` once; ask
 the lead session to resolve conflicts instead).

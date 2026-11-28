@@ -21,7 +21,8 @@ use std::io::Cursor;
 use common::{D_GAIN, D_IN, D_NUM, D_OUT, FLAG, NUM, definition, graph, id};
 use livspeil_cmd::{Command, GroupId, History, JournalWriter, Origin, replay};
 use livspeil_graph::{
-    CharmDef, CharmMeta, GraphSnapshot, INPUT_TYPE, NodeId, PortDirection, instance_node_id,
+    CharmDef, CharmMeta, GraphSnapshot, INPUT_TYPE, MAX_POSITION, NodeId, PortDirection,
+    instance_node_id,
 };
 use livspeil_node_api::{PortType, Value};
 use livspeil_params::{AnimChannel, Extrapolation, Interpolation, Keyframe};
@@ -361,6 +362,28 @@ fn channel() -> impl Strategy<Value = AnimChannel> {
     ]
 }
 
+/// Any coordinate, including ones that must be refused.
+fn coordinate() -> impl Strategy<Value = f64> {
+    prop_oneof![
+        8 => -1.0e4..1.0e4f64,
+        1 => prop::sample::select(vec![0.0, -0.0, MAX_POSITION, -MAX_POSITION, f64::MIN_POSITIVE]),
+        1 => prop::sample::select(vec![f64::MAX, f64::MIN, 1.0e300]),
+        1 => prop::sample::select(vec![f64::NAN, f64::INFINITY, f64::NEG_INFINITY]),
+    ]
+}
+
+/// Placing and unplacing nodes: any node, mostly ones that exist.
+fn layout() -> impl Strategy<Value = Command> {
+    let position =
+        || prop::option::weighted(0.85, (coordinate(), coordinate()).prop_map(|(x, y)| [x, y]));
+    prop_oneof![
+        3 => (num_id(), position())
+            .prop_map(|(node, position)| Command::SetPosition { node, position }),
+        1 => (any_id(), position())
+            .prop_map(|(node, position)| Command::SetPosition { node, position }),
+    ]
+}
+
 fn simple_command() -> impl Strategy<Value = Command> {
     prop_oneof![
         3 => create(),
@@ -381,6 +404,7 @@ fn simple_command() -> impl Strategy<Value = Command> {
             .prop_map(|(node, port)| Command::ClearAnimation { node, port }),
         5 => structure(),
         5 => charms(),
+        6 => layout(),
     ]
 }
 
@@ -594,6 +618,14 @@ fn rebuild(snapshot: &GraphSnapshot) -> Command {
         None => true,
         Some(i) => n.parent == Some(i) && n.type_id == INPUT_TYPE,
     };
+    let layout: Vec<Command> = snapshot
+        .positions
+        .iter()
+        .map(|(&node, &position)| Command::SetPosition {
+            node,
+            position: Some(position),
+        })
+        .collect();
     // Parents before children.
     let mut pending: Vec<_> = snapshot.nodes.iter().collect();
     let mut created = std::collections::BTreeSet::new();
@@ -677,5 +709,6 @@ fn rebuild(snapshot: &GraphSnapshot) -> Command {
             });
         }
     }
+    steps.extend(layout);
     Command::Transaction(steps)
 }

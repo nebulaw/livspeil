@@ -117,7 +117,7 @@ host                                   script
 | `hello` | none | `protocol` (integer, `1`), `client` (string, optional) | `protocol`, `host`, `session`, `capabilities` (tokens), `room` (`{name}`), `limits` (`request_timeout_ms`, `run_timeout_ms`, `max_message_bytes`) |
 | `graph.nodes` | `graph.read` | `network` (subnet path, default root), `recursive` (default `true`) | `nodes`: `[{id, name, path, type, parent, subnet}]`, sorted by path |
 | `graph.node` | `graph.read` | `node` | `{id, name, path, type, summary, parent, subnet, port_type, charm, inputs, outputs}` |
-| `graph.snapshot` | `graph.read` | none | the kernel's `GraphSnapshot` (`nodes`, `links`) plus `paths` (id to path) |
+| `graph.snapshot` | `graph.read` | none | the kernel's `GraphSnapshot` (`nodes`, `links`, `positions`: id to `[x, y]` for placed nodes, left out when none is) plus `paths` (id to path) |
 | `graph.apply` | `graph.write` | `command` (a command, below), `group` (integer, optional) | `changes` (list), `undo_len` |
 | `graph.new_id` | `graph.write` | `count` (1 to 1024, default 1) | `ids`: fresh node ids |
 | `graph.cook` | `graph.cook` | `nodes` (list of node refs), `time`, `frame`, `dt` (optional) | `clock` (`{frame, time, dt}`), `results`: `[{node, id, outputs, error?}]` |
@@ -148,6 +148,10 @@ accepted for a `Float` input.
 {"transaction":[{"set_input":{...}},{"link":{"from":"…","from_port":"out","to":"…","to_port":"a"}}]}
 ```
 
+`{"set_position":{"node":"…","position":[360.0,40.0]}}` places a node in the
+node editor; `"position":null` unplaces it, and the field is required.
+Coordinates are within ±10,000,000.
+
 Commands name nodes by **id** (the SDK resolves paths for you). New nodes
 need ids: take them from `graph.new_id`. The command is applied with
 `History::apply` and `Origin::Script`: it is validated (an invalid command
@@ -159,7 +163,7 @@ script groups are mapped to fresh host groups, so they never merge with a
 user's gesture. `changes` lists the document changes as
 `{"kind": "input_changed" | "node_added" | "node_removed" | "linked" |
 "unlinked" | "renamed" | "expression_changed" | "animation_changed" |
-"node_moved" | "charm_changed", ...}` with `node` (id), `path`, `port` and
+"node_moved" | "charm_changed" | "position_changed", ...}` with `node` (id), `path`, `port` and
 the like.
 
 **`graph.cook`.** Without `time`/`frame`/`dt` the nodes are cooked on the

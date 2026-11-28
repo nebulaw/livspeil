@@ -3,6 +3,8 @@
 
 //! Canonical, comparable copies of a graph's editable state.
 
+use std::collections::BTreeMap;
+
 use livspeil_node_api::{PortType, Value};
 use livspeil_params::AnimChannel;
 
@@ -63,4 +65,11 @@ pub struct GraphSnapshot {
     /// Charm definitions by id (M0.16).
     #[cfg_attr(feature = "serde", serde(default))]
     pub definitions: Vec<CharmDef>,
+    /// Editor positions of the placed nodes. Kept apart from the nodes so
+    /// that definitions, which share [`NodeSnapshot`], cannot carry layout.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "BTreeMap::is_empty")
+    )]
+    pub positions: BTreeMap<NodeId, [f64; 2]>,
 }

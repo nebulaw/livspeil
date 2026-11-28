@@ -350,6 +350,10 @@ pub(crate) fn change_json(graph: &Graph, change: &DocChange) -> Json {
                 "to": to.map_or(Json::Null, |p| path_json(graph, p)),
             })
         }
+        DocChange::PositionChanged { node: n } => {
+            let (id, path) = node(*n);
+            json!({ "kind": "position_changed", "node": id, "path": path })
+        }
         DocChange::CharmChanged { subnet } => {
             let (id, path) = node(*subnet);
             json!({ "kind": "charm_changed", "node": id, "path": path })
