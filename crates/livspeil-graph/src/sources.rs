@@ -680,6 +680,20 @@ impl Graph {
         }
     }
 
+    /// The inputs whose expression reads `node`, or a node inside it, through
+    /// `ch()` or `out()`. Such a node cannot be removed while a reader
+    /// outside it is left. Sorted; the reader may be inside `node` too.
+    #[must_use]
+    pub fn expression_readers(&self, node: NodeId) -> Vec<(NodeId, &str)> {
+        self.subtree_readers(node)
+            .into_iter()
+            .filter_map(|(reader, index)| {
+                let port = self.node(reader)?.imp.spec().inputs.get(index)?;
+                Some((reader, port.name))
+            })
+            .collect()
+    }
+
     /// Every `(reader, input index)` whose expression reads a node of
     /// `node`'s subtree.
     pub(crate) fn subtree_readers(&self, node: NodeId) -> BTreeSet<(NodeId, usize)> {

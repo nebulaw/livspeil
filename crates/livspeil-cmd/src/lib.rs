@@ -48,12 +48,14 @@
 //! graph (`GraphError::InInstance`).
 
 mod command;
+mod delete;
 mod entry;
 mod error;
 mod history;
 mod journal;
 
 pub use command::{Applied, Command, DocChange};
+pub use delete::delete_nodes;
 pub use entry::{EntryKind, GroupId, JournalEntry, Origin};
 pub use error::{CmdError, JournalError};
 pub use history::{History, Record};
