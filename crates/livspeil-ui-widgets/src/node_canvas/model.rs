@@ -219,6 +219,12 @@ pub trait NodeGraphModel: 'static {
     }
     /// Links.
     fn links(&self) -> Vec<Link>;
+    /// What is wrong with a node, if something is: its card is marked and
+    /// the text becomes its accessible description. Report a change of it
+    /// as [`GraphChange::Edited`].
+    fn problem(&self, _node: NodeId) -> Option<SharedString> {
+        None
+    }
 
     /// Whether a link from output `from` to input `to` is allowed (the
     /// type check). Default: different nodes and equal type names.

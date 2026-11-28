@@ -984,3 +984,51 @@ fn releasing_a_canvas_releases_everything_it_created() {
         assert_eq!(count(&h.app), empty);
     }
 }
+
+/// A model whose node 3 reports a problem.
+struct Failing(DemoGraph);
+
+impl NodeGraphModel for Failing {
+    fn revision(&self) -> u64 {
+        self.0.revision()
+    }
+    fn node_ids(&self) -> Vec<u64> {
+        self.0.node_ids()
+    }
+    fn title(&self, node: u64) -> SharedString {
+        self.0.title(node)
+    }
+    fn position(&self, node: u64) -> Point {
+        self.0.position(node)
+    }
+    fn inputs(&self, node: u64) -> Vec<PortInfo> {
+        self.0.inputs(node)
+    }
+    fn outputs(&self, node: u64) -> Vec<PortInfo> {
+        self.0.outputs(node)
+    }
+    fn links(&self) -> Vec<Link> {
+        self.0.links()
+    }
+    fn problem(&self, node: u64) -> Option<SharedString> {
+        (node == 3).then(|| "it broke".into())
+    }
+    fn set_position(&mut self, node: u64, position: Point) {
+        self.0.set_position(node, position);
+    }
+    fn connect(&mut self, link: Link) {
+        self.0.connect(link);
+    }
+}
+
+#[test]
+fn a_node_with_a_problem_is_marked() {
+    let (mut h, _) = host_sized(Size::new(900.0, 600.0), |app, env| {
+        let graph = app.new_model(Failing(DemoGraph::sample()));
+        let view = app.new_view(NodeCanvas::new(env, graph));
+        Box::new(move |_| div().w_full().h_full().child(Element::view(&view)))
+    });
+    h.run_until_idle(100);
+    assert!(h.app.find("problem:Mix").is_some());
+    assert!(h.app.find("problem:Time").is_none());
+}
