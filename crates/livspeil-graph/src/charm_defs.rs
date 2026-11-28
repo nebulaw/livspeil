@@ -734,6 +734,8 @@ impl Graph {
         }
         self.set_container_type(subnet, CHARM_TYPE)?;
         self.instances.insert(subnet, def.to_owned());
+        // Its contents are the definition's now, and have no layout.
+        self.clear_layout_inside(subnet);
         Ok(())
     }
 

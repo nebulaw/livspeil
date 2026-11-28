@@ -107,6 +107,7 @@ Round 15 (2026-11-28)
 - D66 Experience and features come first. Visual design polish is one of the last stages, after what is needed for the OS's features exists. The colours (D59) stay as they are. This replaces "finish P1 polish before starting P2" from 2026-11-26.
 - D67 Frame pipeline P3 is recorded and postponed; it is looked at again with P5, once the Intel iGPU laptop is measured. Next is the Dream Mode app (`specs/livspeil-dream-spec-v0.md`).
 - D68 When the Floor is built, it has to be good enough to replace Hyprland: the owner will run it instead and keep working from it.
+- D69 The Dream Mode first slice is accepted. Node positions are kernel data edited by commands (undo, journal), not app state. Live values appear in the inspector only; the app is `livspeil-dream`.
 
 ## Architecture overview
 - **Floor**: Smithay compositor (windows, input, outputs, XWayland, layer-shell, titlebars, shadows, rounded masks, blur, window tokens).
@@ -185,9 +186,8 @@ All `crates/livspeil-ui-*` are MPL-2.0 and testable headlessly (CPU reference ra
 19. Usage limits interrupt parallel agents; mitigated by small tracks, resuming agents, and committing early.
 
 ## Open questions, round 15
-1. The questions of the Dream Mode spec (section 5): undo of node moves, values on cards, the name.
-2. What must the Floor do before it can replace Hyprland (D68)? To be specified when it starts. A first list: native and XWayland apps (terminal, browser, editor), keyboard layouts and shortcuts, multiple monitors at their refresh rate, NVIDIA, clipboard, screen lock, screenshots and screen sharing, notifications, and always a way back to Hyprland. Its TTY build has never set a display mode.
-3. When is the Intel iGPU laptop measured? P3, P5 and the iGPU budget wait for it.
-4. When is the screen-reader pass (Orca, VoiceOver)? Accessibility is built and has never been heard.
+1. What must the Floor do before it can replace Hyprland (D68)? To be specified when it starts. A first list: native and XWayland apps (terminal, browser, editor), keyboard layouts and shortcuts, multiple monitors at their refresh rate, NVIDIA, clipboard, screen lock, screenshots and screen sharing, notifications, and always a way back to Hyprland. Its TTY build has never set a display mode.
+2. When is the Intel iGPU laptop measured? P3, P5 and the iGPU budget wait for it.
+3. When is the screen-reader pass (Orca, VoiceOver)? Accessibility is built and has never been heard.
 
 Deferred by D66: the design critique (`docs/design-critique.md`), the dark surface ramp, and the missing cross, trash, plus and lock icons.

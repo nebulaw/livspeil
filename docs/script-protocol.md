@@ -148,6 +148,9 @@ accepted for a `Float` input.
 {"transaction":[{"set_input":{...}},{"link":{"from":"…","from_port":"out","to":"…","to_port":"a"}}]}
 ```
 
+`{"set_position":{"node":"…","position":[360.0,40.0]}}` places a node in the
+node editor; `"position":null` unplaces it, and the field is required.
+
 Commands name nodes by **id** (the SDK resolves paths for you). New nodes
 need ids: take them from `graph.new_id`. The command is applied with
 `History::apply` and `Origin::Script`: it is validated (an invalid command
@@ -159,7 +162,7 @@ script groups are mapped to fresh host groups, so they never merge with a
 user's gesture. `changes` lists the document changes as
 `{"kind": "input_changed" | "node_added" | "node_removed" | "linked" |
 "unlinked" | "renamed" | "expression_changed" | "animation_changed" |
-"node_moved" | "charm_changed", ...}` with `node` (id), `path`, `port` and
+"node_moved" | "charm_changed" | "position_changed", ...}` with `node` (id), `path`, `port` and
 the like.
 
 **`graph.cook`.** Without `time`/`frame`/`dt` the nodes are cooked on the

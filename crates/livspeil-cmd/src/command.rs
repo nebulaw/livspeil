@@ -13,6 +13,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::CmdError;
 
+/// Deserialize an `Option` field that may not be left out.
+fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<[f64; 2]>, D::Error> {
+    Option::deserialize(d)
+}
+
 /// An edit to a graph (kernel spec, section 7).
 ///
 /// JSON form (serde's externally tagged enums, snake case):
@@ -182,6 +187,16 @@ pub enum Command {
         parent: Option<NodeId>,
         seed: NodeId,
     },
+    /// Place a node in the node editor (`None`: unplace it). Layout only:
+    /// nothing is re-cooked. The inverse restores the previous position.
+    /// Fails like `livspeil_graph::Graph::set_position`.
+    SetPosition {
+        node: NodeId,
+        /// Required in JSON, `null` to unplace: a misspelled or forgotten
+        /// field must not unplace the node.
+        #[serde(deserialize_with = "present")]
+        position: Option<[f64; 2]>,
+    },
 }
 
 /// A change to the document, reported by every applied command so a UI can
@@ -189,6 +204,10 @@ pub enum Command {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DocChange {
+    /// A node was placed, moved or unplaced in the node editor. Layout only.
+    PositionChanged {
+        node: NodeId,
+    },
     NodeAdded {
         id: NodeId,
     },
@@ -315,6 +334,9 @@ impl Command {
                 .iter()
                 .flat_map(|n| &n.inputs)
                 .any(|(_, v)| !value_is_finite(v)),
+            Command::SetPosition { position, .. } => {
+                position.is_some_and(|p| !p.iter().all(|v| v.is_finite()))
+            }
             Command::Transaction(steps) => steps.iter().any(Command::has_non_finite),
             _ => false,
         }
@@ -645,9 +667,35 @@ impl Command {
                 })
             }
             Command::Attach { subnet, def } => {
+                // Attaching drops the layout of the contents.
+                let layout = layout_inside(graph, *subnet);
                 graph.attach(*subnet, def)?;
                 changes.push(DocChange::InstanceAttached { node: *subnet });
-                Ok(Command::Detach { instance: *subnet })
+                let detach = Command::Detach { instance: *subnet };
+                if layout.is_empty() {
+                    return Ok(detach);
+                }
+                changes.extend(
+                    layout
+                        .iter()
+                        .map(|&(node, _)| DocChange::PositionChanged { node }),
+                );
+                let mut steps = vec![detach];
+                steps.extend(layout.into_iter().map(|(node, p)| Command::SetPosition {
+                    node,
+                    position: Some(p),
+                }));
+                Ok(Command::Transaction(steps))
+            }
+            Command::SetPosition { node, position } => {
+                let previous = graph.set_position(*node, *position)?;
+                if previous != *position {
+                    changes.push(DocChange::PositionChanged { node: *node });
+                }
+                Ok(Command::SetPosition {
+                    node: *node,
+                    position: previous,
+                })
             }
             Command::MakeDefinition {
                 subnet,
@@ -674,6 +722,8 @@ impl Command {
                     name: plan.name,
                     def: def.clone(),
                 });
+                // The instance takes the subnet's place in the editor too.
+                steps.extend(restore_position(graph, *subnet));
                 steps.extend(plan.overrides.into_iter().map(|(node, source)| {
                     Command::SetExpression {
                         node,
@@ -768,6 +818,26 @@ fn subtree_reader_sources(graph: &Graph, node: NodeId) -> Vec<(NodeId, String, S
         }
     }
     readers
+}
+
+/// The placed nodes inside `container` (not itself).
+fn layout_inside(graph: &Graph, container: NodeId) -> Vec<(NodeId, [f64; 2])> {
+    if !graph.is_subnet(container) {
+        return Vec::new();
+    }
+    subtree(graph, container)
+        .into_iter()
+        .filter(|&n| n != container)
+        .filter_map(|n| Some((n, graph.position(n)?)))
+        .collect()
+}
+
+/// The command restoring `node`'s position after it was recreated.
+fn restore_position(graph: &Graph, node: NodeId) -> Option<Command> {
+    graph.position(node).map(|p| Command::SetPosition {
+        node,
+        position: Some(p),
+    })
 }
 
 /// `node` and everything inside it, descendants first.
@@ -899,6 +969,7 @@ fn delete_instance(
     }
     restore.extend(links.iter().map(link_command));
     restore.extend(expressions);
+    restore.extend(restore_position(graph, id));
     graph.remove_node(id)?;
     changes.extend(links.into_iter().map(DocChange::Unlinked));
     changes.push(DocChange::NodeRemoved { id });
@@ -1003,6 +1074,7 @@ fn delete_node(
     let mut links = graph.incoming_links(id);
     links.extend(graph.outgoing_links(id));
     restore.extend(links.iter().map(link_command));
+    restore.extend(restore_position(graph, id));
     graph.remove_node(id)?;
     changes.extend(links.into_iter().map(DocChange::Unlinked));
     changes.push(DocChange::NodeRemoved { id });

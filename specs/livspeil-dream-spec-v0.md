@@ -5,7 +5,8 @@ SPDX-License-Identifier: CC-BY-4.0
 
 # Livspeil Dream Mode app, first slice (v0)
 
-Status: **proposed** (2026-11-28). Nothing here is built. Roadmap P2; D18
+Status: **accepted** (2026-11-28, D69). The kernel's position commands
+(section 3) are built; the app is not. Roadmap P2; D18
 (Dream Mode first as an app), D66 (experience before polish).
 
 ## 1. What it is for
@@ -75,10 +76,10 @@ typed path); visual polish (D66).
 New crate `crates/livspeil-dream` (GPL-3.0-or-later, library and binary). It
 depends on kernel and UI crates; neither side learns about the other.
 
-- **Session**: the one owner of the document. Holds the `Graph`, the node
-  positions, the history, the cooker and the clock. All changes go through it
-  as commands, so the canvas, inspector and menus cannot disagree. It is
-  plain Rust with no UI dependency, tested headlessly.
+- **Session**: the one owner of the document. Holds the `Graph` (which holds
+  the node positions), the history, the cooker and the clock. All changes go
+  through it as commands, so the canvas, inspector and menus cannot disagree.
+  It is plain Rust with no UI dependency, tested headlessly.
 - **Canvas adapter**: implements `NodeGraphModel` over the session. Maps
   kernel node ids to canvas ids, and turns the `DocChange` events of each
   command into `changes_since`, so an edit costs what changed (frame pipeline
@@ -95,6 +96,7 @@ Needed in existing crates:
 
 | Crate | Addition |
 |---|---|
+| `livspeil-graph`, `livspeil-cmd`, `livspeil-doc` | node positions as graph data with a `SetPosition` command (built) |
 | `livspeil-graph` | ask whether a link is allowed without making it |
 | `livspeil-doc` | write a changed document keeping the comments of the old text |
 | `livspeil-ui-widgets` | NodeCanvas: disconnect, delete requests, marking a failed node |
@@ -108,13 +110,10 @@ Needed in existing crates:
 - The `DemoGraph` canvas tests stay; the adapter gets the same
   retained-against-fresh test over random commands.
 
-## 5. Questions to settle
+## 5. Settled (2026-11-28)
 
-1. **Undo of node moves.** Positions are in the document, not in the graph,
-   and the kernel has no command for them. (a) The session keeps one undo
-   stack holding both kernel steps and moves. (b) The kernel gains position
-   commands. Proposed: (a); the kernel stays free of editor data. The cost:
-   moves are not in the command journal.
-2. **Live values on the cards**, or only in the inspector? Proposed:
-   inspector only in these slices.
-3. **A name** for the binary and crate. Proposed: `livspeil-dream`.
+1. **Node moves are commands.** Positions are graph data with a
+   `SetPosition` command, so a move is undone and journaled like any edit.
+   They take no part in evaluation (kernel spec, section 3).
+2. **Live values** are shown in the inspector only in these slices.
+3. The crate and binary are `livspeil-dream`.

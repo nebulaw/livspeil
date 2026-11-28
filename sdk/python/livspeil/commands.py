@@ -179,6 +179,22 @@ class ClearAnimation(Command):
 
 
 @dataclass
+class SetPosition(Command):
+    """Place a node in the node editor, or unplace it with ``None``. Layout
+    only: nothing is re-cooked."""
+
+    node: NodeRef
+    position: Optional[tuple[float, float]]
+
+    def to_json(self, resolve: Resolver) -> dict[str, Any]:
+        position = None
+        if self.position is not None:
+            x, y = self.position
+            position = [float(x), float(y)]
+        return {"set_position": {"node": resolve(self.node), "position": position}}
+
+
+@dataclass
 class Transaction(Command):
     """Apply ``steps`` in order, all or nothing, as one undo step."""
 

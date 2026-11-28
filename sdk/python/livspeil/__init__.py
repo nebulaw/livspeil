@@ -36,6 +36,7 @@ from .commands import (
     Rename,
     SetExpression,
     SetInput,
+    SetPosition,
     Transaction,
     Unlink,
 )
@@ -92,6 +93,7 @@ __all__ = [
     "Session",
     "SetExpression",
     "SetInput",
+    "SetPosition",
     "Tick",
     "Transaction",
     "Unlink",

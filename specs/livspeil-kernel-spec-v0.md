@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-4.0
 
 # Livspeil Kernel Spec v0.3 (as built)
 
-Status: updated 2026-11-26 to match `main` after PR #38. Phase 0 is complete.
+Status: updated 2026-11-28 (node positions, D69). Phase 0 is complete.
 The kernel is headless and cross-platform (macOS and Linux) and never depends
 on Bevy, wgpu, Wayland or UI crates. Code comments cite this spec by section
 number, so keep the numbers stable.
@@ -55,6 +55,9 @@ interface (`wit/livspeil-node.wit`).
   may cross one subnet boundary through the interface. Root `core.output`
   nodes mark sinks.
 - **Promotion** exposes an inner input as an input of its subnet.
+- **Layout**: a node may have an editor position. It is edited and saved like
+  the rest of the graph but takes no part in evaluation. Nodes inside a Charm
+  instance have none, and definitions carry none.
 - A **Charm** is a subnet with metadata (`CharmMeta`: name, version, icon,
   required capabilities, minimum tier). Metadata does not affect cooking.
 - **Shared Charm definitions**: a graph holds a library of `CharmDef`s. An
@@ -120,6 +123,8 @@ interface (`wit/livspeil-node.wit`).
 - Primitive edits: `CreateNode`, `DeleteNode`, `SetInput`, `ClearInput`,
   `Link`, `Unlink`, `Rename`, `SetExpression`, `ClearExpression`,
   `SetAnimation`, `ClearAnimation`, `Transaction`.
+- Layout: `SetPosition` (a missing position unplaces). Commands that delete or
+  rebuild nodes restore positions in their inverses.
 - Networks and Charms: `CreateNodeIn`, `CreateSubnet`, `AddInterfacePort`,
   `RemoveInterfacePort`, `MoveNode`, `MoveNodeRewired`, `Promote`,
   `Unpromote`, `SetCharm`.
@@ -127,7 +132,8 @@ interface (`wit/livspeil-node.wit`).
   `Instantiate`, `Detach`, `Attach`, `MakeDefinition`.
 - `apply` returns the exact inverse and `DocChange` events, or fails and
   leaves the graph unchanged. `History` coalesces by group. The journal
-  records do/undo/redo with an origin and replays to the same state.
+  records do/undo/redo with an origin and replays to the same state. A step
+  that only places nodes keeps one entry per node, however long the drag.
 - Edits inside a Charm instance are refused.
 
 ## 8. Core nodes
@@ -191,6 +197,8 @@ room "Sun and Lamp" format=1 min-tier="T1" {
   format 1 (D44).
 - `assets/` + `assets.lock`: content-addressed files with sha256, size, SPDX
   license, source and author.
+- `meta` is the layout: loading places the graph's nodes, saving writes their
+  positions under their paths. An entry naming no node is an error.
 - `livspeil diff` matches nodes by id.
 - `livspeil cook` sinks (D46): root `core.output` nodes, otherwise nodes
   without outgoing links.

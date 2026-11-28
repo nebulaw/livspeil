@@ -23,7 +23,6 @@
 //! lines. A script that calls `listen()` is driven for `--ticks N` frames
 //! (`--fps`, default 60) and then shut down.
 
-use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -304,6 +303,10 @@ fn describe(graph: &Graph, command: &Command) -> String {
         } => format!("link {}.{from_port} -> {}.{to_port}", n(from), n(to)),
         Command::Unlink { to, to_port } => format!("unlink {}.{to_port}", n(to)),
         Command::Rename { node, name } => format!("rename {} (now \"{name}\")", n(node)),
+        Command::SetPosition { node, position } => match position {
+            Some([x, y]) => format!("set_position {} = {x} {y}", n(node)),
+            None => format!("set_position {} (unplaced)", n(node)),
+        },
         Command::SetExpression { node, port, source } => {
             format!("set_expression {}.{port} = {source}", n(node))
         }
@@ -358,8 +361,8 @@ fn append_journal(path: &Path, scene: &Scene) -> Result<(), String> {
 }
 
 /// Write the edited graph back to `file` in canonical form, keeping the
-/// original prolog comments, tier and editor positions (renamed nodes keep
-/// theirs; deleted nodes lose theirs).
+/// original prolog comments and tier. Editor positions come from the graph
+/// (renamed nodes keep theirs; deleted nodes lose theirs).
 fn save(file: &Path, original: &str, doc: &Document, graph: &Graph) -> Result<(), ExitCode> {
     let mut out = match Document::from_graph(graph, doc.name.clone()) {
         Ok(d) => d,
@@ -369,19 +372,6 @@ fn save(file: &Path, original: &str, doc: &Document, graph: &Graph) -> Result<()
         }
     };
     out.min_tier = doc.min_tier;
-    let ids: BTreeMap<String, NodeId> = doc
-        .network
-        .walk()
-        .into_iter()
-        .map(|(path, node)| (path, node.id))
-        .collect();
-    for (path, pos) in &doc.meta.positions {
-        if let Some(new_path) = ids.get(path).and_then(|id| graph.path(*id)) {
-            out.meta
-                .positions
-                .insert(new_path.trim_start_matches('/').to_owned(), *pos);
-        }
-    }
     let (prolog, _) = split_prolog(original);
     let text = match format(&out).and_then(|body| canonicalize(&format!("{prolog}{body}"))) {
         Ok(t) => t,

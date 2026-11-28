@@ -34,7 +34,8 @@ impl Document {
     /// Charm definitions (M0.16) become the `charms` block; an instance is
     /// written as a `core.charm@1` node with `def="id@version"` and only
     /// the interface input sources that differ from the definition's
-    /// defaults (its contents are not written).
+    /// defaults (its contents are not written). Node positions become
+    /// `meta`.
     pub fn from_graph(graph: &Graph, name: impl Into<String>) -> Result<Document, DocError> {
         let snapshot = graph.snapshot();
         let mut charms = Vec::new();
@@ -60,6 +61,13 @@ impl Document {
         let mut doc = Document::new(name);
         doc.charms = charms;
         doc.network = network;
+        for (&id, &position) in &snapshot.positions {
+            if let Some(path) = graph.path(id) {
+                doc.meta
+                    .positions
+                    .insert(path.trim_start_matches('/').to_owned(), position);
+            }
+        }
         Ok(doc)
     }
 
@@ -74,7 +82,7 @@ impl Document {
     /// input, network boundaries and no cycles. Expressions come last
     /// because their `ch()` paths name other nodes; a `ch()` reference that
     /// closes a cycle (with links or other expressions) is reported at the
-    /// expression. Meta is not part of the graph.
+    /// expression. Last, the nodes named in `meta` get their positions.
     ///
     /// # Errors
     /// [`DocError::Graph`] naming the node, input, link or expression at
@@ -88,8 +96,32 @@ impl Document {
                 .map_err(|source| graph_err(def.at.0, format!("def '{}'", def.id), source))?;
         }
         load_network(&mut graph, None, &self.network)?;
+        load_layout(&mut graph, self)?;
         Ok(graph)
     }
+}
+
+/// Place the nodes `meta` names.
+fn load_layout(graph: &mut Graph, doc: &Document) -> Result<(), DocError> {
+    if doc.meta.is_empty() {
+        return Ok(());
+    }
+    let ids: BTreeMap<String, NodeId> = doc
+        .network
+        .walk()
+        .into_iter()
+        .map(|(path, node)| (path, node.id))
+        .collect();
+    for (path, &position) in &doc.meta.positions {
+        let context = || format!("meta position of '{path}'");
+        let &id = ids.get(path).ok_or_else(|| {
+            DocError::invalid(None, format!("{}: no node with that name", context()))
+        })?;
+        graph
+            .set_position(id, Some(position))
+            .map_err(|source| graph_err(None, context(), source))?;
+    }
+    Ok(())
 }
 
 /// Container of a definition's network while building it.

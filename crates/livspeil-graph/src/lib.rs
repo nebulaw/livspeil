@@ -140,6 +140,7 @@
 mod charm_defs;
 mod cook;
 mod graph;
+mod layout;
 mod network;
 mod rewire;
 mod snapshot;

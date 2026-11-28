@@ -48,11 +48,13 @@ fn check(name: &str, graph: &Graph, doc: &Document) {
 
 #[test]
 fn sun_and_lamp_document() {
-    let graph = sun_and_lamp();
+    let mut graph = sun_and_lamp();
+    for (name, position) in [("sun", [120.0, 40.0]), ("lamp", [360.0, 40.0])] {
+        let node = graph.find(name).unwrap();
+        graph.set_position(node, Some(position)).unwrap();
+    }
     let mut doc = Document::from_graph(&graph, "Sun and Lamp").unwrap();
     doc.min_tier = Tier(1);
-    doc.meta.positions.insert("sun".into(), [120.0, 40.0]);
-    doc.meta.positions.insert("lamp".into(), [360.0, 40.0]);
     check("sun_and_lamp", &graph, &doc);
 }
 
