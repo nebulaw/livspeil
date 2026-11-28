@@ -8,6 +8,7 @@ SPDX-License-Identifier: CC-BY-4.0
 Status: living doc. Rev 16 (2026-11-29). This repository copy is the source of truth. Details live in the specs:
 - `livspeil-kernel-spec-v0.md` (kernel as built, v0.3)
 - `livspeil-dream-spec-v0.md` (Dream Mode app, first slice)
+- `livspeil-viewport-spec-v0.md` (3D viewport; proposed)
 - `livspeil-ui-spec-v0.md` (UI toolkit and design system; formerly `livkit-spec-v0.md`; section 12 option (b), scripted Charm views, is deferred by D38)
 - `repo-conventions-and-licensing.md` (repo layout, CI, agent workflow)
 - `licensing-and-contributions.md` (complete license and CLA summary, Rev 2; DCO dropped by D42; not in this repository, see `docs/licensing.md`)
@@ -159,7 +160,7 @@ All `crates/livspeil-ui-*` are MPL-2.0 and testable headlessly (CPU reference ra
 ## Roadmap
 - P0 Foundations: done.
 - P1 Livspeil UI + gallery (Linux and macOS): frame pipeline P3 and P5 postponed (D67). At 2000 nodes a frame costs 0.6–0.9 ms of CPU except with the whole graph in view (1.5 ms). Then: damage tracking and blur caching (after the iGPU measurement), node delete/unlink/keyboard navigation, screen-reader verification on Linux (Orca) and macOS (VoiceOver), real-window check on macOS. Visual design polish comes late (D66).
-- P2 Dream Mode app, **current focus**. Built (`specs/livspeil-dream-spec-v0.md`, DM1–DM4): node editor and inspector on the real kernel graph, building rooms, saving and opening them. Next: the 3D viewport (Bevy), to be specified. Then entering subnets and making Charms, dashed `ch()`/`out()` wires, timeline, glTF import, lighting; Black Room.
+- P2 Dream Mode app, **current focus**. Built (`specs/livspeil-dream-spec-v0.md`, DM1–DM4): node editor and inspector on the real kernel graph, building rooms, saving and opening them. Next: the 3D viewport (Bevy), proposed in `specs/livspeil-viewport-spec-v0.md`. Then entering subnets and making Charms, dashed `ch()`/`out()` wires, timeline, glTF import, lighting; Black Room.
 - P3 Linux OS pieces: Floor spike and build (a daily replacement for Hyprland, D68), layer-shell host for Livspeil UI, world protocol, tokens, blur, titlebars, menubar.
 - P4 Integration, tiers, calm governor, Safe scene; Room publishing and license checks.
 - P5 The Room in Dream Mode; ISO, installer, updates; Charm/Room store (free licenses only).
@@ -186,7 +187,8 @@ All `crates/livspeil-ui-*` are MPL-2.0 and testable headlessly (CPU reference ra
 18. Upstream Taffy 0.16 bugs worked around locally; re-check on each Taffy upgrade and report upstream.
 19. Usage limits interrupt parallel agents; mitigated by small tracks, resuming agents, and committing early.
 
-## Open questions, round 15
+## Open questions, round 16
+0. The 3D viewport: the five points in section 9 of `specs/livspeil-viewport-spec-v0.md`.
 1. What must the Floor do before it can replace Hyprland (D68)? To be specified when it starts. A first list: native and XWayland apps (terminal, browser, editor), keyboard layouts and shortcuts, multiple monitors at their refresh rate, NVIDIA, clipboard, screen lock, screenshots and screen sharing, notifications, and always a way back to Hyprland. Its TTY build has never set a display mode.
 2. When is the Intel iGPU laptop measured? P3, P5 and the iGPU budget wait for it.
 3. When is the screen-reader pass (Orca, VoiceOver)? Accessibility is built and has never been heard.

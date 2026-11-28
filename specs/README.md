@@ -4,6 +4,9 @@ Design specs for Livspeil:
 
 - [`livspeil-kernel-spec-v0.md`](livspeil-kernel-spec-v0.md) (Phase 0 kernel; this repo implements it)
 - [`livspeil-ui-spec-v0.md`](livspeil-ui-spec-v0.md) (Livspeil UI toolkit and design system, Phase 1; formerly Livkit)
+- [`livspeil-ui-frame-pipeline.md`](livspeil-ui-frame-pipeline.md) (retained frame pipeline, D65)
+- [`livspeil-dream-spec-v0.md`](livspeil-dream-spec-v0.md) (Dream Mode app, first slice)
+- [`livspeil-viewport-spec-v0.md`](livspeil-viewport-spec-v0.md) (3D viewport in Dream Mode; proposed)
 
 Project documents live in `docs/`:
 
