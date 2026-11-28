@@ -91,12 +91,9 @@ fn main() -> ExitCode {
     renderer.install_measurer(&mut app);
     let env = Env::new(&mut app, FontSystem::new());
     WidgetClipboard::install_system(&env);
-    let mut keymap = app.keymap().clone();
-    keymap.extend(&livspeil_ui_widgets::keymap());
-    app.set_keymap(keymap);
     let mounted = app::mount(&mut app, &env, session);
     if args.play {
-        app::set_playing(mounted.session, &mut app, true);
+        app::set_playing(mounted.editor, &mut app, true);
     }
     let focus = env.clone();
     let options = HostOptions::default()
@@ -104,7 +101,8 @@ fn main() -> ExitCode {
         .size(1280.0, 800.0)
         .min_size(800.0, 500.0)
         // Accessibility actions can move focus: let text fields know.
-        .after_accessibility_action(move |app| focus.sync_focus(app));
+        .after_accessibility_action(move |app| focus.sync_focus(app))
+        .on_close_requested(move |app| mounted.may_close(app));
     match run(app, renderer, options) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {

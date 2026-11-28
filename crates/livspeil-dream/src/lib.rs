@@ -17,6 +17,7 @@
 pub mod app;
 pub mod arrange;
 pub mod canvas;
+pub mod edit;
 pub mod inspect;
 pub mod session;
 pub mod shown;
