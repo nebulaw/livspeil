@@ -107,7 +107,7 @@ pub use node_canvas::{
     rect_from, rubber_select,
 };
 pub use number_field::{NumberField, Scrub, scrub_precision};
-pub use picker::{Picker, PickerItem, search as search_items};
+pub use picker::{Picker, PickerItem, search as search_items, searching};
 pub use popover::{POPOVER_GAP, POPOVER_MARGIN, Placement, Popover, place_popover};
 pub use scroll::{
     OVERSCAN, SCROLL_SCOPE, ScrollAxis, ScrollContent, ScrollInfo, ScrollPhysics, ScrollView,

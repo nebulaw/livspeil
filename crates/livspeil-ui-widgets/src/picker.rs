@@ -84,30 +84,47 @@ pub fn search(items: &[PickerItem], query: &str) -> Vec<usize> {
     found.into_iter().map(|(_, i)| i).collect()
 }
 
-type PickFn = Rc<dyn Fn(usize, &mut App)>;
+/// A source offering those of `items` that [`search`] finds.
+pub fn searching(items: Vec<PickerItem>) -> impl Fn(&str) -> Vec<PickerItem> {
+    move |query| {
+        search(&items, query)
+            .into_iter()
+            .filter_map(|i| items.get(i).cloned())
+            .collect()
+    }
+}
+
+type SourceFn = Rc<dyn Fn(&str) -> Vec<PickerItem>>;
+type PickFn = Rc<dyn Fn(&PickerItem, &mut App)>;
 
 struct State {
+    source: SourceFn,
     on_pick: PickFn,
-    items: Rc<[PickerItem]>,
-    matches: Vec<usize>,
+    /// What the source offers for the query.
+    matches: Vec<PickerItem>,
     /// Index into `matches`.
     highlight: usize,
+    /// Shown when there is no match.
+    nothing: SharedString,
 }
 
 impl State {
     fn filter(&mut self, query: &str) {
-        self.matches = search(&self.items, query);
+        self.matches = (self.source)(query);
         self.highlight = 0;
     }
 }
 
-/// A modal list narrowed by typing: a query field over the items it finds.
+/// A modal list narrowed by typing: a query field over what its source
+/// offers for it.
 ///
 /// - Opens as a [`Dialog`] with the keyboard in the query field.
 /// - Up/Down and Page Up/Down move the highlight, Enter or a click chooses
 ///   it, Escape closes. Choosing closes the picker, returns focus to what
-///   had it, then calls the callback with the item's index.
-/// - See [`search`] for what a query finds.
+///   had it, then calls the callback with the item.
+/// - The source is asked again at every change of the query and every time
+///   the picker opens, in the order the items are shown. [`searching`] is
+///   the source of a fixed list.
 ///
 /// The query field is named `<name>-query` and rows `<name>:<label>`.
 #[derive(Debug, Clone, Copy)]
@@ -145,23 +162,22 @@ struct Rows {
 }
 
 impl Picker {
-    /// A picker titled `title` over `items`; `on_pick` gets the index of the
-    /// chosen one. `name` prefixes its element names.
+    /// A picker titled `title` over what `source` offers; `on_pick` gets the
+    /// chosen item. `name` prefixes its element names.
     pub fn new(
         app: &mut App,
         env: &Env,
         name: &'static str,
         title: impl Into<SharedString>,
-        items: Vec<PickerItem>,
-        on_pick: impl Fn(usize, &mut App) + 'static,
+        source: impl Fn(&str) -> Vec<PickerItem> + 'static,
+        on_pick: impl Fn(&PickerItem, &mut App) + 'static,
     ) -> Picker {
-        let items: Rc<[PickerItem]> = items.into();
-        let matches = search(&items, "");
         let state = app.new_model(State {
+            source: Rc::new(source),
             on_pick: Rc::new(on_pick),
-            items,
-            matches,
+            matches: Vec::new(),
             highlight: 0,
+            nothing: "Nothing matches".into(),
         });
         let list = app.new_view(
             ScrollView::new(env, |_, _| div())
@@ -212,6 +228,25 @@ impl Picker {
         picker
     }
 
+    /// What the empty query field says, and what the list says when there
+    /// is nothing in it.
+    pub fn set_hints(
+        self,
+        app: &mut App,
+        placeholder: impl Into<SharedString>,
+        nothing: impl Into<SharedString>,
+    ) {
+        let (placeholder, nothing) = (placeholder.into(), nothing.into());
+        self.field.update(app, |f, cx| {
+            f.set_placeholder(placeholder);
+            cx.notify();
+        });
+        self.parts.state.update(app, |s, cx| {
+            s.nothing = nothing;
+            cx.notify();
+        });
+    }
+
     /// Open with an empty query and the keyboard in it.
     pub fn open(self, app: &mut App) {
         self.field.update(app, |f, cx| {
@@ -251,12 +286,12 @@ impl Parts {
             return;
         }
         let state = self.state.read(app);
-        let Some(&item) = state.matches.get(at) else {
+        let Some(item) = state.matches.get(at).cloned() else {
             return;
         };
         let on_pick = state.on_pick.clone();
         Dialog::close(self.dialog, app);
-        on_pick(item, app);
+        on_pick(&item, app);
     }
 
     fn step(self, app: &mut App, by: isize) {
@@ -327,17 +362,14 @@ impl Render for Rows {
         let mut rows = div().key("rows").flex_col().w_full();
         if state.matches.is_empty() {
             return rows.child(
-                text("Nothing matches")
+                text(state.nothing.clone())
                     .key("none")
                     .name(format!("{}-none", picker.name))
                     .font_size(font)
                     .text_color(colors.text_secondary),
             );
         }
-        for (at, &i) in state.matches.iter().enumerate() {
-            let Some(item) = state.items.get(i) else {
-                continue;
-            };
+        for (at, item) in state.matches.iter().enumerate() {
             let lit = at == state.highlight;
             let line = |content: SharedString, key: &str, size: f32, color| {
                 text(content)
@@ -347,7 +379,7 @@ impl Render for Rows {
                     .hit_test(false)
             };
             let mut row = div()
-                .key(format!("item-{i}"))
+                .key(format!("item-{at}"))
                 .name(format!("{}:{}", picker.name, item.label))
                 .w_full()
                 .h(ROW)

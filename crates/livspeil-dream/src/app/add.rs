@@ -6,7 +6,9 @@
 
 use livspeil_ui_core::{App, Model, View};
 use livspeil_ui_layout::{Point, Vec2};
-use livspeil_ui_widgets::{Env, NODE_WIDTH, NodeCanvas, NodeGraphModel, Picker, PickerItem};
+use livspeil_ui_widgets::{
+    Env, NODE_WIDTH, NodeCanvas, NodeGraphModel, Picker, PickerItem, searching,
+};
 
 use super::{change, focus_canvas};
 use crate::canvas::Editor;
@@ -40,8 +42,10 @@ pub(super) fn picker(
         .map(|t| PickerItem::new(t.label.clone(), t.summary))
         .collect();
     let env_of = env.clone();
-    Picker::new(app, env, "add", "Add a node", items, move |i, app| {
-        if let Some(chosen) = types.get(i) {
+    let source = searching(items);
+    Picker::new(app, env, "add", "Add a node", source, move |item, app| {
+        // Labels are unique among the types.
+        if let Some(chosen) = types.iter().find(|t| t.label == *item.label) {
             add(&env_of, editor, canvas, app, &chosen.id);
         }
     })

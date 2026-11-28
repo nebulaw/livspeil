@@ -290,6 +290,10 @@ cargo run --release -p livspeil-dream -- examples/sun-and-lamp.room
 cargo run --release -p livspeil-dream          # a new, empty room
 ```
 
+Rooms are kept in `~/Livspeil` (set `LIVSPEIL_ROOMS` to move it): **Open**
+(Ctrl+O) lists them and also takes a typed path, and "save as" puts a name
+given alone there.
+
 Press **Play**, select a node (`lamp_color` shows its color change through a
 simulated day), pan with middle drag or two fingers and zoom with Ctrl+scroll.
 `--select=NAME` and `--play` start that way.
@@ -301,7 +305,7 @@ a linked input to remove its link), and in the inspector: type a value,
 Ctrl+Shift+Z undo and redo. Ctrl+S saves into the room file, Ctrl+Shift+S
 saves as a new room folder, Ctrl+N starts a new room
 (`specs/livspeil-dream-spec-v0.md`). Work on a copy of an example, or save it
-under another name first.
+under another name first (Ctrl+Shift+S).
 
 ## Try the gallery
 

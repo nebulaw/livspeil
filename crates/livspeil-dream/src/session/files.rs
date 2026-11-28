@@ -46,26 +46,14 @@ fn replace(path: &Path, text: &str) -> io::Result<()> {
     result
 }
 
-/// The package directory a typed path names: `~` is the home directory, and
-/// `.room` is added if it is not there.
-fn destination(typed: &str) -> Result<PathBuf, String> {
-    let typed = typed.trim();
-    if typed.is_empty() {
-        return Err("type where to save the room".to_owned());
-    }
-    let home = || std::env::var_os("HOME").map(PathBuf::from);
-    let path = match typed.strip_prefix('~') {
-        Some("") => home().ok_or("no home directory")?,
-        Some(rest) if rest.starts_with('/') => home()
-            .ok_or("no home directory")?
-            .join(rest.trim_start_matches('/')),
-        _ => PathBuf::from(typed),
-    };
+/// `path` as the package directory it names: `.room` is added if it is not
+/// there.
+fn package(path: &Path) -> Result<PathBuf, String> {
     let Some(name) = path.file_name() else {
-        return Err(format!("{typed} does not name a room"));
+        return Err(format!("{} does not name a room", path.display()));
     };
     if path.extension().is_some_and(|e| e == PACKAGE_EXTENSION) {
-        return Ok(path);
+        return Ok(path.to_path_buf());
     }
     let mut name = name.to_owned();
     name.push(".");
@@ -147,16 +135,16 @@ impl Session {
         Ok(())
     }
 
-    /// Save the room as a new package at the path typed, which the room is
-    /// saved to from then on. What the room reads beside it comes along. A
+    /// Save the room as a new package at `path` (`.room` is added to it if
+    /// missing), which the room is saved to from then on. What the room reads beside it comes along. A
     /// room that never had a file takes the package's name.
     ///
     /// # Errors
     /// When something else is already there, or it cannot be written. The
     /// room then keeps its file.
-    pub fn save_as(&mut self, typed: &str) -> Result<(), String> {
+    pub fn save_as(&mut self, path: &Path) -> Result<(), String> {
         self.end_gesture();
-        let dest = destination(typed)?;
+        let dest = package(path)?;
         if self.path().is_some_and(|file| is_room_of(file, &dest)) {
             return self.save();
         }

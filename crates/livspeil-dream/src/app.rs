@@ -7,6 +7,10 @@
 mod add;
 mod files;
 mod inspector;
+mod open;
+
+use std::cell::RefCell;
+use std::path::PathBuf;
 
 use livspeil_ui_core::{
     App, Element, Keymap, Keystroke, Model, Render, View, ViewContext, div, text,
@@ -24,6 +28,7 @@ pub const INSPECTOR_WIDTH: f32 = 340.0;
 const TOOLBAR_HEIGHT: f32 = 44.0;
 const ADD: &str = "dream.add";
 const NEW: &str = "dream.new";
+const OPEN: &str = "dream.open";
 const SAVE: &str = "dream.save";
 const SAVE_AS: &str = "dream.save_as";
 const UNDO: &str = "edit.undo";
@@ -64,6 +69,8 @@ pub fn keymap() -> Keymap {
     for (keys, action) in [
         ("ctrl-n", NEW),
         ("cmd-n", NEW),
+        ("ctrl-o", OPEN),
+        ("cmd-o", OPEN),
         ("ctrl-s", SAVE),
         ("cmd-s", SAVE),
         ("ctrl-shift-s", SAVE_AS),
@@ -130,6 +137,7 @@ pub fn set_playing(editor: Model<Editor>, app: &mut App, playing: bool) {
 struct Toolbar {
     editor: Model<Editor>,
     picker: Picker,
+    rooms: Picker,
     files: Files,
 }
 
@@ -137,6 +145,7 @@ impl Render for Toolbar {
     fn render(&mut self, cx: &mut ViewContext<'_, Self>) -> Element {
         let theme = cx.theme().clone();
         let (editor, picker, files) = (self.editor, self.picker, self.files);
+        let rooms = self.rooms;
         let session = editor.read(cx).session();
         let has_file = session.path().is_some();
         let (playing, frame, time) = (session.playing(), session.frame(), session.time());
@@ -190,7 +199,17 @@ impl Render for Toolbar {
                     .key("add"),
             )
             .child(div().key("space").grow())
-            .child(muted(name, "room"))
+            // The first to give up room in a narrow window.
+            .child(
+                div()
+                    .key("name")
+                    .clip()
+                    .style(|s| {
+                        s.flex_shrink = 1.0;
+                        s.min_size.width = LengthPercentageAuto::length(0.0);
+                    })
+                    .child(muted(name, "room").h(16.0)),
+            )
             .child(
                 button("Undo")
                     .disabled(!can_undo)
@@ -212,6 +231,12 @@ impl Render for Toolbar {
                     .key("new"),
             )
             .child(
+                button("Open")
+                    .on_click(move |_, cx| rooms.open(cx))
+                    .render(&theme)
+                    .key("open"),
+            )
+            .child(
                 button("Save")
                     .disabled(!dirty && has_file)
                     .on_click(move |_, cx| files.save(cx, Then::Stay))
@@ -230,6 +255,7 @@ impl Render for Toolbar {
 struct Window {
     editor: Model<Editor>,
     picker: Picker,
+    rooms: Picker,
     files: Files,
     toolbar: View<Toolbar>,
     canvas: View<NodeCanvas<Editor>>,
@@ -240,6 +266,7 @@ impl Render for Window {
     fn render(&mut self, cx: &mut ViewContext<'_, Self>) -> Element {
         let colors = cx.theme().colors();
         let (editor, picker, files) = (self.editor, self.picker, self.files);
+        let rooms = self.rooms;
         div()
             .name("dream")
             .w_full()
@@ -252,6 +279,7 @@ impl Render for Window {
             .on_action(REDO, move |cx| redo(editor, cx))
             .on_action(ADD, move |cx| picker.open(cx))
             .on_action(NEW, move |cx| files.new_room(cx))
+            .on_action(OPEN, move |cx| rooms.open(cx))
             .on_action(SAVE, move |cx| files.save(cx, Then::Stay))
             .on_action(SAVE_AS, move |cx| files.save_as(cx))
             .child(Element::view(&self.toolbar).key("toolbar"))
@@ -285,9 +313,15 @@ impl Render for Window {
     }
 }
 
+/// The window's title for the room called `name`.
+#[must_use]
+pub fn title(name: &str) -> String {
+    format!("{name} — Livspeil Dream")
+}
+
 /// Build the window over `session`, make it the app's root and install the
-/// shortcuts.
-pub fn mount(app: &mut App, env: &Env, session: Session) -> Mounted {
+/// shortcuts. `folder` is where rooms are kept ([`crate::rooms::home`]).
+pub fn mount(app: &mut App, env: &Env, session: Session, folder: PathBuf) -> Mounted {
     let mut bound = app.keymap().clone();
     bound.extend(&livspeil_ui_widgets::keymap());
     bound.extend(&keymap());
@@ -318,11 +352,26 @@ pub fn mount(app: &mut App, env: &Env, session: Session) -> Mounted {
         });
     });
 
+    // Paths are made from it and read back: a relative one would be applied
+    // twice.
+    let folder = std::path::absolute(&folder).unwrap_or(folder);
     let picker = add::picker(app, env, editor, canvas);
-    let files = Files::new(app, env, editor, canvas);
+    let files = Files::new(app, env, editor, canvas, folder.clone());
+    let rooms = open::picker(app, env, files, folder);
+    // The window is called after the room that is open.
+    let titled = RefCell::new(editor.read(app).session().name().to_owned());
+    let _ = app.observe(editor.id(), move |app| {
+        let name = editor.read(app).session().name();
+        if *titled.borrow() != name {
+            name.clone_into(&mut titled.borrow_mut());
+            let title = title(name);
+            app.set_window_title(title);
+        }
+    });
     let toolbar = app.new_view(Toolbar {
         editor,
         picker,
+        rooms,
         files,
     });
     let inspected = app.new_view(Inspector::new(env, editor));
@@ -335,6 +384,7 @@ pub fn mount(app: &mut App, env: &Env, session: Session) -> Mounted {
     let window = app.new_view(Window {
         editor,
         picker,
+        rooms,
         files,
         toolbar,
         canvas,

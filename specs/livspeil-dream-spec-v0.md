@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-4.0
 # Livspeil Dream Mode app, first slice (v0)
 
 Status: **accepted** (2026-11-28, D69). The kernel's position commands
-(section 3), DM1, DM2 and DM3 are built. Roadmap P2; D18
+(section 3), DM1 to DM4 are built. Roadmap P2; D18
 (Dream Mode first as an app), D66 (experience before polish).
 
 ## 1. What it is for
@@ -89,12 +89,27 @@ Built; a test rebuilds it through the window.
   `assets/` and `assets.lock`). A room that had no file takes the folder's
   name.
 
+### DM4: keep and open rooms
+
+- Rooms are kept in `~/Livspeil` (`$LIVSPEIL_ROOMS` moves it; D70). The
+  folder is made when a room is first saved into it.
+- **Save as** suggests a free name there; a name alone, or a relative path,
+  goes there too.
+- **Open** (button, Ctrl+O): the rooms of that folder, narrowed by typing.
+  A typed path (with `/`, or starting `~` or `.`) lists the rooms of that
+  folder, or the room or room file it names. Unsaved changes are asked
+  about first; a room that cannot be read leaves the open one as it is.
+- The window is titled after the open room.
+
+Built. Rooms named on the command line are still relative to where the app
+was started.
+
 ### Not in these slices
 
 Entering subnets and making Charms; the 3D viewport (Bevy); timeline and
 animation editing; assets; scripts and WASM packages; dashed `ch()`/`out()`
-wires; a file chooser (rooms are named on the command line, "save as" takes a
-typed path); visual polish (D66).
+wires; a file chooser that browses folders, or a list of recent rooms; visual
+polish (D66).
 
 ## 3. Design
 

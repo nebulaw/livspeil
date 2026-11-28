@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-4.0
 
 # Livspeil: Vision, Decisions, Roadmap (hub)
 
-Status: living doc. Rev 15 (2026-11-28). This repository copy is the source of truth. Details live in the specs:
+Status: living doc. Rev 16 (2026-11-29). This repository copy is the source of truth. Details live in the specs:
 - `livspeil-kernel-spec-v0.md` (kernel as built, v0.3)
 - `livspeil-dream-spec-v0.md` (Dream Mode app, first slice)
 - `livspeil-ui-spec-v0.md` (UI toolkit and design system; formerly `livkit-spec-v0.md`; section 12 option (b), scripted Charm views, is deferred by D38)
@@ -108,6 +108,7 @@ Round 15 (2026-11-28)
 - D67 Frame pipeline P3 is recorded and postponed; it is looked at again with P5, once the Intel iGPU laptop is measured. Next is the Dream Mode app (`specs/livspeil-dream-spec-v0.md`).
 - D68 When the Floor is built, it has to be good enough to replace Hyprland: the owner will run it instead and keep working from it.
 - D69 The Dream Mode first slice is accepted. Node positions are kernel data edited by commands (undo, journal), not app state. Live values appear in the inspector only; the app is `livspeil-dream`.
+- D70 Rooms are kept in `~/Livspeil` by default (`LIVSPEIL_ROOMS` moves it).
 
 ## Architecture overview
 - **Floor**: Smithay compositor (windows, input, outputs, XWayland, layer-shell, titlebars, shadows, rounded masks, blur, window tokens).
@@ -158,7 +159,7 @@ All `crates/livspeil-ui-*` are MPL-2.0 and testable headlessly (CPU reference ra
 ## Roadmap
 - P0 Foundations: done.
 - P1 Livspeil UI + gallery (Linux and macOS): frame pipeline P3 and P5 postponed (D67). At 2000 nodes a frame costs 0.6–0.9 ms of CPU except with the whole graph in view (1.5 ms). Then: damage tracking and blur caching (after the iGPU measurement), node delete/unlink/keyboard navigation, screen-reader verification on Linux (Orca) and macOS (VoiceOver), real-window check on macOS. Visual design polish comes late (D66).
-- P2 Dream Mode app, **current focus** (first slice in `specs/livspeil-dream-spec-v0.md`): Bevy viewport host for Livspeil UI, inspector, node editor on the real kernel graph (incl. dashed `ch()`/`out()` wires), timeline, glTF import, lighting; Black Room.
+- P2 Dream Mode app, **current focus**. Built (`specs/livspeil-dream-spec-v0.md`, DM1–DM4): node editor and inspector on the real kernel graph, building rooms, saving and opening them. Next: the 3D viewport (Bevy), to be specified. Then entering subnets and making Charms, dashed `ch()`/`out()` wires, timeline, glTF import, lighting; Black Room.
 - P3 Linux OS pieces: Floor spike and build (a daily replacement for Hyprland, D68), layer-shell host for Livspeil UI, world protocol, tokens, blur, titlebars, menubar.
 - P4 Integration, tiers, calm governor, Safe scene; Room publishing and license checks.
 - P5 The Room in Dream Mode; ISO, installer, updates; Charm/Room store (free licenses only).

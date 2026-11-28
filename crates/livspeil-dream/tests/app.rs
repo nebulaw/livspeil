@@ -5,6 +5,7 @@
 //! `UPDATE_GOLDEN=1` accepts new screenshots; look at them.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use livspeil_dream::app::{Mounted, mount};
 use livspeil_dream::session::Session;
@@ -18,8 +19,12 @@ use livspeil_ui_text::FontSystem;
 use livspeil_ui_widgets::Env;
 
 const SIZE: Size = Size::new(1280.0, 720.0);
+/// Numbers the rooms folders of the windows.
+static FOLDERS: AtomicUsize = AtomicUsize::new(0);
 
 struct Fx {
+    /// The rooms folder of this window.
+    rooms: Dir,
     h: TestHost,
     bridge: PaintBridge,
     /// The bridge sends each glyph once: keep what it sent.
@@ -174,10 +179,15 @@ fn mounted(session: Session) -> Fx {
     let mut app = App::new();
     app.set_text_measurer(bridge.text.measurer());
     let env = Env::new(&mut app, FontSystem::test());
-    let m = mount(&mut app, &env, session);
+    let rooms = Dir::new(&format!(
+        "rooms-{}",
+        FOLDERS.fetch_add(1, Ordering::Relaxed)
+    ));
+    let m = mount(&mut app, &env, session, rooms.0.clone());
     let mut h = TestHost::new(app, SIZE);
     h.run_until_idle(200);
     Fx {
+        rooms,
         h,
         bridge,
         atlases: AtlasStore::new(),
@@ -716,4 +726,74 @@ fn closing_a_room_without_a_file_asks_where_to_save_it() {
     f.shortcut("enter");
     assert_eq!(f.h.app.take_window_requests(), [WindowRequest::Close]);
     assert!(dir.0.join("kept.room/room.kdl").is_file());
+}
+
+#[test]
+fn rooms_are_opened_from_the_list_and_by_path() {
+    let mut f = untitled();
+    let folder = f.rooms.0.clone();
+    // An empty folder says where rooms are looked for.
+    f.shortcut("ctrl-o");
+    assert!(f.text().contains("No room."), "{}", f.text());
+    f.shortcut("escape");
+
+    // A name alone saves into the rooms folder, made if it is not there.
+    std::fs::remove_dir_all(&folder).unwrap();
+    f.add("time.clock");
+    f.shortcut("ctrl-s");
+    f.type_into("save-as-path", "morning");
+    f.shortcut("enter");
+    assert!(
+        folder.join("morning.room/room.kdl").is_file(),
+        "{}",
+        f.text()
+    );
+    assert_eq!(
+        f.h.app.take_window_title().as_deref(),
+        Some("morning — Livspeil Dream")
+    );
+
+    f.shortcut("ctrl-n");
+    assert_eq!(
+        f.h.app.take_window_title().as_deref(),
+        Some("Untitled — Livspeil Dream")
+    );
+    f.add("math.add");
+    // Opening another asks about the unsaved one first.
+    f.click("button:Open");
+    f.h.type_text("morn");
+    f.h.run_until_idle(200);
+    f.shortcut("enter");
+    f.find("dialog");
+    f.click("button:Cancel");
+    assert!(f.session().find("add").is_some());
+    f.shortcut("ctrl-o");
+    f.shortcut("enter");
+    f.click("button:Discard");
+    assert_eq!(f.session().name(), "morning");
+    assert!(f.session().find("clock").is_some() && f.session().find("add").is_none());
+    assert!(!f.session().dirty());
+    assert!(f.h.app.find("node:clock").is_some(), "{}", f.text());
+    assert_eq!(
+        f.h.app.take_window_title().as_deref(),
+        Some("morning — Livspeil Dream")
+    );
+
+    // A typed path opens a room outside the folder.
+    let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    f.shortcut("ctrl-o");
+    f.h.type_text(&format!("{}/charm", examples.display()));
+    f.h.run_until_idle(200);
+    f.shortcut("enter");
+    assert_eq!(
+        f.session().path(),
+        Some(examples.join("charm-demo.room/room.kdl").as_path())
+    );
+
+    // One that cannot be read says why and leaves the room open.
+    std::fs::write(folder.join("morning.room/room.kdl"), "not a room").unwrap();
+    f.shortcut("ctrl-o");
+    f.shortcut("enter");
+    assert!(f.text().contains("room.kdl"), "{}", f.text());
+    assert!(f.session().path().unwrap().starts_with(&examples));
 }
