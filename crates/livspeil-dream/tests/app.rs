@@ -320,6 +320,7 @@ fn the_canvas_moves_connects_and_disconnects() {
     f.drag(grab, Point::new(grab.x, grab.y - 60.0));
     let moved = f.session().graph().position(sun).unwrap();
     assert!(moved[1] < before[1] - 20.0, "{before:?} {moved:?}");
+    assert_eq!(moved.map(f64::fract), [0.0; 2], "{moved:?}");
     f.shortcut("ctrl-z");
     assert_eq!(f.session().graph().position(sun), Some(before), "one step");
 

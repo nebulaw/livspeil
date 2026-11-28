@@ -250,6 +250,9 @@ impl NodeGraphModel for Editor {
         let Some(card) = self.cards.get_mut(i) else {
             return;
         };
+        // Cards are drawn on whole units; a room should not carry the
+        // pointer's fractions.
+        let position = Point::new(position.x.round(), position.y.round());
         if card.position == position {
             return;
         }
