@@ -188,6 +188,12 @@ impl Dialog {
         self
     }
 
+    /// [`Dialog::content`] for a dialog already made, when the content
+    /// needs the dialog's handle.
+    pub fn set_content(&mut self, height: f32, f: impl Fn(&App) -> Element + 'static) {
+        self.content = Some((height, Rc::new(f)));
+    }
+
     /// Add a button (shown left to right, so the default goes last).
     #[must_use]
     pub fn button(mut self, b: DialogButton) -> Self {

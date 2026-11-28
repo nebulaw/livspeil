@@ -1,0 +1,33 @@
+quad dialog-scrim 0,0 640x520 fill=oklch(0 0 0 / 0.45)
+quad dialog 90,29 460x463 r=14 fill=oklch(0.19 0 0 / 1) border=1 oklch(1 0 0 / 0.06) shadow=E4
+text dialog-title 106,45 428x19 "Choose" size=15 weight=600 color=oklch(0.97 0 0 / 0.92)
+quad pick-query 106,76 428x32 r=6 fill=oklch(0.15 0 0 / 1) border=1 oklch(0.68 0.16 255 / 1)
+clip 106,76 428x32 r=6
+  text text 118,84 31x16 "item1" size=13 color=oklch(0.97 0 0 / 0.92)
+  quad caret 149,84 1x16 fill=oklch(0.68 0.16 255 / 1)
+pop
+clip 106,116 428x360 r=0
+  text label 114,119 412x17 "item1" size=13 color=oklch(0.97 0 0 / 0.92)
+  text detail 114,136 412x14 "number 1" size=11 color=oklch(0.97 0 0 / 0.62)
+  quad pick:item10 106,156 428x40 r=6 fill=oklch(0.25 0 0 / 1)
+  text label 114,159 412x17 "item10" size=13 color=oklch(0.97 0 0 / 0.92)
+  text detail 114,176 412x14 "number 10" size=11 color=oklch(0.97 0 0 / 0.62)
+  text label 114,199 412x17 "item11" size=13 color=oklch(0.97 0 0 / 0.92)
+  text detail 114,216 412x14 "number 11" size=11 color=oklch(0.97 0 0 / 0.62)
+  text label 114,239 412x17 "item12" size=13 color=oklch(0.97 0 0 / 0.92)
+  text detail 114,256 412x14 "number 12" size=11 color=oklch(0.97 0 0 / 0.62)
+  text label 114,279 412x17 "item13" size=13 color=oklch(0.97 0 0 / 0.92)
+  text detail 114,296 412x14 "number 13" size=11 color=oklch(0.97 0 0 / 0.62)
+  text label 114,319 412x17 "item14" size=13 color=oklch(0.97 0 0 / 0.92)
+  text detail 114,336 412x14 "number 14" size=11 color=oklch(0.97 0 0 / 0.62)
+  text label 114,359 412x17 "item15" size=13 color=oklch(0.97 0 0 / 0.92)
+  text detail 114,376 412x14 "number 15" size=11 color=oklch(0.97 0 0 / 0.62)
+  text label 114,399 412x17 "item16" size=13 color=oklch(0.97 0 0 / 0.92)
+  text detail 114,416 412x14 "number 16" size=11 color=oklch(0.97 0 0 / 0.62)
+  text label 114,439 412x17 "item17" size=13 color=oklch(0.97 0 0 / 0.92)
+  text detail 114,456 412x14 "number 17" size=11 color=oklch(0.97 0 0 / 0.62)
+  text label 114,479 412x17 "item18" size=13 color=oklch(0.97 0 0 / 0.92)
+  text detail 114,496 412x14 "number 18" size=11 color=oklch(0.97 0 0 / 0.62)
+  text label 114,519 412x17 "item19" size=13 color=oklch(0.97 0 0 / 0.92)
+  text detail 114,536 412x14 "number 19" size=11 color=oklch(0.97 0 0 / 0.62)
+pop

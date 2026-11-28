@@ -319,17 +319,17 @@ impl Render for TextField {
                 if let Some(cb) = cb {
                     cb(&text, cx);
                 }
-            })
-            .on_action(core::CANCEL, move |cx| {
+            });
+        // Escape drops a composition; otherwise it is for what surrounds
+        // the field, such as the dialog it is in.
+        if self.tb.editor.is_composing() {
+            el = el.on_action(core::CANCEL, move |cx| {
                 edit(view, cx, |tf, _| {
-                    if tf.tb.editor.is_composing() {
-                        tf.tb.editor.cancel_preedit();
-                        Outcome::Moved
-                    } else {
-                        Outcome::Ignored
-                    }
+                    tf.tb.editor.cancel_preedit();
+                    Outcome::Moved
                 });
             });
+        }
         for &a in TEXT_ACTIONS {
             el = el.on_action(a, move |cx| {
                 let env = view.read(cx).env.clone();

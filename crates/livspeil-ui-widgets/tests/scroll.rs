@@ -9,9 +9,10 @@ use std::time::Duration;
 
 use common::{find, host_sized, pointer, wait};
 use livspeil_ui_core::{
-    InputEvent, Modifiers, PointerKind, ScrollDelta, SemanticRequest, TestHost, View, div, text,
+    Element, InputEvent, Modifiers, PointerKind, Render, ScrollDelta, SemanticRequest, TestHost,
+    View, ViewContext, div, text,
 };
-use livspeil_ui_layout::{Point, Size, Vec2};
+use livspeil_ui_layout::{Point, Rect, Size, Vec2};
 use livspeil_ui_theme::{MotionClass, MotionConfig, MotionSpec, PropertyKind, SpringSpec};
 use livspeil_ui_widgets::{
     Button, ScrollAxis, ScrollPhysics, ScrollView, Scroller, VirtualList, rubber_band,
@@ -362,4 +363,36 @@ fn slow_pulls_below_the_limit_are_unchanged() {
     flick(&mut s, &p, 20.0, 5, 0); // 100 px: below the 120 px limit
     assert!(s.is_tracking());
     assert!((s.offset().y - rubber_band(-100.0, 200.0, 0.55)).abs() < 1e-3);
+}
+
+/// Ten rows of 40 px, rendered by a view of their own.
+struct Rows;
+
+impl Render for Rows {
+    fn render(&mut self, _cx: &mut ViewContext<'_, Self>) -> Element {
+        let mut rows = div().flex_col().w_full().h(400.0);
+        for i in 0..10 {
+            rows = rows.child(div().key(format!("r{i}")).name(format!("r{i}")).h(40.0));
+        }
+        rows
+    }
+}
+
+#[test]
+fn content_that_is_a_view_scrolls_like_any_other() {
+    let mut out = None;
+    let (mut h, _) = host_sized(Size::new(200.0, 100.0), |app, env| {
+        let rows = app.new_view(Rows);
+        let scroll = app.new_view(ScrollView::new(env, move |_, _| Element::view(&rows)));
+        out = Some(scroll);
+        Box::new(move |_| div().w_full().h_full().child(Element::view(&scroll)))
+    });
+    let scroll = out.unwrap();
+    h.run_until_idle(100);
+    let top = |h: &TestHost| h.app.visual_bounds(find(h, "r5")).unwrap().y;
+    assert!((top(&h) - 200.0).abs() < 0.5);
+    ScrollView::jump_into_view(scroll, &mut h.app, Rect::new(0.0, 200.0, 1.0, 40.0));
+    h.run_until_idle(100);
+    // Just far enough: the row ends at the bottom of the view.
+    assert!((top(&h) - 60.0).abs() < 0.5, "{}", top(&h));
 }

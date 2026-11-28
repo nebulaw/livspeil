@@ -677,6 +677,14 @@ impl ScrollView {
         });
     }
 
+    /// Jump just far enough that `rect`, in the content's coordinates, is
+    /// in view, as of the last layout.
+    pub fn jump_into_view(view: View<Self>, app: &mut App, rect: Rect) {
+        measure_view(view, app);
+        let to = view.read(app).scroller.reveal(rect, 0.0);
+        Self::jump_to(view, app, to);
+    }
+
     /// Spring to `offset` (clamped); instant under Reduce Motion.
     pub fn scroll_to(view: View<Self>, app: &mut App, offset: Vec2) {
         measure_view(view, app);
@@ -1010,7 +1018,16 @@ impl Render for ScrollView {
             virtualized: Cell::new(false),
         };
         let axis = self.axis;
-        let content = (self.content)(cx, &info)
+        let mut content = (self.content)(cx, &info);
+        // A view takes no style or layer, so it moves inside a box.
+        if content.is_view() {
+            let around = match axis {
+                ScrollAxis::Horizontal => div().flex_row(),
+                ScrollAxis::Vertical | ScrollAxis::Both => div().flex_col(),
+            };
+            content = around.child(content);
+        }
+        let content = content
             .key("content")
             .layer(cx.layer("content"))
             .style(move |s| {
