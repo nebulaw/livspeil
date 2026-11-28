@@ -30,6 +30,7 @@ Status: **Phase 0 (kernel) and Phase 1 (UI toolkit)**. This repository holds the
 | `crates/livspeil-ui-a11y` | Accessibility: incremental AccessKit trees from the UI core and action routing |
 | `crates/livspeil-ui-shot` | Headless screenshots of UI scenes and the golden-image diff harness |
 | `crates/livspeil-ui-host-winit` | Desktop host: winit window, wgpu surface and `PaintRenderer`, frame pacing, input, IME, cursors, clipboard and AccessKit (macOS first) |
+| `crates/livspeil-dream` | Dream Mode app, first slice: open a room, see its graph and watch it run |
 | `crates/livspeil-ui-gallery` | Component gallery: every widget, material, the type scale and motion settings, live (app and headless pages) |
 | `sdk/python` | Python SDK for scripts (MPL-2.0, standard library only) |
 | `xtask` | Project automation (`cargo xtask check`) |
@@ -281,6 +282,17 @@ handshake timeout, per-handler timeouts (cancel, then kill), a total run
 time and a message size limit. Capabilities scope the kernel API; they are
 not an OS sandbox yet. Exit code 4 means the script failed; the room is
 then not saved.
+
+## Try Dream Mode
+
+```sh
+cargo run --release -p livspeil-dream -- examples/sun-and-lamp.room
+```
+
+Press **Play**, select a node (`lamp_color` shows its color change through a
+simulated day), pan with middle drag or two fingers and zoom with Ctrl+scroll.
+`--select=NAME` and `--play` start that way. Nothing can be edited or saved
+yet (`specs/livspeil-dream-spec-v0.md`).
 
 ## Try the gallery
 

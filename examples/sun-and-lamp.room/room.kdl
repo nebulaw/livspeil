@@ -54,14 +54,14 @@ room "Sun and Lamp" format=1 min-tier="T1" {
     link from="time_of_day.hour" to="sunset.x"
   }
   meta {
-    node "clock" x=0.0 y=120.0
-    node "day_seconds" x=200.0 y=120.0
-    node "daylight" x=800.0 y=200.0
-    node "lamp_color" x=1000.0 y=160.0
-    node "lamp_intensity" x=1000.0 y=280.0
-    node "sun" x=600.0 y=0.0
-    node "sunrise" x=600.0 y=140.0
-    node "sunset" x=600.0 y=260.0
-    node "time_of_day" x=400.0 y=120.0
+    node "clock" x=0.0 y=140.0
+    node "day_seconds" x=240.0 y=140.0
+    node "daylight" x=960.0 y=200.0
+    node "lamp_color" x=1200.0 y=40.0
+    node "lamp_intensity" x=1200.0 y=260.0
+    node "sun" x=720.0 y=-60.0
+    node "sunrise" x=720.0 y=120.0
+    node "sunset" x=720.0 y=300.0
+    node "time_of_day" x=480.0 y=140.0
   }
 }

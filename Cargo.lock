@@ -2140,6 +2140,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "livspeil-dream"
+version = "0.0.0"
+dependencies = [
+ "livspeil-doc",
+ "livspeil-graph",
+ "livspeil-node-api",
+ "livspeil-nodes-core",
+ "livspeil-ui-core",
+ "livspeil-ui-host-winit",
+ "livspeil-ui-layout",
+ "livspeil-ui-paint",
+ "livspeil-ui-render",
+ "livspeil-ui-shot",
+ "livspeil-ui-text",
+ "livspeil-ui-theme",
+ "livspeil-ui-widgets",
+ "log",
+]
+
+[[package]]
 name = "livspeil-floor"
 version = "0.0.0"
 dependencies = [

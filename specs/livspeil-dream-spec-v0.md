@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-4.0
 # Livspeil Dream Mode app, first slice (v0)
 
 Status: **accepted** (2026-11-28, D69). The kernel's position commands
-(section 3) are built; the app is not. Roadmap P2; D18
+(section 3) and DM1 are built. Roadmap P2; D18
 (Dream Mode first as an app), D66 (experience before polish).
 
 ## 1. What it is for
@@ -40,6 +40,9 @@ Three slices, one pull request each.
 
 Done when the lamp color and intensity of `sun-and-lamp.room` visibly change
 through a simulated day.
+
+Built, with one gap: an input driven by an expression or an animation shows
+its source but not its current value, which the kernel has no query for yet.
 
 ### DM2: edit
 
@@ -86,9 +89,9 @@ depends on kernel and UI crates; neither side learns about the other.
   P4).
 - **Inspector**: a view of the session's selected node, built from the node's
   spec.
-- **Cooking**: on the UI thread, once per frame while playing, only for what
-  is shown (the selected node and the sinks); the kernel's caching does the
-  rest. Moving it off the thread waits for a graph that needs it.
+- **Cooking**: on the UI thread, once per frame while playing, the nodes of
+  the shown network (so that a failing one is marked); the kernel's caching
+  does the rest. Moving it off the thread waits for a graph that needs it.
 - **Errors** are shown where they happen. No `unwrap`; a bad file is a
   message, not a crash.
 
@@ -99,7 +102,8 @@ Needed in existing crates:
 | `livspeil-graph`, `livspeil-cmd`, `livspeil-doc` | node positions as graph data with a `SetPosition` command (built) |
 | `livspeil-graph` | ask whether a link is allowed without making it |
 | `livspeil-doc` | write a changed document keeping the comments of the old text |
-| `livspeil-ui-widgets` | NodeCanvas: disconnect, delete requests, marking a failed node |
+| `livspeil-ui-widgets` | NodeCanvas: marking a failed node (built); disconnect, delete requests |
+| `livspeil-graph` | the current value of an input driven by an expression or animation |
 
 ## 4. Testing
 

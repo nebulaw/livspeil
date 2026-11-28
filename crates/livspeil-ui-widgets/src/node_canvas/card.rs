@@ -103,6 +103,7 @@ impl CardProps {
             && n.inputs == node.inputs
             && n.outputs == node.outputs
             && n.params == node.params
+            && n.problem == node.problem
             && self.colors.iter().copied().eq(port_colors(cache, node))
     }
 
@@ -289,9 +290,12 @@ impl<M: NodeGraphModel> Render for NodeCard<M> {
             })
             .on_click(move |_, cx| node_click(view, id, cx))
             .on_drag(move |ev, cx| node_drag(view, ev, cx));
-        let sem = Semantics::new(Role::Node)
+        let mut sem = Semantics::new(Role::Node)
             .label(&*n.title)
             .selected(selected);
+        if let Some(problem) = &n.problem {
+            sem.value = Some(problem.to_string());
+        }
         if lod == Lod::Block {
             let tint = match (n.outputs.first(), n.inputs.first()) {
                 (Some(_), _) => self.props.color(PortSide::Output, 0),
@@ -398,6 +402,18 @@ impl<M: NodeGraphModel> Render for NodeCard<M> {
                 }
                 card = card.child(row.children(control));
             }
+        }
+        if n.problem.is_some() {
+            // Inside the selection ring, so both show.
+            card = card.child(
+                div()
+                    .key("problem-ring")
+                    .name(format!("problem:{}", n.title))
+                    .style(fill)
+                    .rounded(radius)
+                    .border(2.0, col.danger)
+                    .hit_test(false),
+            );
         }
         if selected {
             // The selection ring paints above the header and rows (which

@@ -82,6 +82,8 @@ pub struct NodeGeom {
     pub outputs: Vec<PortInfo>,
     /// Parameters.
     pub params: Vec<ParamInfo>,
+    /// What is wrong with it, if something is.
+    pub problem: Option<SharedString>,
 }
 
 impl NodeGeom {
@@ -156,6 +158,7 @@ impl GraphCache {
                 inputs,
                 outputs,
                 params,
+                problem: model.problem(id),
             });
         }
         let mut cache = GraphCache {
@@ -218,6 +221,7 @@ impl GraphCache {
                 }
                 node.title = model.title(id);
                 node.params = model.params(id);
+                node.problem = model.problem(id);
                 let size = metrics.card_size(inputs.len(), outputs.len(), node.params.len());
                 (node.rect.width, node.rect.height) = (size.width, size.height);
                 (node.inputs, node.outputs) = (inputs, outputs);
